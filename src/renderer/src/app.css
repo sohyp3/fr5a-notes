@@ -1,0 +1,333 @@
+/* ============================================================
+   fr5a — global styles & design tokens
+   Bear-inspired: no internal borders, panes separated by
+   padding and the faintest of shadows. Warm off-white light
+   mode, deep charcoal dark mode.
+   ============================================================ */
+
+:root {
+	--font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+	--font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+	/* Editor body — a mixed-script stack (English first, Arabic fallback),
+	   overridden at runtime from Settings. */
+	--font-editor: 'Inter', 'Noto Naskh Arabic', system-ui, sans-serif;
+
+	/* motion */
+	--ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ---- light (default) ---- */
+:root,
+:root[data-theme='light'] {
+	--bg-app: #eceae6; /* the window backdrop */
+	--bg-sidebar: transparent;
+	--bg-list: #f7f6f4;
+	--bg-editor: #ffffff;
+	--bg-hover: rgba(0, 0, 0, 0.045);
+	--bg-active: rgba(0, 0, 0, 0.07);
+
+	--text-strong: #1e1d1b;
+	--text: #33312d;
+	--text-muted: #8a877f;
+	--text-faint: #b3afa6;
+
+	/* Accent is set at runtime from Settings (see accents.ts); the value here is
+	   the default (yellow) used before the store applies the stored choice. */
+	--accent: #c99700;
+	--accent-soft: color-mix(in srgb, var(--accent) 13%, transparent);
+
+	--md-syntax: #c26b62;
+	--shadow-pane: 0 1px 3px rgba(0, 0, 0, 0.04), 0 6px 20px rgba(0, 0, 0, 0.05);
+	--code-bg: rgba(0, 0, 0, 0.05);
+}
+
+/* ---- dark ---- */
+:root[data-theme='dark'] {
+	--bg-app: #171719;
+	--bg-sidebar: transparent;
+	--bg-list: #1f1f22;
+	--bg-editor: #242427;
+	--bg-hover: rgba(255, 255, 255, 0.05);
+	--bg-active: rgba(255, 255, 255, 0.08);
+
+	--text-strong: #f3f1ee;
+	--text: #d7d4cf;
+	--text-muted: #8b8880;
+	--text-faint: #605d57;
+
+	--accent: #f0b429;
+	--accent-soft: color-mix(in srgb, var(--accent) 17%, transparent);
+
+	--md-syntax: #e08a80;
+	--shadow-pane: 0 1px 3px rgba(0, 0, 0, 0.25), 0 8px 26px rgba(0, 0, 0, 0.35);
+	--code-bg: rgba(255, 255, 255, 0.07);
+}
+
+/* Follow OS theme until the user explicitly overrides via the toggle. */
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme]) {
+		color-scheme: dark;
+	}
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+	height: 100%;
+	margin: 0;
+}
+
+body {
+	font-family: var(--font-ui);
+	color: var(--text);
+	background: var(--bg-app);
+	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizeLegibility;
+	overflow: hidden;
+	user-select: none;
+}
+
+button {
+	font-family: inherit;
+	cursor: pointer;
+	border: none;
+	background: none;
+	color: inherit;
+}
+
+::-webkit-scrollbar {
+	width: 9px;
+	height: 9px;
+}
+::-webkit-scrollbar-thumb {
+	background: var(--text-faint);
+	border-radius: 6px;
+	border: 2px solid transparent;
+	background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+	background: var(--text-muted);
+	background-clip: padding-box;
+}
+
+/* ============================================================
+   TipTap / ProseMirror editor surface
+   ============================================================ */
+
+.ProseMirror {
+	outline: none;
+	font-family: var(--font-editor);
+	font-size: 17px;
+	line-height: 1.7;
+	color: var(--text);
+	caret-color: var(--accent);
+	max-width: 720px;
+	margin: 0 auto;
+	padding: 8px 0 40vh;
+	user-select: text;
+}
+
+.ProseMirror p {
+	margin: 0.15em 0;
+	transition: none;
+}
+
+/* Placeholder (from @tiptap Placeholder extension) on the first empty line. */
+.ProseMirror p.is-editor-empty:first-child::before {
+	content: attr(data-placeholder);
+	color: var(--text-faint);
+	float: left;
+	height: 0;
+	pointer-events: none;
+}
+
+/* --- the star of the show: Ghost Syntax ---
+   Rather than `display:none` (which makes the text "jump"), we collapse the
+   Markdown symbols with font-size:0 + negative letter-spacing and fade them in.
+   Because font-size animates, revealing/hiding is smooth, not jarring. */
+.md-syntax {
+	font-family: var(--font-mono);
+	color: var(--md-syntax);
+	transition:
+		opacity 130ms ease,
+		font-size 130ms ease,
+		letter-spacing 130ms ease;
+}
+
+/* Ghost ON (default): symbols are collapsed until hover / caret. */
+:root:not([data-ghost='off']) .md-syntax {
+	font-size: 0;
+	opacity: 0;
+	letter-spacing: -1px;
+}
+:root:not([data-ghost='off']) .ProseMirror p:hover .md-syntax {
+	font-size: inherit;
+	opacity: 0.3;
+	letter-spacing: normal;
+}
+:root:not([data-ghost='off']) .md-syntax.md-active {
+	font-size: inherit;
+	opacity: 1;
+	letter-spacing: normal;
+}
+
+/* Ghost OFF: symbols are always visible. */
+:root[data-ghost='off'] .md-syntax {
+	opacity: 0.55;
+}
+:root[data-ghost='off'] .md-syntax.md-active {
+	opacity: 1;
+}
+
+/* Directionality metadata (`<!-- dir: rtl -->`) — always hidden and collapsed,
+   regardless of the Ghost Syntax setting. */
+.md-meta-text {
+	font-size: 0;
+	opacity: 0;
+	letter-spacing: -2px;
+}
+.ProseMirror p.md-meta {
+	font-size: 0;
+	line-height: 0;
+	margin: 0;
+	height: 0;
+	overflow: hidden;
+}
+
+/* Inline emphasis rendered live while the raw symbols stay in the text. */
+.md-bold {
+	font-weight: 700;
+	color: var(--text-strong);
+}
+.md-italic {
+	font-style: italic;
+}
+.md-strike {
+	text-decoration: line-through;
+	color: var(--text-muted);
+}
+.md-code {
+	font-family: var(--font-mono);
+	font-size: 0.88em;
+	background: var(--code-bg);
+	padding: 0.1em 0.32em;
+	border-radius: 4px;
+}
+.md-link {
+	color: var(--accent);
+	text-decoration: none;
+}
+
+/* Line-level (node) decorations — heading sizing, quotes, etc. */
+.ProseMirror p.md-h1 {
+	font-size: 1.9em;
+	font-weight: 700;
+	line-height: 1.25;
+	color: var(--text-strong);
+	margin: 0.5em 0 0.1em;
+}
+.ProseMirror p.md-h2 {
+	font-size: 1.5em;
+	font-weight: 700;
+	line-height: 1.3;
+	color: var(--text-strong);
+	margin: 0.5em 0 0.1em;
+}
+.ProseMirror p.md-h3 {
+	font-size: 1.25em;
+	font-weight: 600;
+	color: var(--text-strong);
+	margin: 0.4em 0 0.1em;
+}
+.ProseMirror p.md-h4,
+.ProseMirror p.md-h5,
+.ProseMirror p.md-h6 {
+	font-size: 1.08em;
+	font-weight: 600;
+	color: var(--text-strong);
+}
+.ProseMirror p.md-quote {
+	color: var(--text-muted);
+	padding-left: 14px;
+	box-shadow: inset 3px 0 0 var(--text-faint);
+	font-style: italic;
+}
+.ProseMirror p.md-bullet,
+.ProseMirror p.md-ordered {
+	padding-left: 8px;
+}
+.ProseMirror p.md-hr {
+	color: var(--text-faint);
+}
+
+/* Bullet markers: NEVER hidden. Styled to look designed — a coloured, weighted
+   glyph with consistent spacing after it. */
+.md-bullet-mark {
+	color: var(--accent);
+	font-weight: 700;
+	padding-right: 2px;
+}
+.md-ordered-mark {
+	color: var(--accent);
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+}
+
+/* Tags rendered inside the note body. */
+.md-tag {
+	color: var(--accent);
+	background: var(--accent-soft);
+	border-radius: 5px;
+	padding: 0.05em 0.3em;
+	font-weight: 500;
+}
+
+/* ============================================================
+   Right-to-left / Arabic typography
+   ============================================================ */
+.editor-pane.is-rtl .ProseMirror {
+	/* Font comes from --font-editor (Arabic glyphs already fall back correctly);
+	   RTL only changes flow + rhythm. */
+	direction: rtl;
+	text-align: justify;
+	/* Arabic script needs more vertical breathing room. */
+	line-height: 1.8;
+	font-size: 19px;
+}
+.editor-pane.is-rtl .ProseMirror p.md-quote {
+	padding-left: 0;
+	padding-right: 14px;
+	box-shadow: inset -3px 0 0 var(--text-faint);
+}
+.editor-pane.is-rtl .ProseMirror p.md-bullet,
+.editor-pane.is-rtl .ProseMirror p.md-ordered {
+	padding-left: 0;
+	padding-right: 8px;
+}
+
+/* ============================================================
+   Vim mode — block cursor + hidden native caret
+   ============================================================ */
+.ProseMirror.vim-normal,
+.ProseMirror.vim-visual {
+	caret-color: transparent;
+}
+.vim-cursor {
+	background: var(--accent);
+	color: var(--bg-editor);
+	border-radius: 2px;
+}
+.vim-cursor-eol {
+	display: inline-block;
+	width: 0.5em;
+	/* Explicit height so the block cursor stays visible on empty lines, where
+	   there is no text on the line to give the widget's line box height. */
+	height: 1.2em;
+	background: var(--accent);
+	border-radius: 2px;
+	vertical-align: text-bottom;
+}
