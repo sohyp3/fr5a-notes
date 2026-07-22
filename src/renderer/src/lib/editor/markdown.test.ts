@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
 	textToDoc,
+	titleFromContent,
 	detectDir,
 	setDir,
 	detectPinned,
@@ -33,6 +34,32 @@ describe('textToDoc', () => {
 	it('represents an empty file as a single empty paragraph', () => {
 		const doc = textToDoc('');
 		expect(doc.content).toEqual([{ type: 'paragraph' }]);
+	});
+});
+
+describe('titleFromContent (draft filename derivation)', () => {
+	it('uses the first H1 line as the title', () => {
+		expect(titleFromContent('# Shopping List\n\nmilk')).toBe('Shopping List');
+	});
+
+	it('finds the H1 even below other text', () => {
+		expect(titleFromContent('intro line\n# Real Title')).toBe('Real Title');
+	});
+
+	it('falls back to the first non-empty line when there is no H1', () => {
+		expect(titleFromContent('\n\njust some text')).toBe('just some text');
+		expect(titleFromContent('## Second-level')).toBe('Second-level');
+	});
+
+	it('returns null for a blank draft (nothing worth saving)', () => {
+		expect(titleFromContent('')).toBeNull();
+		expect(titleFromContent('# ')).toBeNull();
+		expect(titleFromContent('#\n\n')).toBeNull();
+	});
+
+	it('skips hidden metadata comments', () => {
+		expect(titleFromContent('<!-- dir: rtl -->\n# مرحبا')).toBe('مرحبا');
+		expect(titleFromContent('<!-- pinned: true -->')).toBeNull();
 	});
 });
 

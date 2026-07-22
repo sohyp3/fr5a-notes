@@ -1,11 +1,12 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
+import Store from 'electron-store';
 import { NoteIndex } from './db';
 import { FileService } from './fileService';
 import { buildTagTree } from './tags';
 import { Channels } from '../shared/types';
-import type { NoteMeta } from '../shared/types';
+import type { NoteMeta, StateKey } from '../shared/types';
 // electron-vite copies the file into the build output and rewrites this to the
 // runtime path (works in both dev and the packaged app).
 import icon from '../../resources/icon.png?asset';
@@ -16,24 +17,35 @@ let mainWindow: BrowserWindow | null = null;
 let fileService: FileService | null = null;
 let index: NoteIndex | null = null;
 
-// --- persisted config (just the last workspace path) ----------------------
+// --- persisted state (electron-store) --------------------------------------
 
-interface Config {
+interface StoreSchema {
+	/** Root directory of the last-opened workspace. */
 	workspace?: string;
+	/** Note id (workspace-relative) re-opened on launch. */
+	lastOpenFile?: string;
+	/** Sidebar section/expansion state (renderer-owned shape). */
+	sidebar?: unknown;
+	/** Renderer settings: theme colors, fonts, vim toggle, ghost syntax. */
+	settings?: unknown;
+	theme?: string;
 }
 
-const configPath = () => path.join(app.getPath('userData'), 'fr5a-config.json');
+const store = new Store<StoreSchema>({ name: 'fr5a' });
 
-async function loadConfig(): Promise<Config> {
+/** Renderer-writable keys — anything else on the wire is rejected. */
+const RENDERER_KEYS = new Set<StateKey>(['lastOpenFile', 'sidebar', 'settings', 'theme']);
+
+/** One-time migration from the old hand-rolled fr5a-config.json. */
+async function migrateLegacyConfig(): Promise<void> {
+	if (store.get('workspace')) return;
 	try {
-		return JSON.parse(await fs.readFile(configPath(), 'utf8'));
+		const legacy = path.join(app.getPath('userData'), 'fr5a-config.json');
+		const config = JSON.parse(await fs.readFile(legacy, 'utf8')) as { workspace?: string };
+		if (config.workspace) store.set('workspace', config.workspace);
 	} catch {
-		return {};
+		// No legacy config — fresh install.
 	}
-}
-
-async function saveConfig(config: Config): Promise<void> {
-	await fs.writeFile(configPath(), JSON.stringify(config, null, 2), 'utf8');
 }
 
 // --- workspace lifecycle ---------------------------------------------------
@@ -49,7 +61,7 @@ async function openWorkspace(root: string): Promise<void> {
 	index = new NoteIndex(path.join(app.getPath('userData'), 'fr5a-index.db'));
 	fileService = new FileService(root, index, pushNotesChanged);
 	await fileService.start();
-	await saveConfig({ workspace: root });
+	store.set('workspace', root);
 }
 
 // --- window ----------------------------------------------------------------
@@ -116,8 +128,8 @@ function registerIpc(): void {
 		fileService?.write(id, content)
 	);
 
-	ipcMain.handle(Channels.noteCreate, (_e, title?: string, folder?: string) =>
-		fileService?.create(title, folder)
+	ipcMain.handle(Channels.noteCreate, (_e, title?: string, folder?: string, content?: string) =>
+		fileService?.create(title, folder, content)
 	);
 
 	ipcMain.handle(Channels.noteDelete, (_e, id: string) => fileService?.delete(id));
@@ -138,6 +150,16 @@ function registerIpc(): void {
 	ipcMain.handle(Channels.noteRestore, (_e, id: string) => fileService?.restore(id));
 	ipcMain.handle(Channels.trashDelete, (_e, id: string) => fileService?.permanentDelete(id));
 
+	// Persistent UI state (last open file, sidebar layout, settings).
+	ipcMain.handle(Channels.stateGet, (_e, key: StateKey) =>
+		RENDERER_KEYS.has(key) ? (store.get(key) ?? null) : null
+	);
+	ipcMain.handle(Channels.stateSet, (_e, key: StateKey, value: unknown) => {
+		if (!RENDERER_KEYS.has(key)) return;
+		if (value === null || value === undefined) store.delete(key);
+		else store.set(key, value);
+	});
+
 	// Frameless window controls.
 	ipcMain.handle(Channels.windowMinimize, () => mainWindow?.minimize());
 	ipcMain.handle(Channels.windowMaximize, () => {
@@ -151,15 +173,20 @@ function registerIpc(): void {
 // --- bootstrap -------------------------------------------------------------
 
 app.whenReady().then(async () => {
+	// Ties the window to its taskbar/dock entry (and, with the .desktop file's
+	// StartupWMClass, prevents the duplicate-icon issue on Linux docks).
+	app.setAppUserModelId('com.fr5a.app');
+
 	registerIpc();
 	createWindow();
 
 	// Re-open the last workspace if it still exists.
-	const config = await loadConfig();
-	if (config.workspace) {
+	await migrateLegacyConfig();
+	const workspace = store.get('workspace');
+	if (workspace) {
 		try {
-			await fs.access(config.workspace);
-			await openWorkspace(config.workspace);
+			await fs.access(workspace);
+			await openWorkspace(workspace);
 			pushNotesChanged();
 		} catch (err) {
 			// Folder moved/deleted, or the index failed to open — log and fall

@@ -9,7 +9,7 @@ const nodeBuiltins = new Set([...builtinModules, ...builtinModules.map((m) => `n
 // Runtime packages the main/preload code imports directly. Keeping them
 // external means they load from node_modules at runtime — essential for the
 // native `better-sqlite3` binding and for `electron` to resolve to the built-in.
-const runtimeExternals = ['electron', 'better-sqlite3', 'chokidar'];
+const runtimeExternals = ['electron', 'better-sqlite3', 'chokidar', 'electron-store'];
 
 /** Authoritative rollup `external` predicate for the Node-side bundles. */
 function isExternal(id: string): boolean {

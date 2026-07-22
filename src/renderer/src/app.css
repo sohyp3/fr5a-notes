@@ -16,18 +16,25 @@
 	--ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-/* ---- light (default) ---- */
+/* ---- light (default) ----
+   The primary/secondary/text-main triplet is overridden at runtime with
+   accent-tinted values (see accents.ts applyPalette) so the entire window —
+   backdrop, panes, body text — follows the chosen accent color. */
 :root,
 :root[data-theme='light'] {
-	--bg-app: #eceae6; /* the window backdrop */
+	--bg-primary: #eceae6; /* the window backdrop */
+	--bg-secondary: #ffffff; /* the panes (editor / list) */
+	--text-main: #33312d;
+
+	--bg-app: var(--bg-primary);
 	--bg-sidebar: transparent;
-	--bg-list: #f7f6f4;
-	--bg-editor: #ffffff;
+	--bg-list: color-mix(in srgb, var(--bg-primary) 40%, var(--bg-secondary));
+	--bg-editor: var(--bg-secondary);
 	--bg-hover: rgba(0, 0, 0, 0.045);
 	--bg-active: rgba(0, 0, 0, 0.07);
 
 	--text-strong: #1e1d1b;
-	--text: #33312d;
+	--text: var(--text-main);
 	--text-muted: #8a877f;
 	--text-faint: #b3afa6;
 
@@ -43,15 +50,19 @@
 
 /* ---- dark ---- */
 :root[data-theme='dark'] {
-	--bg-app: #171719;
+	--bg-primary: #171719;
+	--bg-secondary: #242427;
+	--text-main: #d7d4cf;
+
+	--bg-app: var(--bg-primary);
 	--bg-sidebar: transparent;
-	--bg-list: #1f1f22;
-	--bg-editor: #242427;
+	--bg-list: color-mix(in srgb, var(--bg-primary) 40%, var(--bg-secondary));
+	--bg-editor: var(--bg-secondary);
 	--bg-hover: rgba(255, 255, 255, 0.05);
 	--bg-active: rgba(255, 255, 255, 0.08);
 
 	--text-strong: #f3f1ee;
-	--text: #d7d4cf;
+	--text: var(--text-main);
 	--text-muted: #8b8880;
 	--text-faint: #605d57;
 
@@ -287,6 +298,61 @@ button {
 }
 
 /* ============================================================
+   Tag autocomplete dropdown (TagSuggest.ts) — floating, Bear-style
+   ============================================================ */
+.tag-suggest {
+	position: fixed;
+	z-index: 100;
+	min-width: 160px;
+	max-width: 280px;
+	padding: 4px;
+	border-radius: 10px;
+	background: var(--bg-editor);
+	box-shadow:
+		0 0 0 1px var(--bg-active),
+		0 8px 28px rgba(0, 0, 0, 0.18);
+	animation: tag-suggest-in 120ms var(--ease-spring);
+}
+@keyframes tag-suggest-in {
+	from {
+		opacity: 0;
+		transform: translateY(-3px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+.tag-suggest-item {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	width: 100%;
+	padding: 6px 10px;
+	border-radius: 7px;
+	font-family: var(--font-ui);
+	font-size: 13px;
+	color: var(--text);
+	text-align: left;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.tag-suggest-item .hash {
+	color: var(--text-faint);
+}
+.tag-suggest-item:hover {
+	background: var(--bg-hover);
+}
+.tag-suggest-item.active {
+	background: var(--accent-soft);
+	color: var(--accent);
+}
+.tag-suggest-item.active .hash {
+	color: var(--accent);
+}
+
+/* ============================================================
    Right-to-left / Arabic typography
    ============================================================ */
 .editor-pane.is-rtl .ProseMirror {
@@ -313,7 +379,8 @@ button {
    Vim mode — block cursor + hidden native caret
    ============================================================ */
 .ProseMirror.vim-normal,
-.ProseMirror.vim-visual {
+.ProseMirror.vim-visual,
+.ProseMirror.vim-visual-line {
 	caret-color: transparent;
 }
 .vim-cursor {

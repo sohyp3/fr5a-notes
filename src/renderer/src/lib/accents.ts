@@ -27,3 +27,26 @@ export const DEFAULT_ACCENT = 'yellow';
 export function accentById(id: string): Accent {
 	return ACCENTS.find((a) => a.id === id) ?? ACCENTS[0];
 }
+
+/** Untinted surface colors per theme — must mirror the bases in app.css. */
+const SURFACES = {
+	light: { primary: '#eceae6', secondary: '#ffffff', text: '#33312d' },
+	dark: { primary: '#171719', secondary: '#242427', text: '#d7d4cf' }
+} as const;
+
+/**
+ * Full theming: picking an accent restyles the whole window, not just the
+ * controls. Sets --accent plus accent-tinted --bg-primary (window backdrop),
+ * --bg-secondary (panes) and --text-main as inline root variables, which
+ * app.css feeds into every surface. Re-run on every theme flip (the tint bases
+ * and accent hex differ per theme).
+ */
+export function applyPalette(accent: Accent, theme: 'light' | 'dark'): void {
+	const hex = theme === 'dark' ? accent.dark : accent.light;
+	const base = SURFACES[theme];
+	const root = document.documentElement.style;
+	root.setProperty('--accent', hex);
+	root.setProperty('--bg-primary', `color-mix(in srgb, ${hex} 6%, ${base.primary})`);
+	root.setProperty('--bg-secondary', `color-mix(in srgb, ${hex} 3%, ${base.secondary})`);
+	root.setProperty('--text-main', `color-mix(in srgb, ${hex} 8%, ${base.text})`);
+}

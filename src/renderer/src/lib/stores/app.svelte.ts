@@ -1,11 +1,20 @@
-import type { NoteMeta, TagNode } from '../../../../shared/types';
+import type { NoteMeta, TagNode, SidebarState } from '../../../../shared/types';
 import { uiStack, editorStack } from '../fonts';
-import { accentById, DEFAULT_ACCENT } from '../accents';
-import { setPinned, setLocked } from '../editor/markdown';
+import { accentById, applyPalette, DEFAULT_ACCENT } from '../accents';
+import { setPinned, setLocked, titleFromContent } from '../editor/markdown';
 
 const SAVE_DEBOUNCE = 500;
 const THEME_KEY = 'fr5a-theme';
 const SETTINGS_KEY = 'fr5a-settings';
+/** Pending-save id for a draft note that has no file yet. */
+const DRAFT_ID = '\0draft';
+
+const DEFAULT_SIDEBAR: SidebarState = {
+	foldersOpen: true,
+	tagsOpen: true,
+	folderExpanded: {},
+	tagExpanded: {}
+};
 
 export type View = 'editor' | 'settings';
 
@@ -49,6 +58,26 @@ class AppState {
 	activeId = $state<string | null>(null);
 	/** Body of the active note as last loaded from disk. */
 	activeContent = $state('');
+	/**
+	 * A new note not yet on disk. It materialises on the first save: the first
+	 * H1 typed becomes the filename (no more Untitled.md), and a draft left
+	 * completely blank never touches the disk at all.
+	 */
+	draft = $state(false);
+	/** Folder (workspace-relative, '' = root) a materialising draft lands in. */
+	private draftFolder = '';
+	/**
+	 * Keys the editor component. Bumped when a *different* buffer should mount
+	 * (open/create) — deliberately NOT when a draft materialises into a file, so
+	 * typing isn't interrupted by a remount.
+	 */
+	editorSession = $state(0);
+
+	/** Flipped once init() has restored persisted state — gates the UI fade-in. */
+	booted = $state(false);
+
+	/** Sidebar layout: section visibility + folder/tag expansion (persisted). */
+	sidebar = $state<SidebarState>({ ...DEFAULT_SIDEBAR });
 
 	search = $state('');
 	selectedTag = $state<string | null>(null);
@@ -65,9 +94,6 @@ class AppState {
 
 	/** Bumped to force the editor to recreate (e.g. after an external rewrite). */
 	editorReloadToken = $state(0);
-
-	/** Bumped to signal every folder row to collapse (see collapseFolders). */
-	folderCollapseToken = $state(0);
 
 	/** Which top-level view is showing in the main window. */
 	view = $state<View>('editor');
@@ -112,16 +138,19 @@ class AppState {
 	});
 
 	async init(): Promise<void> {
-		// Theme: stored preference, else follow the OS.
-		const storedTheme = localStorage.getItem(THEME_KEY) as 'light' | 'dark' | null;
+		// Theme: electron-store, else the old localStorage copy, else the OS.
+		const storedTheme = ((await window.api.getState<string>('theme')) ??
+			localStorage.getItem(THEME_KEY)) as 'light' | 'dark' | null;
 		this.theme =
 			storedTheme ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 		this.applyTheme();
 
-		// Settings.
+		// Settings: electron-store first, localStorage as a one-time migration.
 		try {
-			const raw = localStorage.getItem(SETTINGS_KEY);
-			if (raw) this.settings = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+			const stored =
+				(await window.api.getState<Partial<Settings>>('settings')) ??
+				JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? 'null');
+			if (stored) this.settings = { ...DEFAULT_SETTINGS, ...stored };
 		} catch {
 			/* ignore malformed settings */
 		}
@@ -129,11 +158,22 @@ class AppState {
 		this.applyGhost();
 		this.applyAccent();
 
+		// Sidebar layout (section visibility + expanded folders/tags).
+		const sidebar = await window.api.getState<Partial<SidebarState>>('sidebar');
+		if (sidebar) this.sidebar = { ...DEFAULT_SIDEBAR, ...sidebar };
+
 		this.workspace = await window.api.getWorkspace();
 		await this.refresh();
 
+		// Re-open the note from the previous session, if it still exists.
+		const last = await window.api.getState<string>('lastOpenFile');
+		if (last && this.notes.some((n) => n.id === last)) {
+			await this.openNote(last);
+		}
+
 		// Live updates from the filesystem watcher.
 		window.api.onNotesChanged(() => this.refresh());
+		this.booted = true;
 	}
 
 	async refresh(): Promise<void> {
@@ -166,28 +206,42 @@ class AppState {
 			this.workspace = path;
 			this.activeId = null;
 			this.activeContent = '';
+			this.draft = false;
 			this.selectedTag = null;
+			void window.api.setState('lastOpenFile', null);
 			await this.refresh();
 		}
 	}
 
 	async openNote(id: string): Promise<void> {
+		if (id === this.activeId) {
+			this.view = 'editor';
+			return;
+		}
 		await this.flush(); // persist any pending edits before switching
-		// Load the body BEFORE flipping activeId. The editor is keyed on activeId,
-		// so its content must already be in place when the new instance mounts —
-		// otherwise it mounts with stale/empty text and never re-reads it.
+		this.draft = false; // a blank draft is simply discarded
+		// Load the body BEFORE flipping activeId. The editor is keyed on
+		// editorSession, so its content must already be in place when the new
+		// instance mounts — otherwise it mounts with stale/empty text.
 		const content = await window.api.readNote(id);
 		this.view = 'editor';
 		this.activeContent = content;
 		this.activeId = id;
+		this.editorSession++;
+		void window.api.setState('lastOpenFile', id);
 	}
 
 	async createNote(): Promise<void> {
+		await this.flush(); // persist the outgoing note (or materialise a draft)
 		// New notes land in the folder currently in view ('' = workspace root).
-		const folder = this.trashOpen ? '' : (this.selectedFolder ?? '');
-		const meta = await window.api.createNote('Untitled', folder);
-		await this.refresh();
-		if (meta) await this.openNote(meta.id);
+		this.draftFolder = this.trashOpen ? '' : (this.selectedFolder ?? '');
+		// No file yet: open an in-memory draft on an empty H1 line. The first
+		// save derives the filename from the typed title.
+		this.view = 'editor';
+		this.draft = true;
+		this.activeId = null;
+		this.activeContent = '# ';
+		this.editorSession++;
 	}
 
 	/**
@@ -212,6 +266,7 @@ class AppState {
 			this.cancelPending();
 			this.activeId = null;
 			this.activeContent = '';
+			void window.api.setState('lastOpenFile', null);
 		}
 		await window.api.deleteNote(id);
 		await this.refresh();
@@ -282,9 +337,42 @@ class AppState {
 		this.trashOpen = false;
 	}
 
+	// --- sidebar layout (persisted via electron-store) ----------------------
+
 	/** Collapse every folder and subfolder in the sidebar tree. */
 	collapseFolders(): void {
-		this.folderCollapseToken++;
+		for (const path of this.folders) this.sidebar.folderExpanded[path] = false;
+		this.persistSidebar();
+	}
+
+	/** Show/hide a whole sidebar section ("Folders" / "Tags"). */
+	toggleSection(section: 'folders' | 'tags'): void {
+		if (section === 'folders') this.sidebar.foldersOpen = !this.sidebar.foldersOpen;
+		else this.sidebar.tagsOpen = !this.sidebar.tagsOpen;
+		this.persistSidebar();
+	}
+
+	// Expansion maps hold explicit overrides; the default is "top level open".
+	isFolderExpanded(path: string, depth: number): boolean {
+		return this.sidebar.folderExpanded[path] ?? depth < 1;
+	}
+
+	toggleFolderExpanded(path: string, depth: number): void {
+		this.sidebar.folderExpanded[path] = !this.isFolderExpanded(path, depth);
+		this.persistSidebar();
+	}
+
+	isTagExpanded(path: string, depth: number): boolean {
+		return this.sidebar.tagExpanded[path] ?? depth < 1;
+	}
+
+	toggleTagExpanded(path: string, depth: number): void {
+		this.sidebar.tagExpanded[path] = !this.isTagExpanded(path, depth);
+		this.persistSidebar();
+	}
+
+	private persistSidebar(): void {
+		void window.api.setState('sidebar', $state.snapshot(this.sidebar));
 	}
 
 	// --- pinning -----------------------------------------------------------
@@ -366,17 +454,16 @@ class AppState {
 	updateSettings(patch: Partial<Settings>): void {
 		this.settings = { ...this.settings, ...patch };
 		localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
+		void window.api.setState('settings', $state.snapshot(this.settings));
 		this.applyFonts();
 		this.applyGhost();
 		this.applyAccent();
 	}
 
 	private applyAccent(): void {
-		const accent = accentById(this.settings.accent);
-		document.documentElement.style.setProperty(
-			'--accent',
-			this.theme === 'dark' ? accent.dark : accent.light
-		);
+		// Full theming: the accent drives --accent plus tinted window surfaces
+		// (--bg-primary / --bg-secondary / --text-main), so the whole app follows.
+		applyPalette(accentById(this.settings.accent), this.theme);
 	}
 
 	private applyFonts(): void {
@@ -397,8 +484,8 @@ class AppState {
 	// --- auto-save (debounced 500ms) --------------------------------------
 
 	queueSave(content: string): void {
-		if (!this.activeId) return;
-		this.pending = { id: this.activeId, content };
+		if (!this.activeId && !this.draft) return;
+		this.pending = { id: this.activeId ?? DRAFT_ID, content };
 		this.saving = true;
 		if (this.saveTimer) clearTimeout(this.saveTimer);
 		this.saveTimer = setTimeout(() => this.flush(), SAVE_DEBOUNCE);
@@ -413,11 +500,42 @@ class AppState {
 		if (!this.pending) return;
 		const { id, content } = this.pending;
 		this.pending = null;
+		if (id === DRAFT_ID) {
+			await this.materializeDraft(content);
+			return;
+		}
 		// Keep the in-memory copy in sync so re-derived UI (and a later reopen)
 		// reflect what we just wrote without a round-trip.
 		if (id === this.activeId) this.activeContent = content;
 		await window.api.writeNote(id, content);
 		this.saving = false;
+	}
+
+	/**
+	 * First save of a draft: derive the filename from the first H1 typed and
+	 * create the file. The editor instance is left alone (its key is
+	 * editorSession, not the id), so typing continues uninterrupted.
+	 */
+	private async materializeDraft(content: string): Promise<void> {
+		if (!this.draft) {
+			// The draft became a file while this save sat in the queue — write there.
+			if (this.activeId) await window.api.writeNote(this.activeId, content);
+			this.saving = false;
+			return;
+		}
+		const title = titleFromContent(content);
+		if (title === null) {
+			// Still blank (just the empty H1 scaffold) — keep it off the disk.
+			this.saving = false;
+			return;
+		}
+		const meta = await window.api.createNote(title, this.draftFolder, content);
+		this.draft = false;
+		this.activeId = meta.id;
+		this.activeContent = content;
+		this.saving = false;
+		void window.api.setState('lastOpenFile', meta.id);
+		await this.refresh();
 	}
 
 	private cancelPending(): void {
@@ -436,6 +554,7 @@ class AppState {
 	setTheme(theme: 'light' | 'dark'): void {
 		this.theme = theme;
 		localStorage.setItem(THEME_KEY, this.theme);
+		void window.api.setState('theme', this.theme);
 		this.applyTheme();
 	}
 

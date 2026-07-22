@@ -10,6 +10,7 @@
 	import { MarkdownSyntax } from '../editor/MarkdownSyntax';
 	import { MarkdownShortcuts } from '../editor/MarkdownShortcuts';
 	import { ListBehavior } from '../editor/ListBehavior';
+	import { TagSuggest, flattenTagTree } from '../editor/TagSuggest';
 	import { Vim, type VimMode } from '../editor/vim';
 	import {
 		textToDoc,
@@ -35,9 +36,11 @@
 	// Locked notes are read-only. Fall back to the buffer so the badge is right
 	// even before the index round-trips.
 	const locked = $derived(activeMeta?.locked ?? detectLocked(app.activeContent));
-	// Recreate the editor when the note changes, Vim is toggled, or an external
-	// rewrite (e.g. pin toggle) bumps the reload token.
-	const editorKey = $derived(`${app.activeId ?? ''}:${app.settings.vim}:${app.editorReloadToken}`);
+	// Recreate the editor when a different buffer opens (editorSession), Vim is
+	// toggled, or an external rewrite (e.g. pin toggle) bumps the reload token.
+	// Keyed on the session — not the note id — so a draft materialising into a
+	// real file doesn't remount the editor mid-typing.
+	const editorKey = $derived(`${app.editorSession}:${app.settings.vim}:${app.editorReloadToken}`);
 
 	function buildEditor(node: HTMLElement, content: string): Editor {
 		const extensions = [
@@ -48,7 +51,9 @@
 			Placeholder.configure({ placeholder: 'Start writing…' }),
 			MarkdownSyntax,
 			MarkdownShortcuts,
-			ListBehavior
+			ListBehavior,
+			// Fed from the store's tag tree (itself the SQLite index over IPC).
+			TagSuggest.configure({ getTags: () => flattenTagTree(app.tags) })
 		];
 		if (app.settings.vim) {
 			extensions.push(Vim.configure({ onModeChange: (m) => (vimMode = m) }));
@@ -111,7 +116,7 @@
 				{/snippet}
 			</EmptyState>
 		</div>
-	{:else if !app.activeId}
+	{:else if !app.activeId && !app.draft}
 		<div class="placeholder-screen" in:fade={{ duration: 150 }}>
 			<EmptyState
 				src={mascotNew}
@@ -226,9 +231,9 @@
 			<div
 				class="vim-badge"
 				class:insert={vimMode === 'insert'}
-				class:visual={vimMode === 'visual'}
+				class:visual={vimMode === 'visual' || vimMode === 'visual-line'}
 			>
-				{vimMode.toUpperCase()}
+				{vimMode === 'visual-line' ? 'V-LINE' : vimMode.toUpperCase()}
 			</div>
 		{/if}
 	{/if}

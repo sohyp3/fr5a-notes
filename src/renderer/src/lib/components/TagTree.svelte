@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import { getAppState } from '../stores/app.svelte';
 	import type { TagNode } from '../../../../shared/types';
@@ -8,8 +7,8 @@
 	let { node, depth = 0 }: { node: TagNode; depth?: number } = $props();
 
 	const app = getAppState();
-	// Top two levels start open; `depth` is fixed for a given node, so read it untracked.
-	let expanded = $state(untrack(() => depth < 1));
+	// Expansion lives in the app's persisted sidebar state (survives relaunch).
+	const expanded = $derived(app.isTagExpanded(node.path, depth));
 
 	const hasChildren = $derived(node.children.length > 0);
 	const selected = $derived(app.selectedTag === node.path);
@@ -22,7 +21,7 @@
 		aria-label="Expand"
 		onclick={(e) => {
 			e.stopPropagation();
-			expanded = !expanded;
+			app.toggleTagExpanded(node.path, depth);
 		}}
 	>
 		<svg width="9" height="9" viewBox="0 0 10 10" class:open={expanded}>

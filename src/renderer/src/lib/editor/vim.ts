@@ -10,16 +10,16 @@ import type { Node as PMNode } from '@tiptap/pm/model';
  * A compact Vim mode for the raw-Markdown editor. There is no maintained
  * ProseMirror/TipTap Vim package, so this implements the essentials directly:
  *
- *   modes    normal · insert · visual
+ *   modes    normal · insert · visual · visual-line
  *   motions  h j k l · w b e · 0 $ · gg G
  *   inserts  i a I A o O
  *   edits    x · dd dw d$ · yy · p · u · Ctrl-r
- *   visual   v + motions, then d / y / x
+ *   visual   v / V + motions, then d / y / x (V selects whole lines)
  *
  * "Lines" are paragraphs (the editor stores one Markdown line per paragraph).
  */
 
-export type VimMode = 'normal' | 'insert' | 'visual';
+export type VimMode = 'normal' | 'insert' | 'visual' | 'visual-line';
 
 interface VimPluginState {
 	mode: VimMode;
@@ -106,11 +106,22 @@ function apply(view: EditorView, tr: Transaction): void {
 	view.focus();
 }
 
-/** Move the caret (and, in visual mode, extend the selection to it). */
+/** Move the caret (and, in visual modes, extend the selection to it). */
 function moveTo(view: EditorView, pos: number, mode: VimMode, anchor: number | null): void {
 	const { state } = view;
 	const tr = state.tr;
-	if (mode === 'visual' && anchor !== null) {
+	if (mode === 'visual-line' && anchor !== null) {
+		// Native V behaviour: the selection always covers whole lines, from the
+		// anchor line through the caret line, in either direction.
+		const ls = lines(state.doc);
+		const a = lineAt(ls, anchor).line;
+		const c = lineAt(ls, pos).line;
+		if (c.start >= a.start) {
+			tr.setSelection(TextSelection.create(state.doc, a.start, c.end));
+		} else {
+			tr.setSelection(TextSelection.create(state.doc, a.end, c.start));
+		}
+	} else if (mode === 'visual' && anchor !== null) {
 		tr.setSelection(TextSelection.create(state.doc, anchor, pos));
 	} else {
 		tr.setSelection(TextSelection.create(state.doc, pos));
@@ -136,6 +147,53 @@ function yankRange(view: EditorView, from: number, to: number, linewise: boolean
 	apply(view, tr);
 }
 
+/** Line indices (inclusive) spanned by a visual-line selection. */
+function lineSpan(ls: Line[], selFrom: number, selTo: number): { i: number; j: number } {
+	const i = lineAt(ls, selFrom).index;
+	const j = lineAt(ls, selTo).index;
+	return { i: Math.min(i, j), j: Math.max(i, j) };
+}
+
+/** Linewise delete of whole lines i..j, removing a bounding newline (like dd). */
+function deleteLines(view: EditorView, selFrom: number, selTo: number): void {
+	const ls = lines(view.state.doc);
+	const { i, j } = lineSpan(ls, selFrom, selTo);
+	register = ls
+		.slice(i, j + 1)
+		.map((l) => l.text)
+		.join('\n');
+	registerLinewise = true;
+	let from: number;
+	let to: number;
+	if (i > 0) {
+		from = ls[i - 1].end;
+		to = ls[j].end;
+	} else if (j < ls.length - 1) {
+		from = ls[i].start;
+		to = ls[j + 1].start - 1;
+	} else {
+		from = ls[i].start;
+		to = ls[j].end;
+	}
+	const tr = view.state.tr.delete(from, to);
+	setMode(tr, 'normal');
+	apply(view, tr);
+}
+
+/** Linewise yank of whole lines i..j; the caret collapses to the span start. */
+function yankLines(view: EditorView, selFrom: number, selTo: number): void {
+	const ls = lines(view.state.doc);
+	const { i, j } = lineSpan(ls, selFrom, selTo);
+	register = ls
+		.slice(i, j + 1)
+		.map((l) => l.text)
+		.join('\n');
+	registerLinewise = true;
+	const tr = setMode(view.state.tr, 'normal');
+	tr.setSelection(TextSelection.create(tr.doc, ls[i].start));
+	apply(view, tr);
+}
+
 // --- the keymap -------------------------------------------------------------
 
 function handleNormal(view: EditorView, event: KeyboardEvent, vs: VimPluginState): boolean {
@@ -146,6 +204,7 @@ function handleNormal(view: EditorView, event: KeyboardEvent, vs: VimPluginState
 	const { line, index } = lineAt(ls, head);
 	const col = head - line.start;
 	const visual = vs.mode === 'visual';
+	const visualLine = vs.mode === 'visual-line';
 
 	// Operator pending (d / y / g).
 	if (vs.pending) {
@@ -230,21 +289,27 @@ function handleNormal(view: EditorView, event: KeyboardEvent, vs: VimPluginState
 			apply(view, view.state.tr.setMeta(vimKey, { pending: 'g' }));
 			return true;
 		case 'd':
-			if (visual) {
+			if (visualLine) {
+				deleteLines(view, state.selection.from, state.selection.to);
+			} else if (visual) {
 				deleteRange(view, state.selection.from, state.selection.to, false);
 			} else {
 				apply(view, view.state.tr.setMeta(vimKey, { pending: 'd' }));
 			}
 			return true;
 		case 'y':
-			if (visual) {
+			if (visualLine) {
+				yankLines(view, state.selection.from, state.selection.to);
+			} else if (visual) {
 				yankRange(view, state.selection.from, state.selection.to, false);
 			} else {
 				apply(view, view.state.tr.setMeta(vimKey, { pending: 'y' }));
 			}
 			return true;
 		case 'x': {
-			if (visual) {
+			if (visualLine) {
+				deleteLines(view, state.selection.from, state.selection.to);
+			} else if (visual) {
 				deleteRange(view, state.selection.from, state.selection.to, false);
 			} else if (head < line.end) {
 				deleteRange(view, head, head + 1, false);
@@ -307,8 +372,31 @@ function handleNormal(view: EditorView, event: KeyboardEvent, vs: VimPluginState
 			return true;
 		}
 		case 'v':
-			apply(view, setMode(state.tr, visual ? 'normal' : 'visual', visual ? null : head));
+			// v toggles charwise visual; from V it switches modes, keeping the anchor.
+			if (visual) {
+				apply(view, setMode(state.tr, 'normal'));
+			} else {
+				apply(view, setMode(state.tr, 'visual', visualLine ? vs.anchor : head));
+			}
 			return true;
+		case 'V': {
+			// Shift-V: visual line mode — the selection snaps to whole lines.
+			if (visualLine) {
+				apply(view, setMode(state.tr, 'normal'));
+				return true;
+			}
+			const anchor = visual && vs.anchor !== null ? vs.anchor : head;
+			const tr = setMode(state.tr, 'visual-line', anchor);
+			// Snap the current selection to full lines immediately.
+			const a = lineAt(ls, anchor).line;
+			if (line.start >= a.start) {
+				tr.setSelection(TextSelection.create(state.doc, a.start, line.end));
+			} else {
+				tr.setSelection(TextSelection.create(state.doc, a.end, line.start));
+			}
+			apply(view, tr);
+			return true;
+		}
 		case 'Escape':
 			apply(view, setMode(state.tr, 'normal'));
 			return true;

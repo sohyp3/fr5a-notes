@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { fade } from 'svelte/transition';
 	import { Spring } from 'svelte/motion';
 	import { getAppState } from './lib/stores/app.svelte';
 	import TitleBar from './lib/components/TitleBar.svelte';
@@ -76,31 +77,37 @@
 
 <div class="app" class:zen={app.zen}>
 	<TitleBar />
-	<div class="body">
-		<div
-			class="sidebar-wrap"
-			style="width:{sidebarWidth.current}px"
-			aria-hidden={!showSidebar}
-			inert={!showSidebar}
-		>
-			<Sidebar />
+	<!-- The body renders only once init() has restored the workspace, settings
+	     and last-open note, then fades in — no flash from empty to full. -->
+	{#if app.booted}
+		<div class="body" in:fade={{ duration: 220 }}>
+			<div
+				class="sidebar-wrap"
+				style="width:{sidebarWidth.current}px"
+				aria-hidden={!showSidebar}
+				inert={!showSidebar}
+			>
+				<Sidebar />
+			</div>
+			<main class="content">
+				{#if app.view === 'settings'}
+					<Settings />
+				{:else}
+					<div
+						class="list-wrap"
+						style="width:{listWidth.current}px"
+						aria-hidden={!showList}
+						inert={!showList}
+					>
+						<NoteList />
+					</div>
+					<Editor />
+				{/if}
+			</main>
 		</div>
-		<main class="content">
-			{#if app.view === 'settings'}
-				<Settings />
-			{:else}
-				<div
-					class="list-wrap"
-					style="width:{listWidth.current}px"
-					aria-hidden={!showList}
-					inert={!showList}
-				>
-					<NoteList />
-				</div>
-				<Editor />
-			{/if}
-		</main>
-	</div>
+	{:else}
+		<div class="body"></div>
+	{/if}
 
 	{#if app.cheatSheetOpen}
 		<CheatSheet />

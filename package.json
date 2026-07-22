@@ -39,8 +39,10 @@
 		"@tiptap/extension-text": "^3.28.0",
 		"@tiptap/extensions": "^3.28.0",
 		"@tiptap/pm": "^3.28.0",
+		"@tiptap/suggestion": "^3.28.0",
 		"better-sqlite3": "^12.11.1",
-		"chokidar": "^5.0.0"
+		"chokidar": "^5.0.0",
+		"electron-store": "^11.0.2"
 	},
 	"devDependencies": {
 		"@electron/rebuild": "^4.2.0",
@@ -80,7 +82,13 @@
 			"category": "Office",
 			"icon": "resources/icon.png",
 			"synopsis": "Bear-style Markdown editor",
-			"maintainer": "sohyp3 <thetit4nsh3@gmail.com>"
+			"maintainer": "sohyp3 <thetit4nsh3@gmail.com>",
+			"executableName": "fr5a",
+			"desktop": {
+				"entry": {
+					"StartupWMClass": "fr5a"
+				}
+			}
 		},
 		"win": {
 			"target": [

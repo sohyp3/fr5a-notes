@@ -30,6 +30,23 @@ export interface Workspace {
 	path: string | null;
 }
 
+/**
+ * Sidebar UI state persisted across launches (electron-store). Expansion maps
+ * record explicit overrides only — a missing path falls back to the default
+ * (top-level rows start open).
+ */
+export interface SidebarState {
+	/** Whether the whole "Folders" section is shown. */
+	foldersOpen: boolean;
+	/** Whether the whole "Tags" section is shown. */
+	tagsOpen: boolean;
+	folderExpanded: Record<string, boolean>;
+	tagExpanded: Record<string, boolean>;
+}
+
+/** Keys the renderer may read/write in the persistent store. */
+export type StateKey = 'lastOpenFile' | 'sidebar' | 'settings' | 'theme';
+
 /** Channel names, kept in one place so main + preload can't drift. */
 export const Channels = {
 	workspacePick: 'workspace:pick',
@@ -47,6 +64,9 @@ export const Channels = {
 	trashList: 'trash:list',
 	noteRestore: 'note:restore',
 	trashDelete: 'trash:delete',
+	// Persistent UI state (electron-store): last open file, sidebar, settings.
+	stateGet: 'state:get',
+	stateSet: 'state:set',
 	windowMinimize: 'window:minimize',
 	windowMaximize: 'window:maximize',
 	windowClose: 'window:close',

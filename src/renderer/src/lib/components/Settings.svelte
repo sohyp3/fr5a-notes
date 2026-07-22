@@ -73,7 +73,7 @@
 			<div class="row">
 				<div class="label">
 					<span class="name">Accent color</span>
-					<span class="desc">Highlights, links and the caret</span>
+					<span class="desc">Tints the whole window — backgrounds, text and highlights</span>
 				</div>
 				<div class="swatches" role="radiogroup" aria-label="Accent color">
 					{#each ACCENTS as a (a.id)}

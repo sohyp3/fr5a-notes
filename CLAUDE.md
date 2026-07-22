@@ -22,7 +22,7 @@ fr5a is a Bear-style Markdown editor for Linux: **Electron + Svelte 5 + TipTap**
 
 ## Three-process architecture (electron-vite)
 
-- `src/main/` — Node main process. `index.ts` owns the frameless window, IPC handlers, workspace lifecycle, and config persistence (`userData/fr5a-config.json`, `userData/fr5a-index.db`). `fileService.ts` is the "Local File Service" (recursive scan, chokidar watch, read/write/create/delete). `db.ts` is the SQLite index. `tags.ts` parses/nests tags.
+- `src/main/` — Node main process. `index.ts` owns the frameless window, IPC handlers, workspace lifecycle, and persistence: `electron-store` (`userData/fr5a.json` — workspace, last open file, sidebar layout, settings; renderer reads/writes it via the `state:get`/`state:set` channels with a key whitelist) plus the SQLite index (`userData/fr5a-index.db`). `fileService.ts` is the "Local File Service" (recursive scan, chokidar watch, read/write/create/delete). `db.ts` is the SQLite index. `tags.ts` parses/nests tags.
 - `src/preload/index.ts` — the **only** bridge to Node. `contextIsolation` is on; the renderer touches the filesystem exclusively through the typed `window.api` (`contextBridge`). `index.d.ts` augments `Window`.
 - `src/renderer/` — plain Vite + Svelte 5 (no SvelteKit). Mounted in `src/renderer/src/main.ts`.
 - `src/shared/types.ts` — types + the `Channels` map of IPC channel names, shared across all three processes so they can't drift.
@@ -31,7 +31,7 @@ Data flow: main scans the folder → indexes into SQLite → renderer pulls `lis
 
 ## electron.vite.config.ts — external deps (critical)
 
-`main` and `preload` use an explicit `external` predicate (NOT `externalizeDepsPlugin`, which silently externalized nothing here). `electron`, node builtins, `better-sqlite3`, and `chokidar` MUST stay external so they resolve from `node_modules` at runtime — bundling them breaks the native binding and pulls in electron's launcher wrapper. If you add a native or Node-only runtime dependency used by main/preload, add it to `runtimeExternals`.
+`main` and `preload` use an explicit `external` predicate (NOT `externalizeDepsPlugin`, which silently externalized nothing here). `electron`, node builtins, `better-sqlite3`, `chokidar`, and `electron-store` MUST stay external so they resolve from `node_modules` at runtime — bundling them breaks the native binding and pulls in electron's launcher wrapper. If you add a native or Node-only runtime dependency used by main/preload, add it to `runtimeExternals`.
 
 ## The editor model — raw Markdown text (most important concept)
 
@@ -43,7 +43,9 @@ The TipTap document is **literally the Markdown file, one paragraph per line** (
 - **Ghost Syntax**: `.md-syntax` is hidden with `font-size:0` (not `display:none`, to avoid layout jumps) and fades in on line-hover / when the caret enters the token (`md-active`, computed from the selection). Bullet markers are the deliberate exception — never hidden (`.md-bullet-mark`).
 - `vim.ts` is a from-scratch ProseMirror Vim plugin (no maintained package exists): modes/motions/operators, block cursor, mode badge. Loaded only when `settings.vim` is on.
 
-The Editor component mounts TipTap via a Svelte **action** keyed on `` `${activeId}:${vim}:${editorReloadToken}` `` so switching notes / toggling vim / external rewrites recreate the instance. Two subtleties that caused past bugs: (1) the store loads note content **before** flipping `activeId` (the editor reads content at mount time); (2) the mount action destroys only its _own_ editor instance (`if (editor === ed)`), since a keyed swap may have already reassigned the shared `editor` ref.
+The Editor component mounts TipTap via a Svelte **action** keyed on `` `${editorSession}:${vim}:${editorReloadToken}` `` so opening a note / toggling vim / external rewrites recreate the instance. Three subtleties that caused past bugs: (1) the store loads note content **before** bumping `editorSession` (the editor reads content at mount time); (2) the mount action destroys only its _own_ editor instance (`if (editor === ed)`), since a keyed swap may have already reassigned the shared `editor` ref; (3) the key is the session counter — NOT `activeId` — because a **draft note** (created in-memory with an empty `# ` H1, no file yet) gains its `activeId` on first save (the typed H1 becomes the filename, see `materializeDraft`), and that must not remount the editor mid-typing.
+
+Tag autocomplete (`TagSuggest.ts`): a `@tiptap/suggestion` plugin on `#` showing a floating dropdown (plain DOM, `.tag-suggest` in app.css) of tags from the index; Tab/Enter completes. It has `priority: 1000` so its Tab handling beats `ListBehavior`'s Tab-indent while open.
 
 ## Per-file metadata (hidden HTML comments)
 
@@ -51,7 +53,7 @@ Direction and pinning live in comment lines at the top of the file: `<!-- dir: r
 
 ## Renderer state
 
-`lib/stores/app.svelte.ts` is a single `$state` class instance (via `getAppState()`) — workspace, notes/tags, active note, filters (`selectedTag`/`selectedFolder`), view (`editor`|`settings`), zen, and `settings`. Auto-save is debounced 500ms and flushed on note switch. Settings persist to `localStorage` and drive global CSS variables (`--font-ui`, `--font-editor`, `data-ghost`, `data-theme` on `<html>`).
+`lib/stores/app.svelte.ts` is a single `$state` class instance (via `getAppState()`) — workspace, notes/tags, active note, draft state, filters (`selectedTag`/`selectedFolder`), view (`editor`|`settings`), zen, `settings`, and `sidebar` (section visibility + per-path folder/tag expansion). Auto-save is debounced 500ms and flushed on note switch. Settings/theme/sidebar/last-open-file persist to `electron-store` via `window.api.getState`/`setState` (localStorage is kept as a legacy fallback read); `init()` restores them, re-opens the last note, then flips `booted` which fades the UI in. The accent drives full theming: `applyPalette` (accents.ts) sets `--accent` plus accent-tinted `--bg-primary`/`--bg-secondary`/`--text-main` inline on `<html>`, which app.css feeds into every surface — keep its base colors in sync with app.css.
 
 Mixed-script fonts (`lib/fonts.ts` `editorStack`): the editor uses one stack — English family first, Arabic family second — so Latin uses the English face and Arabic code points fall back to the Arabic face in LTR _and_ RTL. Don't reorder to Arabic-first (most Arabic faces include Latin glyphs and would capture Latin text).
 

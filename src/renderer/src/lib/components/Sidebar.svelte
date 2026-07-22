@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { slide } from 'svelte/transition';
 	import { getAppState } from '../stores/app.svelte';
 	import { buildFolderTree } from '../folders';
 	import TagTree from './TagTree.svelte';
@@ -47,7 +48,22 @@
 
 	<div class="scroll-area">
 		<div class="section-label with-action">
-			<span>Folders</span>
+			<button
+				class="section-toggle"
+				aria-expanded={app.sidebar.foldersOpen}
+				onclick={() => app.toggleSection('folders')}
+			>
+				<svg
+					class="chev"
+					class:open={app.sidebar.foldersOpen}
+					width="9"
+					height="9"
+					viewBox="0 0 10 10"
+				>
+					<path d="M3 2l4 3-4 3z" fill="currentColor" />
+				</svg>
+				<span>Folders</span>
+			</button>
 			<div class="actions">
 				<button class="hdr-btn" title="New folder" aria-label="New folder" onclick={startAdd}>
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none">
@@ -65,7 +81,7 @@
 						/>
 					</svg>
 				</button>
-				{#if folders.length > 0}
+				{#if folders.length > 0 && app.sidebar.foldersOpen}
 					<button
 						class="hdr-btn"
 						title="Collapse all folders"
@@ -113,24 +129,43 @@
 			</div>
 		{/if}
 
-		{#if folders.length > 0}
-			<div class="tree">
+		{#if folders.length > 0 && app.sidebar.foldersOpen}
+			<div class="tree" transition:slide={{ duration: 160 }}>
 				{#each folders as node (node.path)}
 					<FolderTree {node} />
 				{/each}
 			</div>
 		{/if}
 
-		<div class="section-label">Tags</div>
-		<div class="tree">
-			{#if app.tags.length === 0}
-				<p class="empty">No tags yet. Add <code>#tags</code> to your notes.</p>
-			{:else}
-				{#each app.tags as node (node.path)}
-					<TagTree {node} />
-				{/each}
-			{/if}
+		<div class="section-label with-action">
+			<button
+				class="section-toggle"
+				aria-expanded={app.sidebar.tagsOpen}
+				onclick={() => app.toggleSection('tags')}
+			>
+				<svg
+					class="chev"
+					class:open={app.sidebar.tagsOpen}
+					width="9"
+					height="9"
+					viewBox="0 0 10 10"
+				>
+					<path d="M3 2l4 3-4 3z" fill="currentColor" />
+				</svg>
+				<span>Tags</span>
+			</button>
 		</div>
+		{#if app.sidebar.tagsOpen}
+			<div class="tree" transition:slide={{ duration: 160 }}>
+				{#if app.tags.length === 0}
+					<p class="empty">No tags yet. Add <code>#tags</code> to your notes.</p>
+				{:else}
+					{#each app.tags as node (node.path)}
+						<TagTree {node} />
+					{/each}
+				{/if}
+			</div>
+		{/if}
 	</div>
 
 	<footer class="foot">
@@ -227,6 +262,27 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
+	}
+	.section-toggle {
+		display: flex;
+		align-items: center;
+		gap: 5px;
+		font: inherit;
+		text-transform: inherit;
+		letter-spacing: inherit;
+		color: inherit;
+		padding: 0;
+		transition: color 110ms ease;
+	}
+	.section-toggle:hover {
+		color: var(--text-muted);
+	}
+	.section-toggle .chev {
+		flex: 0 0 auto;
+		transition: transform 140ms var(--ease-spring);
+	}
+	.section-toggle .chev.open {
+		transform: rotate(90deg);
 	}
 	.actions {
 		display: flex;

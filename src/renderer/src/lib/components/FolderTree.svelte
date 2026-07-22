@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import { getAppState } from '../stores/app.svelte';
 	import type { FolderNode } from '../folders';
@@ -8,17 +7,9 @@
 	let { node, depth = 0 }: { node: FolderNode; depth?: number } = $props();
 
 	const app = getAppState();
-	let expanded = $state(untrack(() => depth < 1));
-
-	// Collapse this row (and, recursively, all of its descendants) whenever the
-	// app fires a "collapse all" signal by bumping folderCollapseToken.
-	let lastCollapseToken = untrack(() => app.folderCollapseToken);
-	$effect(() => {
-		if (app.folderCollapseToken !== lastCollapseToken) {
-			lastCollapseToken = app.folderCollapseToken;
-			expanded = false;
-		}
-	});
+	// Expansion lives in the app's persisted sidebar state, so it survives
+	// relaunches and "collapse all" is just a store write.
+	const expanded = $derived(app.isFolderExpanded(node.path, depth));
 
 	const hasChildren = $derived(node.children.length > 0);
 	const selected = $derived(app.selectedFolder === node.path);
@@ -31,7 +22,7 @@
 		aria-label="Expand"
 		onclick={(e) => {
 			e.stopPropagation();
-			expanded = !expanded;
+			app.toggleFolderExpanded(node.path, depth);
 		}}
 	>
 		<svg width="9" height="9" viewBox="0 0 10 10" class:open={expanded}>

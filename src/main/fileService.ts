@@ -172,9 +172,11 @@ export class FileService {
 
 	/**
 	 * Create a fresh note with a unique filename derived from `title`, inside the
-	 * workspace-relative `folder` (defaults to the root).
+	 * workspace-relative `folder` (defaults to the root). When `content` is given
+	 * it becomes the file body verbatim (used when a draft written in the editor
+	 * is first saved — the typed H1 names the file).
 	 */
-	async create(title = 'Untitled', folder = ''): Promise<NoteMeta> {
+	async create(title = 'Untitled', folder = '', content?: string): Promise<NoteMeta> {
 		const base = title.trim().replace(/[/\\?%*:|"<>]/g, '-') || 'Untitled';
 		// Guard against a folder escaping the workspace (e.g. `..`).
 		const dir = this.safeSubdir(folder);
@@ -185,7 +187,7 @@ export class FileService {
 			name = `${base} ${++n}.md`;
 		}
 		const id = dir ? `${dir}/${name}` : name;
-		await this.write(id, `# ${base}\n\n`);
+		await this.write(id, content ?? `# ${base}\n\n`);
 		const raw = await this.read(id);
 		const stat = await fs.stat(path.join(this.root, id));
 		return this.buildMeta(path.join(this.root, id), raw, stat.mtimeMs);

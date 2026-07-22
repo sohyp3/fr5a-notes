@@ -28,6 +28,27 @@ export function docToText(editor: Editor): string {
 	return lines.join('\n');
 }
 
+// --- title derivation ---------------------------------------------------------
+
+/**
+ * The filename a draft note should get on its first save: the first H1 line's
+ * text, else the first non-empty non-metadata line, else null (still blank —
+ * nothing worth saving yet).
+ */
+export function titleFromContent(text: string): string | null {
+	let fallback: string | null = null;
+	for (const raw of text.split('\n')) {
+		const line = raw.trim();
+		if (!line || /^<!--.*-->$/.test(line)) continue;
+		const h1 = line.match(/^#\s+(.+)$/);
+		if (h1) return h1[1].trim();
+		// A bare `#` (the empty H1 scaffold) isn't a title.
+		if (line === '#') continue;
+		fallback ??= line.replace(/^#{1,6}\s*/, '');
+	}
+	return fallback;
+}
+
 // --- per-file directionality ------------------------------------------------
 
 export type Direction = 'ltr' | 'rtl';

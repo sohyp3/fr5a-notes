@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { Channels } from '../shared/types';
-import type { NoteMeta, TagNode } from '../shared/types';
+import type { NoteMeta, TagNode, StateKey } from '../shared/types';
 
 /**
  * The single, typed bridge the renderer is allowed to touch. Everything the UI
@@ -17,8 +17,8 @@ const api = {
 	readNote: (id: string): Promise<string> => ipcRenderer.invoke(Channels.noteRead, id),
 	writeNote: (id: string, content: string): Promise<void> =>
 		ipcRenderer.invoke(Channels.noteWrite, id, content),
-	createNote: (title?: string, folder?: string): Promise<NoteMeta> =>
-		ipcRenderer.invoke(Channels.noteCreate, title, folder),
+	createNote: (title?: string, folder?: string, content?: string): Promise<NoteMeta> =>
+		ipcRenderer.invoke(Channels.noteCreate, title, folder, content),
 	deleteNote: (id: string): Promise<void> => ipcRenderer.invoke(Channels.noteDelete, id),
 
 	// Folders: list every sub-directory (incl. empty), create a new one.
@@ -30,6 +30,12 @@ const api = {
 	listTrash: (): Promise<NoteMeta[]> => ipcRenderer.invoke(Channels.trashList),
 	restoreNote: (id: string): Promise<string> => ipcRenderer.invoke(Channels.noteRestore, id),
 	permanentDelete: (id: string): Promise<void> => ipcRenderer.invoke(Channels.trashDelete, id),
+
+	// Persistent UI state (electron-store): last open file, sidebar, settings.
+	getState: <T = unknown>(key: StateKey): Promise<T | null> =>
+		ipcRenderer.invoke(Channels.stateGet, key),
+	setState: (key: StateKey, value: unknown): Promise<void> =>
+		ipcRenderer.invoke(Channels.stateSet, key, value),
 
 	// Frameless titlebar controls.
 	minimize: (): Promise<void> => ipcRenderer.invoke(Channels.windowMinimize),
