@@ -1,0 +1,67 @@
+# Maintainer: sohyp3 <thetit4nsh3@gmail.com>
+pkgname=fr5a-bin
+_appname=fr5a
+pkgver=0.0.1
+pkgrel=3
+pkgdesc="A polished Bear-style Markdown editor (Electron + Svelte + TipTap)"
+arch=('x86_64')
+url="https://github.com/sohyp3/fr5a-notes"
+license=('MIT')
+depends=('gtk3' 'nss' 'libxss' 'libnotify' 'libsecret' 'at-spi2-core')
+makedepends=('imagemagick')
+options=('!strip')
+source=("${_appname}-${pkgver}.AppImage::${url}/releases/download/v${pkgver}/fr5a-${pkgver}.AppImage")
+sha256sums=('SKIP')  # replace with the real checksum: run `updpkgsums` after the release is published
+
+package() {
+	# Extract the AppImage instead of running it at install time (no FUSE needed)
+	chmod +x "${srcdir}/${_appname}-${pkgver}.AppImage"
+	"${srcdir}/${_appname}-${pkgver}.AppImage" --appimage-extract >/dev/null
+
+	# App payload -> /opt
+	install -d "${pkgdir}/opt/${_appname}"
+	cp -r "${srcdir}/squashfs-root/"* "${pkgdir}/opt/${_appname}/"
+	# AppImage extraction leaves some dirs mode 0700 (root-only); make the whole
+	# payload world-readable so the app runs for the invoking user.
+	chmod -R a+rX "${pkgdir}/opt/${_appname}"
+
+	# Launcher wrapper -> /usr/bin/fr5a
+	install -d "${pkgdir}/usr/bin"
+	ln -s "/opt/${_appname}/AppRun" "${pkgdir}/usr/bin/${_appname}"
+
+	# Desktop entry + icon (electron-builder names it after the product/name field,
+	# so locate it rather than hardcoding the basename)
+	local _desktop
+	_desktop=$(find "${srcdir}/squashfs-root" -maxdepth 1 -name '*.desktop' | head -n1)
+	install -Dm644 "${_desktop}" \
+		"${pkgdir}/usr/share/applications/${_appname}.desktop"
+	# Point Exec at the installed wrapper, and ensure the running window links to
+	# this entry (its WM_CLASS is the Electron productName, "fr5a")
+	sed -i \
+		-e "s|^Exec=.*|Exec=${_appname} %U|" \
+		-e "s|^Icon=.*|Icon=${_appname}|" \
+		-e "/^StartupWMClass=/d" \
+		-e "/^\[Desktop Entry\]/a StartupWMClass=fr5a" \
+		"${pkgdir}/usr/share/applications/${_appname}.desktop"
+
+	# Icon: the AppImage ships a single large PNG named after the executable
+	# (fr5a-notes.png), so match any PNG and take the largest. Resize it to the
+	# standard hicolor sizes under the "fr5a" name (matches Icon= in the .desktop).
+	local _icon
+	_icon=$(find "${srcdir}/squashfs-root/usr/share/icons" -name '*.png' | sort | tail -n1)
+	if [ -n "${_icon}" ]; then
+		local _sz
+		for _sz in 512 256 128 64 48 32; do
+			install -d "${pkgdir}/usr/share/icons/hicolor/${_sz}x${_sz}/apps"
+			magick "${_icon}" -resize "${_sz}x${_sz}" \
+				"${pkgdir}/usr/share/icons/hicolor/${_sz}x${_sz}/apps/${_appname}.png"
+		done
+		# Legacy fallback path that is always searched regardless of theme
+		install -Dm644 "${_icon}" "${pkgdir}/usr/share/pixmaps/${_appname}.png"
+	fi
+
+	# Chrome-sandbox needs the setuid bit; it ships from the AppImage
+	if [ -e "${pkgdir}/opt/${_appname}/chrome-sandbox" ]; then
+		chmod 4755 "${pkgdir}/opt/${_appname}/chrome-sandbox"
+	fi
+}
