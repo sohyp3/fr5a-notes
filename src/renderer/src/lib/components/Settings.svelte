@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { getAppState } from '../stores/app.svelte';
+	import { platform } from '../platform';
+	import GitSetup from './GitSetup.svelte';
 	import { slide } from 'svelte/transition';
 	import { UI_FONTS, EN_FONTS, AR_FONTS } from '../fonts';
 	import { ACCENTS } from '../accents';
@@ -41,9 +43,15 @@
 					<span class="name">Default folder</span>
 					<span class="desc" title={app.workspace ?? ''}>{folderName(app.workspace)}</span>
 				</div>
-				<button class="btn" onclick={() => app.pickWorkspace()}>Change…</button>
+				{#if !platform.syncSetup}
+					<button class="btn" onclick={() => app.pickWorkspace()}>Change…</button>
+				{/if}
 			</div>
 		</section>
+
+		{#if platform.syncSetup}
+			<GitSetup />
+		{/if}
 
 		<!-- Appearance -->
 		<section class="group">
@@ -145,22 +153,25 @@
 		<!-- Preferences -->
 		<section class="group">
 			<h2>Preferences</h2>
-			<div class="row">
-				<div class="label">
-					<span class="name">Vim motions</span>
-					<span class="desc">Modal editing (normal · insert · visual)</span>
+			<!-- No Vim on Android (on-screen keyboard; the editor ignores the setting there). -->
+			{#if platform.platform !== 'android'}
+				<div class="row">
+					<div class="label">
+						<span class="name">Vim motions</span>
+						<span class="desc">Modal editing (normal · insert · visual)</span>
+					</div>
+					<button
+						class="toggle"
+						class:on={s.vim}
+						role="switch"
+						aria-checked={s.vim}
+						aria-label="Vim motions"
+						onclick={() => app.updateSettings({ vim: !s.vim })}
+					>
+						<span class="knob"></span>
+					</button>
 				</div>
-				<button
-					class="toggle"
-					class:on={s.vim}
-					role="switch"
-					aria-checked={s.vim}
-					aria-label="Vim motions"
-					onclick={() => app.updateSettings({ vim: !s.vim })}
-				>
-					<span class="knob"></span>
-				</button>
-			</div>
+			{/if}
 			<div class="row">
 				<div class="label">
 					<span class="name">Ghost Syntax</span>

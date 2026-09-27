@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { platform } from '../platform';
 	import { onMount } from 'svelte';
 	import type { ConflictFile } from '../../../../shared/types';
 	import { accentById, applyPalette } from '../accents';
@@ -19,12 +20,12 @@
 
 	onMount(async () => {
 		// Match the main window's theme + accent.
-		const theme = ((await window.api.getState<string>('theme')) ?? 'light') as 'light' | 'dark';
-		const settings = await window.api.getState<{ accent?: string }>('settings');
+		const theme = ((await platform.getState<string>('theme')) ?? 'light') as 'light' | 'dark';
+		const settings = await platform.getState<{ accent?: string }>('settings');
 		document.documentElement.setAttribute('data-theme', theme);
 		applyPalette(accentById(settings?.accent ?? ''), theme);
 
-		files = await window.api.syncConflicts();
+		files = await platform.syncConflicts();
 		drafts = initialDrafts(files);
 		loading = false;
 	});
@@ -37,7 +38,7 @@
 	async function apply(): Promise<void> {
 		working = true;
 		error = null;
-		const res = await applyConflicts(window.api, files, $state.snapshot(drafts));
+		const res = await applyConflicts(platform, files, $state.snapshot(drafts));
 		working = false;
 		if (!res.ok) error = syncErrorMessage(res.error);
 		else if (res.result.status === 'conflict') {
@@ -50,7 +51,7 @@
 	async function cancel(): Promise<void> {
 		working = true;
 		error = null;
-		const res = await cancelConflicts(window.api);
+		const res = await cancelConflicts(platform);
 		working = false;
 		if (!res.ok) error = syncErrorMessage(res.error);
 	}

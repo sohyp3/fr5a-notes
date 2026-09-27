@@ -15,6 +15,14 @@ fr5a is a Bear-style Markdown editor for Linux: **Electron + Svelte 5 + TipTap**
 - Single test: `bunx vitest run src/main/tags.test.ts` (or `-t "<name>"` to filter by test name).
 - `bun run rebuild` — re-run the native `better-sqlite3` build after an Electron upgrade or ABI error.
 - `bun run dist` — package a Linux AppImage + `.deb` via electron-builder.
+- `bun run test:e2e` — Playwright mobile-layout tests (`e2e/`, phone 390×844 + tablet 800×1280, fake `window.api`).
+- `bun run apk` — Android: web bundle (`vite.android.config.ts` → `out/android`), `cap sync android`, `gradlew assembleDebug` → `android/app/build/outputs/apk/debug/app-debug.apk`. Gradle needs JDK 21 (`android/gradle/gradle-daemon-jvm.properties` picks it).
+
+## Platform layer (desktop + Android)
+
+The renderer never touches `window.api`; it imports `platform` from `lib/platform` (a `PlatformApi`, `platform/types.ts`), chosen at startup: `desktop.ts` wraps the Electron preload, `api.android.ts` is the Capacitor host. Android keeps notes in `notes/` under app-private storage (Filesystem `Directory.Data`, no SAF / storage permissions), state in Preferences, and an in-memory index rebuilt on launch, resume and after each sync. Android git (`platform/git/isoGit.ts`) is isomorphic-git over a Capacitor fs adapter (`capFs.ts`) and native HTTP (`capHttp.ts`, buffered base64 bodies — no CORS proxy); same contract as `main/gitSync.ts` (commit-then-merge, never force-push). The GitHub token lives only in Keystore-backed secure storage. `isoGit.test.ts` runs it in Node against a bare repo via `git http-backend` as CGI. Conflicts reuse `ConflictWindow.svelte` as an in-app overlay (`conflictsInline`).
+
+Layout (`lib/layout.ts` `layoutFor`, store `layout`/`touch`): mouse windows are always `desktop`. Touch devices (Android or coarse pointer): `phone` <600px stacks nav → list → editor (`pane`, `back()`, top-bar Back); `tablet` 600–1023px shows list + editor with folders in a drawer (`drawerOpen`); ≥1024px is the three-pane layout. `App.svelte` keeps every pane mounted and switches layouts with CSS only, so rotation keeps the TipTap instance and caret — don't reintroduce per-layout `{#if}` branches around `<Editor />`. `html[data-touch]` enlarges targets (app.css); `FormatToolbar.svelte` shows on any touch layout; note cards open the context menu on long-press. Vim is off on Android; ghost syntax has no hover reveal when `html[data-hover=none]`.
 
 ## Native module gotcha
 

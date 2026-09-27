@@ -1,9 +1,10 @@
 <script lang="ts">
+	import { platform } from '../platform';
 	import { getAppState } from '../stores/app.svelte';
 
 	const app = getAppState();
 	// macOS draws native traffic lights (top-left); don't duplicate them.
-	const isMac = window.api.platform === 'darwin';
+	const isMac = platform.platform === 'darwin';
 
 	function folderName(path: string | null): string {
 		if (!path) return 'No folder';
@@ -12,27 +13,66 @@
 	}
 </script>
 
-<header class="titlebar" class:mac={isMac}>
+<header
+	class="titlebar"
+	class:mac={isMac}
+	class:touch={app.touch}
+	class:phone={app.layout === 'phone'}
+>
 	<div class="left no-drag">
-		<button
-			class="icon-btn"
-			title="Toggle sidebar"
-			aria-label="Toggle sidebar"
-			onclick={() => app.toggleSidebar()}
-		>
-			<svg width="17" height="17" viewBox="0 0 24 24" fill="none">
-				<rect
-					x="3"
-					y="4"
-					width="18"
-					height="16"
-					rx="2.5"
-					stroke="currentColor"
-					stroke-width="1.8"
-				/>
-				<line x1="9" y1="4" x2="9" y2="20" stroke="currentColor" stroke-width="1.8" />
-			</svg>
-		</button>
+		{#if app.layout === 'tablet'}
+			<button
+				class="icon-btn"
+				class:on={app.drawerOpen}
+				title="Folders"
+				aria-label="Open folders"
+				aria-expanded={app.drawerOpen}
+				onclick={() => app.toggleDrawer()}
+			>
+				<svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+					<path
+						d="M4 7h16M4 12h16M4 17h16"
+						stroke="currentColor"
+						stroke-width="1.9"
+						stroke-linecap="round"
+					/>
+				</svg>
+			</button>
+		{:else if app.layout === 'phone'}
+			{#if app.canGoBack}
+				<button class="icon-btn back" title="Back" aria-label="Back" onclick={() => app.back()}>
+					<svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+						<path
+							d="M15 5l-7 7 7 7"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						/>
+					</svg>
+				</button>
+			{/if}
+		{:else}
+			<button
+				class="icon-btn"
+				title="Toggle sidebar"
+				aria-label="Toggle sidebar"
+				onclick={() => app.toggleSidebar()}
+			>
+				<svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+					<rect
+						x="3"
+						y="4"
+						width="18"
+						height="16"
+						rx="2.5"
+						stroke="currentColor"
+						stroke-width="1.8"
+					/>
+					<line x1="9" y1="4" x2="9" y2="20" stroke="currentColor" stroke-width="1.8" />
+				</svg>
+			</button>
+		{/if}
 	</div>
 
 	<div class="center">
@@ -135,13 +175,13 @@
 			{/if}
 		</button>
 
-		{#if !isMac}
+		{#if !isMac && platform.close}
 			<div class="win-controls">
-				<button class="win-btn min" aria-label="Minimize" onclick={() => window.api.minimize()}>
+				<button class="win-btn min" aria-label="Minimize" onclick={() => platform.minimize?.()}>
 				</button>
-				<button class="win-btn max" aria-label="Maximize" onclick={() => window.api.maximize()}>
+				<button class="win-btn max" aria-label="Maximize" onclick={() => platform.maximize?.()}>
 				</button>
-				<button class="win-btn close" aria-label="Close" onclick={() => window.api.close()}>
+				<button class="win-btn close" aria-label="Close" onclick={() => platform.close?.()}>
 				</button>
 			</div>
 		{/if}
@@ -158,6 +198,25 @@
 		padding: 0 12px;
 		-webkit-app-region: drag;
 		user-select: none;
+	}
+	/* Touch: finger-sized targets. Phones: the workspace name gives way to sync status. */
+	.titlebar.touch {
+		height: 52px;
+		padding: 0 6px;
+	}
+	.titlebar.touch .icon-btn {
+		width: 44px;
+		height: 44px;
+	}
+	.titlebar.touch .icon-btn.on {
+		background: var(--bg-hover);
+		color: var(--text);
+	}
+	.titlebar.phone .workspace {
+		max-width: 28vw;
+	}
+	.titlebar.phone .sync-msg {
+		max-width: 30vw;
 	}
 	/* Leave room for the native traffic lights. */
 	.titlebar.mac {

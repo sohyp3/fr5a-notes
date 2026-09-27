@@ -85,7 +85,59 @@
 	function onContextMenu(e: MouseEvent): void {
 		if (trash) return; // trash cards have their own swipe actions only
 		e.preventDefault();
+		// A touch press in progress: the browser's own long-press got there
+		// first — open once, at the finger, and swallow the release click.
+		if (press) {
+			const { x, y } = press;
+			cancelPress();
+			longPressed = true;
+			app.openContextMenu(x, y, note);
+			return;
+		}
+		if (longPressed) return;
 		app.openContextMenu(e.clientX, e.clientY, note);
+	}
+
+	// --- Long-press (touch) → the same context menu ------------------------
+	const LONG_PRESS_MS = 500;
+	const MOVE_TOLERANCE = 10;
+	let press: { x: number; y: number; timer: ReturnType<typeof setTimeout> } | null = null;
+	let longPressed = false;
+
+	function onPointerDown(e: PointerEvent): void {
+		if (trash || e.pointerType === 'mouse') return;
+		longPressed = false;
+		const x = e.clientX;
+		const y = e.clientY;
+		press = {
+			x,
+			y,
+			timer: setTimeout(() => {
+				press = null;
+				longPressed = true;
+				navigator.vibrate?.(8);
+				app.openContextMenu(x, y, note);
+			}, LONG_PRESS_MS)
+		};
+	}
+
+	function onPointerMove(e: PointerEvent): void {
+		if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > MOVE_TOLERANCE)
+			cancelPress();
+	}
+
+	function cancelPress(): void {
+		if (press) clearTimeout(press.timer);
+		press = null;
+	}
+
+	function onClick(): void {
+		// The release after a long-press must not also open the note.
+		if (longPressed) {
+			longPressed = false;
+			return;
+		}
+		if (!trash && Math.abs(offset.current) < 1) app.openNote(note.id);
 	}
 
 	function springBack(): void {
@@ -168,8 +220,12 @@
 		class:active
 		class:readonly={trash}
 		style="transform:translateX({offset.current}px)"
-		onclick={() => !trash && Math.abs(offset.current) < 1 && app.openNote(note.id)}
+		onclick={onClick}
 		oncontextmenu={onContextMenu}
+		onpointerdown={onPointerDown}
+		onpointermove={onPointerMove}
+		onpointerup={cancelPress}
+		onpointercancel={cancelPress}
 	>
 		<div class="row">
 			<span class="title">

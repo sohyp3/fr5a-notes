@@ -1,4 +1,5 @@
 import type { ConflictFile, ResolveChoice, SyncResponse } from '../../../shared/types';
+import type { PlatformApi } from './platform/types';
 
 /** Friendly text for a failed sync call. */
 export function syncErrorMessage(error: Extract<SyncResponse, { ok: false }>['error']): string {
@@ -57,7 +58,7 @@ export function toChoices(
 	});
 }
 
-type ConflictApi = Pick<Window['api'], 'syncResolve' | 'syncAbort'>;
+type ConflictApi = Pick<PlatformApi, 'syncResolve' | 'syncAbort'>;
 
 /** Apply: resolve every file with its chosen side. Main closes the window and reloads notes. */
 export async function applyConflicts(

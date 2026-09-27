@@ -9,6 +9,9 @@
 	import Settings from './lib/components/Settings.svelte';
 	import CheatSheet from './lib/components/CheatSheet.svelte';
 	import NoteContextMenu from './lib/components/NoteContextMenu.svelte';
+	import ConflictWindow from './lib/components/ConflictWindow.svelte';
+	import { platform } from './lib/platform';
+	import { layoutFor } from './lib/layout';
 
 	const app = getAppState();
 	const SIDEBAR_W = 250;
@@ -21,6 +24,20 @@
 	// In Zen mode the sidebar and note list animate away, centring the editor.
 	const showSidebar = $derived(app.sidebarOpen && !app.zen);
 	const showList = $derived(!app.zen && app.view === 'editor');
+
+	// Which panes are on screen for the current layout. Every pane stays mounted
+	// across layouts (only CSS changes), so rotating keeps the editor + caret.
+	const phonePane = $derived(app.view === 'settings' ? 'settings' : app.pane);
+	const sidebarShown = $derived(
+		app.layout === 'desktop'
+			? showSidebar
+			: app.layout === 'tablet'
+				? app.drawerOpen
+				: phonePane === 'nav'
+	);
+	const listShown = $derived(
+		app.layout === 'desktop' ? showList : app.layout === 'tablet' ? !app.zen : phonePane === 'list'
+	);
 
 	$effect(() => {
 		sidebarWidth.target = showSidebar ? SIDEBAR_W : 0;
@@ -70,6 +87,23 @@
 		}
 	}
 
+	// Layout follows width + input type: touch devices (Android, coarse pointer)
+	// get phone / tablet layouts; mouse windows stay desktop at any width.
+	$effect(() => {
+		const coarse = matchMedia('(pointer: coarse)');
+		const update = () => {
+			const touch = platform.platform === 'android' || coarse.matches;
+			app.setLayout(layoutFor(window.innerWidth, touch), touch);
+		};
+		update();
+		window.addEventListener('resize', update);
+		coarse.addEventListener('change', update);
+		return () => {
+			window.removeEventListener('resize', update);
+			coarse.removeEventListener('change', update);
+		};
+	});
+
 	app.init();
 </script>
 
@@ -80,24 +114,38 @@
 	<!-- The body renders only once init() has restored the workspace, settings
 	     and last-open note, then fades in — no flash from empty to full. -->
 	{#if app.booted}
-		<div class="body" in:fade={{ duration: 220 }}>
+		<div
+			class="body layout-{app.layout}"
+			class:drawer-open={app.drawerOpen}
+			data-layout={app.layout}
+			data-pane={app.layout === 'phone' ? phonePane : undefined}
+			in:fade={{ duration: 220 }}
+		>
 			<div
 				class="sidebar-wrap"
-				style="width:{sidebarWidth.current}px"
-				aria-hidden={!showSidebar}
-				inert={!showSidebar}
+				style:width={app.layout === 'desktop' ? `${sidebarWidth.current}px` : null}
+				aria-hidden={!sidebarShown}
+				inert={!sidebarShown}
 			>
 				<Sidebar />
 			</div>
+			{#if app.layout === 'tablet' && app.drawerOpen}
+				<button
+					class="scrim"
+					aria-label="Close folders"
+					onclick={() => app.toggleDrawer()}
+					transition:fade={{ duration: 150 }}
+				></button>
+			{/if}
 			<main class="content">
 				{#if app.view === 'settings'}
 					<Settings />
 				{:else}
 					<div
 						class="list-wrap"
-						style="width:{listWidth.current}px"
-						aria-hidden={!showList}
-						inert={!showList}
+						style:width={app.layout === 'desktop' ? `${listWidth.current}px` : null}
+						aria-hidden={!listShown}
+						inert={!listShown}
 					>
 						<NoteList />
 					</div>
@@ -114,19 +162,101 @@
 	{/if}
 
 	<NoteContextMenu />
+
+	{#if app.conflictOpen}
+		<!-- Same resolver the desktop opens as a second window; closes on sync done. -->
+		<div class="conflict-overlay" transition:fade={{ duration: 160 }}>
+			<ConflictWindow />
+		</div>
+	{/if}
 </div>
 
 <style>
+	.conflict-overlay {
+		position: fixed;
+		inset: 0;
+		z-index: 50;
+		overflow: auto;
+		background: var(--bg-primary);
+	}
 	.app {
 		display: flex;
 		flex-direction: column;
 		height: 100%;
+		/* Android edge-to-edge: keep the top bar clear of the status bar (0 on desktop). */
+		padding-top: env(safe-area-inset-top, 0px);
 	}
 	.body {
 		flex: 1;
 		display: flex;
 		min-height: 0;
 	}
+	/* --- tablet: list + editor; folders slide in as a drawer ------------- */
+	.layout-tablet {
+		position: relative;
+	}
+	.layout-tablet .sidebar-wrap {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: 0;
+		z-index: 20;
+		width: min(320px, 80vw);
+		background: var(--bg-primary);
+		box-shadow: 8px 0 24px rgba(0, 0, 0, 0.12);
+		transform: translateX(-105%);
+		transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+	}
+	.layout-tablet.drawer-open .sidebar-wrap {
+		transform: none;
+	}
+	.layout-tablet .list-wrap {
+		width: clamp(260px, 38%, 340px);
+	}
+	.app.zen .layout-tablet .list-wrap {
+		display: none;
+	}
+	.scrim {
+		position: absolute;
+		inset: 0;
+		z-index: 15;
+		background: rgba(0, 0, 0, 0.22);
+	}
+
+	/* --- phone: one pane at a time (data-pane), the rest hidden but mounted - */
+	.layout-phone .sidebar-wrap {
+		flex: 1;
+	}
+	.layout-phone:not([data-pane='nav']) .sidebar-wrap,
+	.layout-phone[data-pane='nav'] .content {
+		display: none;
+	}
+	.layout-phone .content {
+		padding: 0;
+		gap: 0;
+	}
+	.layout-phone .list-wrap {
+		flex: 1;
+	}
+	.layout-phone[data-pane='editor'] .list-wrap,
+	.layout-phone[data-pane='list'] .content > :global(.editor-pane) {
+		display: none;
+	}
+
+	.layout-tablet .sidebar-wrap :global(.sidebar),
+	.layout-phone .sidebar-wrap :global(.sidebar) {
+		width: 100%;
+	}
+	.layout-tablet .list-wrap,
+	.layout-phone .list-wrap {
+		display: flex;
+	}
+	.layout-tablet .list-wrap > :global(.notelist),
+	.layout-phone .list-wrap > :global(.notelist) {
+		width: 100%;
+		flex: 1 1 auto;
+	}
+
 	.sidebar-wrap {
 		flex: 0 0 auto;
 		overflow: hidden;

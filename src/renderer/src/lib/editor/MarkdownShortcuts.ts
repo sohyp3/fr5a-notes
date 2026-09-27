@@ -9,7 +9,7 @@ import type { Command } from '@tiptap/pm/state';
  * and Ctrl on Linux/Windows automatically.
  */
 
-function wrap(marker: string): Command {
+export function wrap(marker: string): Command {
 	return (state, dispatch) => {
 		const { from, to, empty } = state.selection;
 		const tr = state.tr;

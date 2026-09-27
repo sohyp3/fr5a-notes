@@ -1,8 +1,10 @@
+import { platform } from '../platform';
 import type { NoteMeta, TagNode, SidebarState } from '../../../../shared/types';
 import { uiStack, editorStack } from '../fonts';
 import { accentById, applyPalette, DEFAULT_ACCENT } from '../accents';
 import { setPinned, setLocked, titleFromContent } from '../editor/markdown';
 import { syncErrorMessage } from '../sync';
+import type { Layout } from '../layout';
 
 const SAVE_DEBOUNCE = 500;
 const THEME_KEY = 'fr5a-theme';
@@ -18,6 +20,7 @@ const DEFAULT_SIDEBAR: SidebarState = {
 };
 
 export type View = 'editor' | 'settings';
+export type Pane = 'nav' | 'list' | 'editor';
 
 export interface Settings {
 	/** Font option ids (see fonts.ts). */
@@ -100,12 +103,27 @@ class AppState {
 	view = $state<View>('editor');
 	/** Zen mode hides the sidebar + note list and centres the editor. */
 	zen = $state(false);
+	/**
+	 * Window layout. Mouse-driven windows are always 'desktop'. Touch devices:
+	 * 'phone' (<600px) stacks one pane at a time (folders → list → editor, with a
+	 * back button); 'tablet' (600–1023px) shows list + editor with folders in a
+	 * drawer; ≥1024px uses the desktop three-pane layout with touch-sized targets.
+	 */
+	layout = $state<Layout>('desktop');
+	/** Touch device (Android or coarse pointer): formatting toolbar, bigger targets. */
+	touch = $state(false);
+	/** Which pane the phone layout shows. Tracked everywhere so rotation lands sensibly. */
+	pane = $state<Pane>('nav');
+	/** Folders drawer on the tablet layout. */
+	drawerOpen = $state(false);
 
 	settings = $state<Settings>({ ...DEFAULT_SETTINGS });
 
 	/** Git sync in flight ('pull' | 'push'), or null when idle. */
 	syncing = $state<'pull' | 'push' | null>(null);
 	/** Last sync outcome shown in the titlebar; errors stay until dismissed. */
+	/** Inline conflict resolver open (hosts with `conflictsInline`, i.e. Android). */
+	conflictOpen = $state(false);
 	syncMessage = $state<{ kind: 'ok' | 'error' | 'conflict'; text: string } | null>(null);
 	private syncMessageTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -146,7 +164,7 @@ class AppState {
 
 	async init(): Promise<void> {
 		// Theme: electron-store, else the old localStorage copy, else the OS.
-		const storedTheme = ((await window.api.getState<string>('theme')) ??
+		const storedTheme = ((await platform.getState<string>('theme')) ??
 			localStorage.getItem(THEME_KEY)) as 'light' | 'dark' | null;
 		this.theme =
 			storedTheme ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
@@ -155,7 +173,7 @@ class AppState {
 		// Settings: electron-store first, localStorage as a one-time migration.
 		try {
 			const stored =
-				(await window.api.getState<Partial<Settings>>('settings')) ??
+				(await platform.getState<Partial<Settings>>('settings')) ??
 				JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? 'null');
 			if (stored) this.settings = { ...DEFAULT_SETTINGS, ...stored };
 		} catch {
@@ -166,28 +184,39 @@ class AppState {
 		this.applyAccent();
 
 		// Sidebar layout (section visibility + expanded folders/tags).
-		const sidebar = await window.api.getState<Partial<SidebarState>>('sidebar');
+		const sidebar = await platform.getState<Partial<SidebarState>>('sidebar');
 		if (sidebar) this.sidebar = { ...DEFAULT_SIDEBAR, ...sidebar };
 
-		this.workspace = await window.api.getWorkspace();
+		this.workspace = await platform.getWorkspace();
 		await this.refresh();
 
 		// Re-open the note from the previous session, if it still exists.
-		const last = await window.api.getState<string>('lastOpenFile');
+		const last = await platform.getState<string>('lastOpenFile');
 		if (last && this.notes.some((n) => n.id === last)) {
 			await this.openNote(last);
 		}
 
 		// Live updates from the filesystem watcher.
-		window.api.onNotesChanged(() => this.refresh());
+		platform.onNotesChanged(() => this.refresh());
 		// Git sync: reload from disk after a clean sync; surface conflicts.
-		window.api.onSyncDone(() => void this.reloadFromDisk());
-		window.api.onSyncConflict((files) =>
+		platform.onSyncDone(() => {
+			this.conflictOpen = false;
+			void this.reloadFromDisk();
+		});
+		platform.onSyncConflict((files) => {
 			this.showSyncMessage(
 				'conflict',
 				`Conflicts in ${files.length} ${files.length === 1 ? 'file' : 'files'}. Resolve them in the conflict window.`
-			)
-		);
+			);
+			if (platform.conflictsInline) this.conflictOpen = true;
+		});
+		// Hardware back (Android) walks the stacked layout; at the root it exits.
+		platform.onBackButton?.(() => this.back());
+		// Touch devices have no hover: ghost syntax is revealed at the caret only.
+		if (platform.platform === 'android' || matchMedia('(hover: none)').matches)
+			document.documentElement.setAttribute('data-hover', 'none');
+		// The stacked layout opens on the folders pane, whatever note was restored.
+		this.pane = 'nav';
 		this.booted = true;
 	}
 
@@ -199,10 +228,10 @@ class AppState {
 			return;
 		}
 		const [notes, tags, trash, folders] = await Promise.all([
-			window.api.listNotes(),
-			window.api.listTags(),
-			window.api.listTrash(),
-			window.api.listFolders()
+			platform.listNotes(),
+			platform.listTags(),
+			platform.listTrash(),
+			platform.listFolders()
 		]);
 		this.notes = notes;
 		this.tags = tags;
@@ -216,14 +245,14 @@ class AppState {
 	}
 
 	async pickWorkspace(): Promise<void> {
-		const path = await window.api.pickWorkspace();
+		const path = await platform.pickWorkspace();
 		if (path) {
 			this.workspace = path;
 			this.activeId = null;
 			this.activeContent = '';
 			this.draft = false;
 			this.selectedTag = null;
-			void window.api.setState('lastOpenFile', null);
+			void platform.setState('lastOpenFile', null);
 			await this.refresh();
 		}
 	}
@@ -231,6 +260,7 @@ class AppState {
 	async openNote(id: string): Promise<void> {
 		if (id === this.activeId) {
 			this.view = 'editor';
+			this.pane = 'editor';
 			return;
 		}
 		await this.flush(); // persist any pending edits before switching
@@ -238,12 +268,13 @@ class AppState {
 		// Load the body BEFORE flipping activeId. The editor is keyed on
 		// editorSession, so its content must already be in place when the new
 		// instance mounts — otherwise it mounts with stale/empty text.
-		const content = await window.api.readNote(id);
+		const content = await platform.readNote(id);
 		this.view = 'editor';
+		this.pane = 'editor';
 		this.activeContent = content;
 		this.activeId = id;
 		this.editorSession++;
-		void window.api.setState('lastOpenFile', id);
+		void platform.setState('lastOpenFile', id);
 	}
 
 	async createNote(): Promise<void> {
@@ -253,6 +284,7 @@ class AppState {
 		// No file yet: open an in-memory draft on an empty H1 line. The first
 		// save derives the filename from the typed title.
 		this.view = 'editor';
+		this.pane = 'editor';
 		this.draft = true;
 		this.activeId = null;
 		this.activeContent = '# ';
@@ -265,7 +297,7 @@ class AppState {
 	 */
 	async createFolder(name: string): Promise<void> {
 		const parent = this.selectedFolder ?? '';
-		const rel = await window.api.createFolder(name, parent);
+		const rel = await platform.createFolder(name, parent);
 		await this.refresh();
 		if (rel) this.selectFolder(rel);
 	}
@@ -279,11 +311,12 @@ class AppState {
 		if (this.notes.find((n) => n.id === id)?.locked) return;
 		if (id === this.activeId) {
 			this.cancelPending();
+			if (this.pane === 'editor') this.pane = 'list';
 			this.activeId = null;
 			this.activeContent = '';
-			void window.api.setState('lastOpenFile', null);
+			void platform.setState('lastOpenFile', null);
 		}
-		await window.api.deleteNote(id);
+		await platform.deleteNote(id);
 		await this.refresh();
 	}
 
@@ -296,7 +329,7 @@ class AppState {
 			this.activeId = null;
 			this.activeContent = '';
 		}
-		await window.api.restoreNote(trashId);
+		await platform.restoreNote(trashId);
 		await this.refresh();
 	}
 
@@ -307,7 +340,7 @@ class AppState {
 			this.activeId = null;
 			this.activeContent = '';
 		}
-		await window.api.permanentDelete(trashId);
+		await platform.permanentDelete(trashId);
 		await this.refresh();
 	}
 
@@ -326,14 +359,19 @@ class AppState {
 		this.view = 'editor';
 		this.trashOpen = false;
 		this.selectedFolder = null;
-		this.selectedTag = this.selectedTag === path ? null : path;
+		// Touch layouts: tapping a tag always drills into it (no toggle-off).
+		this.selectedTag = this.selectedTag === path && !this.touch ? null : path;
+		this.pane = 'list';
+		this.drawerOpen = false;
 	}
 
 	selectFolder(path: string | null): void {
 		this.view = 'editor';
 		this.trashOpen = false;
 		this.selectedTag = null;
-		this.selectedFolder = this.selectedFolder === path ? null : path;
+		this.selectedFolder = this.selectedFolder === path && !this.touch ? null : path;
+		this.pane = 'list';
+		this.drawerOpen = false;
 	}
 
 	/** Open the Trash view (its own note list). */
@@ -342,6 +380,8 @@ class AppState {
 		this.selectedTag = null;
 		this.selectedFolder = null;
 		this.trashOpen = true;
+		this.pane = 'list';
+		this.drawerOpen = false;
 	}
 
 	/** "All Notes": clear every filter and show the whole tree. */
@@ -350,6 +390,54 @@ class AppState {
 		this.selectedTag = null;
 		this.selectedFolder = null;
 		this.trashOpen = false;
+		this.pane = 'list';
+		this.drawerOpen = false;
+	}
+
+	// --- stacked (compact) navigation ---------------------------------------
+
+	setLayout(layout: Layout, touch: boolean): void {
+		this.layout = layout;
+		this.touch = touch;
+		if (layout !== 'tablet') this.drawerOpen = false;
+		if (touch) document.documentElement.setAttribute('data-touch', '');
+		else document.documentElement.removeAttribute('data-touch');
+	}
+
+	toggleDrawer(): void {
+		this.drawerOpen = !this.drawerOpen;
+	}
+
+	/** Does the top bar show a back button (phone layout only)? */
+	get canGoBack(): boolean {
+		return this.layout === 'phone' && (this.view === 'settings' || this.pane !== 'nav');
+	}
+
+	/**
+	 * One step back (top-bar button / Android back): leave settings, close the
+	 * drawer, or on phones editor → list → folders. False when there's nowhere
+	 * to go (the host may then exit).
+	 */
+	back(): boolean {
+		if (this.view === 'settings') {
+			this.view = 'editor';
+			return true;
+		}
+		if (this.drawerOpen) {
+			this.drawerOpen = false;
+			return true;
+		}
+		if (this.layout !== 'phone') return false;
+		if (this.pane === 'editor') {
+			void this.flush();
+			this.pane = 'list';
+			return true;
+		}
+		if (this.pane === 'list') {
+			this.pane = 'nav';
+			return true;
+		}
+		return false;
 	}
 
 	// --- sidebar layout (persisted via electron-store) ----------------------
@@ -387,7 +475,7 @@ class AppState {
 	}
 
 	private persistSidebar(): void {
-		void window.api.setState('sidebar', $state.snapshot(this.sidebar));
+		void platform.setState('sidebar', $state.snapshot(this.sidebar));
 	}
 
 	// --- pinning -----------------------------------------------------------
@@ -395,10 +483,10 @@ class AppState {
 	async setPinned(id: string, pinned: boolean): Promise<void> {
 		// Persist any live edits first so we toggle against current content.
 		if (id === this.activeId) await this.flush();
-		const content = await window.api.readNote(id);
+		const content = await platform.readNote(id);
 		const next = setPinned(content, pinned);
 		if (next === content) return;
-		await window.api.writeNote(id, next);
+		await platform.writeNote(id, next);
 		if (id === this.activeId) {
 			this.activeContent = next;
 			// Recreate the editor so the (hidden) metadata line is part of its doc
@@ -422,10 +510,10 @@ class AppState {
 	 */
 	async setLocked(id: string, locked: boolean): Promise<void> {
 		if (id === this.activeId) await this.flush();
-		const content = await window.api.readNote(id);
+		const content = await platform.readNote(id);
 		const next = setLocked(content, locked);
 		if (next === content) return;
-		await window.api.writeNote(id, next);
+		await platform.writeNote(id, next);
 		if (id === this.activeId) {
 			this.activeContent = next;
 			// Recreate the editor so its editable state (and the hidden metadata
@@ -469,7 +557,7 @@ class AppState {
 	updateSettings(patch: Partial<Settings>): void {
 		this.settings = { ...this.settings, ...patch };
 		localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
-		void window.api.setState('settings', $state.snapshot(this.settings));
+		void platform.setState('settings', $state.snapshot(this.settings));
 		this.applyFonts();
 		this.applyGhost();
 		this.applyAccent();
@@ -522,7 +610,7 @@ class AppState {
 		// Keep the in-memory copy in sync so re-derived UI (and a later reopen)
 		// reflect what we just wrote without a round-trip.
 		if (id === this.activeId) this.activeContent = content;
-		await window.api.writeNote(id, content);
+		await platform.writeNote(id, content);
 		this.saving = false;
 	}
 
@@ -534,7 +622,7 @@ class AppState {
 	private async materializeDraft(content: string): Promise<void> {
 		if (!this.draft) {
 			// The draft became a file while this save sat in the queue — write there.
-			if (this.activeId) await window.api.writeNote(this.activeId, content);
+			if (this.activeId) await platform.writeNote(this.activeId, content);
 			this.saving = false;
 			return;
 		}
@@ -544,12 +632,12 @@ class AppState {
 			this.saving = false;
 			return;
 		}
-		const meta = await window.api.createNote(title, this.draftFolder, content);
+		const meta = await platform.createNote(title, this.draftFolder, content);
 		this.draft = false;
 		this.activeId = meta.id;
 		this.activeContent = content;
 		this.saving = false;
-		void window.api.setState('lastOpenFile', meta.id);
+		void platform.setState('lastOpenFile', meta.id);
 		await this.refresh();
 	}
 
@@ -569,7 +657,7 @@ class AppState {
 		this.showSyncMessage(null);
 		try {
 			await this.flush();
-			const res = await (op === 'pull' ? window.api.syncPull() : window.api.syncPush());
+			const res = await (op === 'pull' ? platform.syncPull() : platform.syncPush());
 			if (!res.ok) {
 				this.showSyncMessage('error', syncErrorMessage(res.error));
 			} else if (res.result.status === 'ok') {
@@ -598,7 +686,7 @@ class AppState {
 		if (!id || this.draft || !this.notes.some((n) => n.id === id)) return;
 		// Keystrokes typed while the sync ran are newer than disk — keep them.
 		if (this.pending) return;
-		const content = await window.api.readNote(id);
+		const content = await platform.readNote(id);
 		if (id !== this.activeId || content === this.activeContent) return;
 		this.activeContent = content;
 		this.editorReloadToken++;
@@ -613,7 +701,7 @@ class AppState {
 	setTheme(theme: 'light' | 'dark'): void {
 		this.theme = theme;
 		localStorage.setItem(THEME_KEY, this.theme);
-		void window.api.setState('theme', this.theme);
+		void platform.setState('theme', this.theme);
 		this.applyTheme();
 	}
 

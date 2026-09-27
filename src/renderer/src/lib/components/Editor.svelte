@@ -21,6 +21,8 @@
 		type Direction
 	} from '../editor/markdown';
 	import EmptyState from './EmptyState.svelte';
+	import FormatToolbar from './FormatToolbar.svelte';
+	import { platform } from '../platform';
 	import logo from '$lib/assets/logo.png';
 	import mascotNew from '$lib/assets/fr5a-new.png';
 
@@ -32,6 +34,8 @@
 	// Suppress auto-save while we programmatically replace content.
 	let loading = false;
 
+	// No hardware keyboard to drive modal editing on Android: Vim stays off there.
+	const vimOn = $derived(app.settings.vim && platform.platform !== 'android');
 	const activeMeta = $derived(app.notes.find((n) => n.id === app.activeId));
 	// Locked notes are read-only. Fall back to the buffer so the badge is right
 	// even before the index round-trips.
@@ -40,7 +44,7 @@
 	// toggled, or an external rewrite (e.g. pin toggle) bumps the reload token.
 	// Keyed on the session — not the note id — so a draft materialising into a
 	// real file doesn't remount the editor mid-typing.
-	const editorKey = $derived(`${app.editorSession}:${app.settings.vim}:${app.editorReloadToken}`);
+	const editorKey = $derived(`${app.editorSession}:${vimOn}:${app.editorReloadToken}`);
 
 	function buildEditor(node: HTMLElement, content: string): Editor {
 		const extensions = [
@@ -55,7 +59,7 @@
 			// Fed from the store's tag tree (itself the SQLite index over IPC).
 			TagSuggest.configure({ getTags: () => flattenTagTree(app.tags) })
 		];
-		if (app.settings.vim) {
+		if (vimOn) {
 			extensions.push(Vim.configure({ onModeChange: (m) => (vimMode = m) }));
 		}
 		return new Editor({
@@ -102,7 +106,12 @@
 	}
 </script>
 
-<section class="editor-pane" class:is-rtl={dir === 'rtl'}>
+<section
+	class="editor-pane"
+	class:is-rtl={dir === 'rtl'}
+	class:compact={app.layout === 'phone'}
+	class:has-toolbar={app.touch && !!editor && !locked}
+>
 	{#if !app.workspace}
 		<div class="placeholder-screen" in:fade={{ duration: 150 }}>
 			<EmptyState
@@ -227,7 +236,11 @@
 			</div>
 		{/key}
 
-		{#if app.settings.vim}
+		{#if app.touch && editor && !locked}
+			<FormatToolbar {editor} />
+		{/if}
+
+		{#if vimOn}
 			<div
 				class="vim-badge"
 				class:insert={vimMode === 'insert'}
@@ -255,6 +268,22 @@
 		inset: 0;
 		overflow-y: auto;
 		padding: 24px 40px 0;
+	}
+	.editor-pane.compact {
+		border-radius: 0;
+		box-shadow: none;
+	}
+	.editor-pane.compact .scroll {
+		padding: 52px 18px 0;
+	}
+	.editor-pane.has-toolbar .scroll {
+		bottom: calc(52px + env(safe-area-inset-bottom, 0px));
+	}
+	.editor-pane :global(.format-toolbar) {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
 	}
 	.editor-actions {
 		position: absolute;

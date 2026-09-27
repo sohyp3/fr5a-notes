@@ -175,7 +175,7 @@ button {
 	opacity: 0;
 	letter-spacing: -1px;
 }
-:root:not([data-ghost='off']) .ProseMirror p:hover .md-syntax {
+:root:not([data-ghost='off']):not([data-hover='none']) .ProseMirror p:hover .md-syntax {
 	font-size: inherit;
 	opacity: 0.3;
 	letter-spacing: normal;
@@ -397,4 +397,36 @@ button {
 	background: var(--accent);
 	border-radius: 2px;
 	vertical-align: text-bottom;
+}
+
+/* Touch devices (html[data-touch], set from the store's layout): finger-sized
+   targets across the sidebar, note list and editor actions. Desktop mouse
+   windows never get this attribute. */
+:root[data-touch] .sidebar .all-notes,
+:root[data-touch] .sidebar .settings-btn {
+	height: 44px;
+}
+:root[data-touch] .sidebar .folder-row,
+:root[data-touch] .sidebar .tag-row {
+	height: 42px;
+}
+:root[data-touch] .sidebar .twist {
+	width: 28px;
+	height: 36px;
+}
+:root[data-touch] .sidebar .hdr-btn {
+	width: 32px;
+	height: 32px;
+}
+:root[data-touch] .sidebar .label {
+	font-size: 15px;
+}
+:root[data-touch] .notelist .card {
+	padding: 13px 14px;
+	-webkit-touch-callout: none;
+	user-select: none;
+}
+:root[data-touch] .editor-actions .act {
+	height: 40px;
+	min-width: 40px;
 }

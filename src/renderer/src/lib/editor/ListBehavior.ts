@@ -17,7 +17,7 @@ import type { Command } from '@tiptap/pm/state';
  * node-based editor, adapted to our text model.
  */
 
-const LIST_RE = /^(\s*)([-*+]|(\d+)\.)(\s+)/;
+export const LIST_RE = /^(\s*)([-*+]|(\d+)\.)(\s+)/;
 
 interface LineCtx {
 	paraStart: number;
@@ -66,7 +66,7 @@ const enter: Command = (state, dispatch) => {
 	return true;
 };
 
-const sink: Command = (state, dispatch) => {
+export const sink: Command = (state, dispatch) => {
 	const { paraStart, text } = lineCtx(state);
 	if (dispatch) {
 		const tr = state.tr.insertText('  ', paraStart);
@@ -78,7 +78,7 @@ const sink: Command = (state, dispatch) => {
 	return true;
 };
 
-const lift: Command = (state, dispatch) => {
+export const lift: Command = (state, dispatch) => {
 	const { paraStart, text } = lineCtx(state);
 	let remove = 0;
 	if (text.startsWith('\t')) remove = 1;

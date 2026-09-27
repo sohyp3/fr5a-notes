@@ -24,3 +24,7 @@ vite.config.ts.timestamp-*
 .npmrc
 .prettierignore
 .vscode/
+
+# Playwright
+/test-results/
+/playwright-report/
