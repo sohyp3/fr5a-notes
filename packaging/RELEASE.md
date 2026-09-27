@@ -12,9 +12,14 @@ bun run dist:linux
 Produces in `dist/`:
 
 - `fr5a-<version>.AppImage` — portable, runs on any distro
+- `fr5a-notes-<version>.pacman` — native Arch package (`sudo pacman -U dist/*.pacman`)
 - `fr5a-notes_<version>_amd64.deb` — Debian/Ubuntu
 
-> On Arch, the `.deb` step needs `libxcrypt-compat` installed (provides `libcrypt.so.1` for fpm).
+All three are built independently from the same `dist/linux-unpacked/` — none is derived
+from another. (`bun run dist:arch` is a separate flow: it builds a package via the AUR
+PKGBUILD to test exactly what AUR users will get.)
+
+> On Arch, the `.deb`/`.pacman` steps need `libxcrypt-compat` installed (provides `libcrypt.so.1` for fpm).
 
 ## 2. Publish a GitHub Release
 

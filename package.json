@@ -77,16 +77,17 @@
 		"linux": {
 			"target": [
 				"AppImage",
+				"pacman",
 				"deb"
 			],
 			"category": "Office",
-			"icon": "resources/icon.png",
+			"icon": "resources/icons",
 			"synopsis": "Bear-style Markdown editor",
 			"maintainer": "sohyp3 <thetit4nsh3@gmail.com>",
 			"executableName": "fr5a",
 			"desktop": {
 				"entry": {
-					"StartupWMClass": "fr5a"
+					"StartupWMClass": "fr5a-notes"
 				}
 			}
 		},

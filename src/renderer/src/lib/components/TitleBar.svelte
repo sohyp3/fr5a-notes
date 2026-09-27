@@ -2,6 +2,8 @@
 	import { getAppState } from '../stores/app.svelte';
 
 	const app = getAppState();
+	// macOS draws native traffic lights (top-left); don't duplicate them.
+	const isMac = window.api.platform === 'darwin';
 
 	function folderName(path: string | null): string {
 		if (!path) return 'No folder';
@@ -10,7 +12,7 @@
 	}
 </script>
 
-<header class="titlebar">
+<header class="titlebar" class:mac={isMac}>
 	<div class="left no-drag">
 		<button
 			class="icon-btn"
@@ -73,13 +75,15 @@
 			{/if}
 		</button>
 
-		<div class="win-controls">
-			<button class="win-btn min" aria-label="Minimize" onclick={() => window.api.minimize()}>
-			</button>
-			<button class="win-btn max" aria-label="Maximize" onclick={() => window.api.maximize()}>
-			</button>
-			<button class="win-btn close" aria-label="Close" onclick={() => window.api.close()}> </button>
-		</div>
+		{#if !isMac}
+			<div class="win-controls">
+				<button class="win-btn min" aria-label="Minimize" onclick={() => window.api.minimize()}>
+				</button>
+				<button class="win-btn max" aria-label="Maximize" onclick={() => window.api.maximize()}>
+				</button>
+				<button class="win-btn close" aria-label="Close" onclick={() => window.api.close()}> </button>
+			</div>
+		{/if}
 	</div>
 </header>
 
@@ -93,6 +97,10 @@
 		padding: 0 12px;
 		-webkit-app-region: drag;
 		user-select: none;
+	}
+	/* Leave room for the native traffic lights. */
+	.titlebar.mac {
+		padding-left: 84px;
 	}
 	.no-drag {
 		-webkit-app-region: no-drag;

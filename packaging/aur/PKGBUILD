@@ -36,12 +36,13 @@ package() {
 	install -Dm644 "${_desktop}" \
 		"${pkgdir}/usr/share/applications/${_appname}.desktop"
 	# Point Exec at the installed wrapper, and ensure the running window links to
-	# this entry (its WM_CLASS is the Electron productName, "fr5a")
+	# this entry (Electron derives the X11 WM_CLASS / Wayland app_id from the
+	# package.json "name" field: "fr5a-notes", NOT the productName)
 	sed -i \
 		-e "s|^Exec=.*|Exec=${_appname} %U|" \
 		-e "s|^Icon=.*|Icon=${_appname}|" \
 		-e "/^StartupWMClass=/d" \
-		-e "/^\[Desktop Entry\]/a StartupWMClass=fr5a" \
+		-e "/^\[Desktop Entry\]/a StartupWMClass=fr5a-notes" \
 		"${pkgdir}/usr/share/applications/${_appname}.desktop"
 
 	# Icon: the AppImage ships a single large PNG named after the executable

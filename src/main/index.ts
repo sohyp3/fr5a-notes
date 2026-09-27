@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Menu } from 'electron';
+import type { MenuItemConstructorOptions } from 'electron';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import Store from 'electron-store';
@@ -76,6 +77,9 @@ function createWindow(): void {
 		show: false,
 		frame: false,
 		titleBarStyle: 'hidden',
+		// macOS keeps its native traffic lights with `hidden`; centre them in the
+		// 46px titlebar. The renderer hides its custom controls on darwin.
+		trafficLightPosition: { x: 16, y: 17 },
 		backgroundColor: '#faf9f7',
 		webPreferences: {
 			preload: path.join(__dirname, '../preload/index.js'),
@@ -86,6 +90,44 @@ function createWindow(): void {
 	});
 
 	mainWindow.on('ready-to-show', () => mainWindow?.show());
+
+	// Native right-click menu (Electron shows none by default): spelling
+	// suggestions + clipboard actions. Renderer menus that preventDefault
+	// (e.g. the note-card menu) suppress this event.
+	mainWindow.webContents.on('context-menu', (_e, params) => {
+		const wc = mainWindow?.webContents;
+		if (!wc) return;
+		const items: MenuItemConstructorOptions[] = [];
+		if (params.misspelledWord) {
+			for (const word of params.dictionarySuggestions) {
+				items.push({ label: word, click: () => wc.replaceMisspelling(word) });
+			}
+			if (!params.dictionarySuggestions.length) {
+				items.push({ label: 'No suggestions', enabled: false });
+			}
+			items.push(
+				{
+					label: 'Add to Dictionary',
+					click: () =>
+						wc.session.addWordToSpellCheckerDictionary(params.misspelledWord)
+				},
+				{ type: 'separator' }
+			);
+		}
+		const f = params.editFlags;
+		if (params.isEditable) {
+			items.push(
+				{ role: 'cut', enabled: f.canCut },
+				{ role: 'copy', enabled: f.canCopy },
+				{ role: 'paste', enabled: f.canPaste },
+				{ type: 'separator' },
+				{ role: 'selectAll', enabled: f.canSelectAll }
+			);
+		} else if (params.selectionText.trim()) {
+			items.push({ role: 'copy', enabled: f.canCopy });
+		}
+		if (items.length) Menu.buildFromTemplate(items).popup({ window: mainWindow! });
+	});
 
 	// Open external links in the OS browser, never in-app.
 	mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -173,8 +215,9 @@ function registerIpc(): void {
 // --- bootstrap -------------------------------------------------------------
 
 app.whenReady().then(async () => {
-	// Ties the window to its taskbar/dock entry (and, with the .desktop file's
-	// StartupWMClass, prevents the duplicate-icon issue on Linux docks).
+	// Ties the window to its taskbar entry on Windows. On Linux the equivalent
+	// is the .desktop file's StartupWMClass, which must equal the package.json
+	// "name" ("fr5a-notes") — that's what Electron reports as WM_CLASS/app_id.
 	app.setAppUserModelId('com.fr5a.app');
 
 	registerIpc();

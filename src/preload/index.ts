@@ -8,6 +8,8 @@ import type { NoteMeta, TagNode, StateKey } from '../shared/types';
  * `ipcRenderer` in the window.
  */
 const api = {
+	platform: process.platform,
+
 	getWorkspace: (): Promise<string | null> => ipcRenderer.invoke(Channels.workspaceGet),
 	pickWorkspace: (): Promise<string | null> => ipcRenderer.invoke(Channels.workspacePick),
 
