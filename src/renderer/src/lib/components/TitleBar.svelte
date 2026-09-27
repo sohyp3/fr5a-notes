@@ -40,9 +40,69 @@
 		{#if app.saving}
 			<span class="saving">saving…</span>
 		{/if}
+		{#if app.syncing}
+			<span class="sync-msg" role="status">{app.syncing === 'pull' ? 'pulling…' : 'pushing…'}</span>
+		{:else if app.syncMessage}
+			<span
+				class="sync-msg no-drag"
+				class:error={app.syncMessage.kind === 'error'}
+				class:conflict={app.syncMessage.kind === 'conflict'}
+				role={app.syncMessage.kind === 'ok' ? 'status' : 'alert'}
+				title={app.syncMessage.text}
+			>
+				{app.syncMessage.text}
+				{#if app.syncMessage.kind !== 'ok'}
+					<button
+						class="dismiss"
+						aria-label="Dismiss sync message"
+						onclick={() => app.showSyncMessage(null)}>×</button
+					>
+				{/if}
+			</span>
+		{/if}
 	</div>
 
 	<div class="right no-drag">
+		{#if app.workspace}
+			<button
+				class="icon-btn"
+				class:busy={app.syncing === 'pull'}
+				title="Pull (git)"
+				aria-label="Pull"
+				aria-busy={app.syncing === 'pull'}
+				disabled={app.syncing !== null}
+				onclick={() => app.sync('pull')}
+			>
+				<svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+					<path
+						d="M12 4v12m0 0-5-5m5 5 5-5M5 20h14"
+						stroke="currentColor"
+						stroke-width="1.8"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					/>
+				</svg>
+			</button>
+			<button
+				class="icon-btn"
+				class:busy={app.syncing === 'push'}
+				title="Push (git)"
+				aria-label="Push"
+				aria-busy={app.syncing === 'push'}
+				disabled={app.syncing !== null}
+				onclick={() => app.sync('push')}
+			>
+				<svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+					<path
+						d="M12 16V4m0 0L7 9m5-5 5 5M5 20h14"
+						stroke="currentColor"
+						stroke-width="1.8"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					/>
+				</svg>
+			</button>
+		{/if}
 		<button
 			class="icon-btn"
 			title="Toggle theme"
@@ -81,7 +141,8 @@
 				</button>
 				<button class="win-btn max" aria-label="Maximize" onclick={() => window.api.maximize()}>
 				</button>
-				<button class="win-btn close" aria-label="Close" onclick={() => window.api.close()}> </button>
+				<button class="win-btn close" aria-label="Close" onclick={() => window.api.close()}>
+				</button>
 			</div>
 		{/if}
 	</div>
@@ -140,9 +201,52 @@
 			background 120ms ease,
 			color 120ms ease;
 	}
-	.icon-btn:hover {
+	.icon-btn:hover:not(:disabled) {
 		background: var(--bg-hover);
 		color: var(--text);
+	}
+	.icon-btn:disabled {
+		opacity: 0.45;
+		cursor: default;
+	}
+	.icon-btn.busy {
+		opacity: 1;
+		color: var(--accent);
+		animation: sync-pulse 900ms ease-in-out infinite alternate;
+	}
+	@keyframes sync-pulse {
+		from {
+			opacity: 1;
+		}
+		to {
+			opacity: 0.35;
+		}
+	}
+	.sync-msg {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		max-width: 38vw;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-size: 11px;
+		color: var(--text-faint);
+	}
+	.sync-msg.error {
+		color: #d4513f;
+	}
+	.sync-msg.conflict {
+		color: var(--accent);
+	}
+	.dismiss {
+		font-size: 13px;
+		line-height: 1;
+		color: inherit;
+		opacity: 0.7;
+	}
+	.dismiss:hover {
+		opacity: 1;
 	}
 	.win-controls {
 		display: flex;

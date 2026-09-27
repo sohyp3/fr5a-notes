@@ -6,6 +6,7 @@ import Store from 'electron-store';
 import { NoteIndex } from './db';
 import { FileService } from './fileService';
 import { buildTagTree } from './tags';
+import { registerSyncHandlers } from './syncIpc';
 import { Channels } from '../shared/types';
 import type { NoteMeta, StateKey } from '../shared/types';
 // electron-vite copies the file into the build output and rewrites this to the
@@ -15,6 +16,7 @@ import icon from '../../resources/icon.png?asset';
 // `__dirname` is provided by electron-vite's ESM shim at runtime.
 
 let mainWindow: BrowserWindow | null = null;
+let conflictWindow: BrowserWindow | null = null;
 let fileService: FileService | null = null;
 let index: NoteIndex | null = null;
 
@@ -108,8 +110,7 @@ function createWindow(): void {
 			items.push(
 				{
 					label: 'Add to Dictionary',
-					click: () =>
-						wc.session.addWordToSpellCheckerDictionary(params.misspelledWord)
+					click: () => wc.session.addWordToSpellCheckerDictionary(params.misspelledWord)
 				},
 				{ type: 'separator' }
 			);
@@ -135,14 +136,69 @@ function createWindow(): void {
 		return { action: 'deny' };
 	});
 
+	loadPage(mainWindow, 'index.html');
+}
+
+/** Load a renderer page: the dev server in development, the built file otherwise. */
+function loadPage(win: BrowserWindow, page: string): void {
 	// electron-vite injects the dev server URL in development.
 	const devUrl = process.env['ELECTRON_RENDERER_URL'];
 	if (devUrl) {
-		mainWindow.loadURL(devUrl);
+		win.loadURL(page === 'index.html' ? devUrl : `${devUrl}/${page}`);
 	} else {
-		mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+		win.loadFile(path.join(__dirname, '../renderer', page));
 	}
 }
+
+// --- conflict window -------------------------------------------------------
+
+/**
+ * Modal child window listing the files a pull left conflicted. It pulls the
+ * list itself over `sync:conflicts`; closing it without applying aborts the
+ * merge (see `closed`).
+ */
+function openConflictWindow(): void {
+	if (conflictWindow) {
+		conflictWindow.webContents.reload();
+		conflictWindow.focus();
+		return;
+	}
+	conflictWindow = new BrowserWindow({
+		parent: mainWindow ?? undefined,
+		modal: true,
+		width: 960,
+		height: 640,
+		minWidth: 600,
+		minHeight: 400,
+		icon,
+		title: 'Resolve sync conflicts',
+		show: false,
+		autoHideMenuBar: true,
+		backgroundColor: '#faf9f7',
+		webPreferences: {
+			preload: path.join(__dirname, '../preload/index.js'),
+			sandbox: false,
+			contextIsolation: true,
+			nodeIntegration: false
+		}
+	});
+	conflictWindow.on('ready-to-show', () => conflictWindow?.show());
+	conflictWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+	conflictWindow.on('closed', () => {
+		conflictWindow = null;
+		// Closed via the window frame: treat as Cancel so the repo isn't left mid-merge.
+		void syncHandlers?.abortPending();
+	});
+	loadPage(conflictWindow, 'conflict.html');
+}
+
+function closeConflictWindow(): void {
+	const win = conflictWindow;
+	conflictWindow = null;
+	win?.close();
+}
+
+let syncHandlers: ReturnType<typeof registerSyncHandlers> | null = null;
 
 // --- IPC -------------------------------------------------------------------
 
@@ -200,6 +256,14 @@ function registerIpc(): void {
 		if (!RENDERER_KEYS.has(key)) return;
 		if (value === null || value === undefined) store.delete(key);
 		else store.set(key, value);
+	});
+
+	// Git sync. The renderer never runs git itself; results/errors come back as data.
+	syncHandlers = registerSyncHandlers(ipcMain, {
+		getRoot: () => fileService?.root ?? null,
+		emit: (channel, ...args) => mainWindow?.webContents.send(channel, ...args),
+		openConflicts: () => openConflictWindow(),
+		closeConflicts: closeConflictWindow
 	});
 
 	// Frameless window controls.

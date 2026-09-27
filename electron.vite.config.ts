@@ -44,7 +44,11 @@ export default defineConfig({
 		},
 		build: {
 			rollupOptions: {
-				input: { index: resolve('src/renderer/index.html') }
+				input: {
+					index: resolve('src/renderer/index.html'),
+					// Git-sync conflict resolution window (second BrowserWindow).
+					conflict: resolve('src/renderer/conflict.html')
+				}
 			}
 		},
 		plugins: [

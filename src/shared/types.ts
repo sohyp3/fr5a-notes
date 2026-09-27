@@ -47,6 +47,27 @@ export interface SidebarState {
 /** Keys the renderer may read/write in the persistent store. */
 export type StateKey = 'lastOpenFile' | 'sidebar' | 'settings' | 'theme';
 
+/** One file left conflicted by a pull; `null` means that side deleted the file. */
+export interface ConflictFile {
+	path: string;
+	mine: string | null;
+	theirs: string | null;
+}
+
+export type SyncResult = { status: 'ok' } | { status: 'conflict'; files: ConflictFile[] };
+
+/** How to settle one conflicted file: take a side, or write explicit content. */
+export type ResolveChoice =
+	{ path: string; pick: 'mine' | 'theirs' } | { path: string; content: string };
+
+export type SyncErrorCode =
+	'no-git' | 'not-a-repo' | 'no-remote' | 'auth' | 'network' | 'nothing-to-push' | 'git';
+
+/** What a sync IPC call returns; errors travel as data since IPC drops custom error fields. */
+export type SyncResponse =
+	| { ok: true; result: SyncResult }
+	| { ok: false; error: { code: SyncErrorCode | 'busy' | 'no-workspace'; message: string } };
+
 /** Channel names, kept in one place so main + preload can't drift. */
 export const Channels = {
 	workspacePick: 'workspace:pick',
@@ -70,6 +91,16 @@ export const Channels = {
 	windowMinimize: 'window:minimize',
 	windowMaximize: 'window:maximize',
 	windowClose: 'window:close',
+	// Git sync (system git CLI). Resolve/abort/conflicts are used by the conflict window.
+	syncPull: 'sync:pull',
+	syncPush: 'sync:push',
+	syncResolve: 'sync:resolve',
+	syncAbort: 'sync:abort',
+	syncConflicts: 'sync:conflicts',
 	// main -> renderer push
-	notesChanged: 'notes:changed'
+	notesChanged: 'notes:changed',
+	/** A pull stopped on conflicts; payload is ConflictFile[]. */
+	syncConflict: 'sync:conflict',
+	/** A sync finished cleanly (pull/push/resolve/abort); reload open notes. */
+	syncDone: 'sync:done'
 } as const;

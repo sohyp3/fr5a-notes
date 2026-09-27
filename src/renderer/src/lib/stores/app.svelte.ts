@@ -2,6 +2,7 @@ import type { NoteMeta, TagNode, SidebarState } from '../../../../shared/types';
 import { uiStack, editorStack } from '../fonts';
 import { accentById, applyPalette, DEFAULT_ACCENT } from '../accents';
 import { setPinned, setLocked, titleFromContent } from '../editor/markdown';
+import { syncErrorMessage } from '../sync';
 
 const SAVE_DEBOUNCE = 500;
 const THEME_KEY = 'fr5a-theme';
@@ -102,6 +103,12 @@ class AppState {
 
 	settings = $state<Settings>({ ...DEFAULT_SETTINGS });
 
+	/** Git sync in flight ('pull' | 'push'), or null when idle. */
+	syncing = $state<'pull' | 'push' | null>(null);
+	/** Last sync outcome shown in the titlebar; errors stay until dismissed. */
+	syncMessage = $state<{ kind: 'ok' | 'error' | 'conflict'; text: string } | null>(null);
+	private syncMessageTimer: ReturnType<typeof setTimeout> | null = null;
+
 	/** Reflects a pending debounced write, for a subtle "saving…" hint. */
 	saving = $state(false);
 
@@ -173,6 +180,14 @@ class AppState {
 
 		// Live updates from the filesystem watcher.
 		window.api.onNotesChanged(() => this.refresh());
+		// Git sync: reload from disk after a clean sync; surface conflicts.
+		window.api.onSyncDone(() => void this.reloadFromDisk());
+		window.api.onSyncConflict((files) =>
+			this.showSyncMessage(
+				'conflict',
+				`Conflicts in ${files.length} ${files.length === 1 ? 'file' : 'files'}. Resolve them in the conflict window.`
+			)
+		);
 		this.booted = true;
 	}
 
@@ -543,6 +558,50 @@ class AppState {
 		this.saveTimer = null;
 		this.pending = null;
 		this.saving = false;
+	}
+
+	// --- git sync ---------------------------------------------------------
+
+	/** Run a pull/push in main. Pending edits are flushed first so git sees them. */
+	async sync(op: 'pull' | 'push'): Promise<void> {
+		if (this.syncing) return;
+		this.syncing = op;
+		this.showSyncMessage(null);
+		try {
+			await this.flush();
+			const res = await (op === 'pull' ? window.api.syncPull() : window.api.syncPush());
+			if (!res.ok) {
+				this.showSyncMessage('error', syncErrorMessage(res.error));
+			} else if (res.result.status === 'ok') {
+				this.showSyncMessage('ok', op === 'pull' ? 'Pulled' : 'Pushed');
+			}
+			// 'conflict' is reported through the onSyncConflict event.
+		} catch (err) {
+			this.showSyncMessage('error', err instanceof Error ? err.message : String(err));
+		} finally {
+			this.syncing = null;
+		}
+	}
+
+	showSyncMessage(kind: 'ok' | 'error' | 'conflict' | null, text = ''): void {
+		if (this.syncMessageTimer) clearTimeout(this.syncMessageTimer);
+		this.syncMessageTimer = null;
+		this.syncMessage = kind ? { kind, text } : null;
+		if (kind === 'ok') this.syncMessageTimer = setTimeout(() => (this.syncMessage = null), 2500);
+	}
+
+	/** Files may have changed under us (pull / conflict resolution): re-read the open note. */
+	async reloadFromDisk(): Promise<void> {
+		if (this.syncMessage?.kind === 'conflict') this.showSyncMessage(null);
+		await this.refresh();
+		const id = this.activeId;
+		if (!id || this.draft || !this.notes.some((n) => n.id === id)) return;
+		// Keystrokes typed while the sync ran are newer than disk — keep them.
+		if (this.pending) return;
+		const content = await window.api.readNote(id);
+		if (id !== this.activeId || content === this.activeContent) return;
+		this.activeContent = content;
+		this.editorReloadToken++;
 	}
 
 	// --- theme ------------------------------------------------------------
