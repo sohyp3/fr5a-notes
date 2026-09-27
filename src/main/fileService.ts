@@ -164,6 +164,8 @@ export class FileService {
 	/** Write body to disk and re-index synchronously so the UI stays coherent. */
 	async write(id: string, content: string): Promise<void> {
 		const absPath = path.join(this.root, id);
+		// Unchanged content: skip the write so the mtime (list order) stays put.
+		if ((await fs.readFile(absPath, 'utf8').catch(() => null)) === content) return;
 		await fs.mkdir(path.dirname(absPath), { recursive: true });
 		await fs.writeFile(absPath, content, 'utf8');
 		await this.indexFile(absPath);

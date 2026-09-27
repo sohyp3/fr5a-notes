@@ -1,3 +1,4 @@
+import './bufferShim';
 import git, { Errors, type HttpClient, type PromiseFsClient } from 'isomorphic-git';
 import type {
 	ConflictFile,

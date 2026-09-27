@@ -130,7 +130,7 @@
 		{/if}
 
 		{#if folders.length > 0 && app.sidebar.foldersOpen}
-			<div class="tree" transition:slide={{ duration: 160 }}>
+			<div class="tree" transition:slide={{ duration: app.touch ? 0 : 160 }}>
 				{#each folders as node (node.path)}
 					<FolderTree {node} />
 				{/each}
@@ -156,7 +156,7 @@
 			</button>
 		</div>
 		{#if app.sidebar.tagsOpen}
-			<div class="tree" transition:slide={{ duration: 160 }}>
+			<div class="tree" transition:slide={{ duration: app.touch ? 0 : 160 }}>
 				{#if app.tags.length === 0}
 					<p class="empty">No tags yet. Add <code>#tags</code> to your notes.</p>
 				{:else}

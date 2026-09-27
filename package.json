@@ -27,7 +27,8 @@
 		"dist:win": "electron-vite build && electron-builder --win",
 		"dist:mac": "electron-vite build && electron-builder --mac",
 		"build:android": "vite build -c vite.android.config.ts && cap sync android",
-		"apk": "bun run build:android && cd android && ./gradlew assembleDebug"
+		"apk": "bun run build:android && cd android && ./gradlew assembleDebug",
+		"apk:release": "bun run build:android && cd android && ./gradlew assembleRelease"
 	},
 	"dependencies": {
 		"@aparajita/capacitor-secure-storage": "^8.0.1",
@@ -50,6 +51,7 @@
 		"@tiptap/pm": "^3.28.0",
 		"@tiptap/suggestion": "^3.28.0",
 		"better-sqlite3": "^12.11.1",
+		"buffer": "^6.0.3",
 		"chokidar": "^5.0.0",
 		"electron-store": "^11.0.2",
 		"isomorphic-git": "^1.42.3"
@@ -62,6 +64,8 @@
 		"@sveltejs/vite-plugin-svelte": "^7.1.2",
 		"@types/better-sqlite3": "^7.6.13",
 		"@types/node": "^22",
+		"@vitejs/plugin-legacy": "^8.2.3",
+		"core-js": "^3.50.0",
 		"electron": "^43.1.1",
 		"electron-builder": "^26.15.3",
 		"electron-vite": "^5.0.0",

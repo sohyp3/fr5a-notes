@@ -143,6 +143,29 @@
 				</svg>
 			</button>
 		{/if}
+		{#if app.layout === 'tablet' && (app.activeId || app.draft)}
+			<!-- Desktop uses Mod+\; touch has no shortcut, so offer a button. -->
+			<button
+				class="icon-btn"
+				class:on={app.zen}
+				title="Zen mode"
+				aria-label="Toggle zen mode"
+				aria-pressed={app.zen}
+				onclick={() => app.toggleZen()}
+			>
+				<svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+					<path
+						d={app.zen
+							? 'M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5'
+							: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5'}
+						stroke="currentColor"
+						stroke-width="1.8"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					/>
+				</svg>
+			</button>
+		{/if}
 		<button
 			class="icon-btn"
 			title="Toggle theme"

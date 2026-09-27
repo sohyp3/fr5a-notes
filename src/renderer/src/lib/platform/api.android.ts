@@ -309,6 +309,8 @@ export function createAndroidPlatform(): PlatformApi {
 		},
 		async writeNote(id, content) {
 			await ready;
+			// Unchanged content: skip the write so the mtime (list order) stays put.
+			if ((await readRaw(id).catch(() => null)) === content) return;
 			await write(id, content);
 		},
 		async createNote(title = 'Untitled', folder = '', content) {

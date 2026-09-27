@@ -36,7 +36,7 @@
 </div>
 
 {#if hasChildren && expanded}
-	<div transition:slide={{ duration: 160 }}>
+	<div transition:slide={{ duration: app.touch ? 0 : 160 }}>
 		{#each node.children as child (child.path)}
 			<Self node={child} depth={depth + 1} />
 		{/each}

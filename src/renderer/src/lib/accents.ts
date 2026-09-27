@@ -1,8 +1,7 @@
 /**
  * Accent color palette. Each accent carries a light- and dark-mode hex so the
  * color stays legible on the warm off-white and deep charcoal backgrounds.
- * `--accent-soft` is derived from `--accent` at paint time (see app.css), so
- * only `--accent` is set at runtime — the store picks light/dark by theme.
+ * The store picks light/dark by theme; applyPalette derives the rest.
  */
 export interface Accent {
 	id: string;
@@ -46,7 +45,31 @@ export function applyPalette(accent: Accent, theme: 'light' | 'dark'): void {
 	const base = SURFACES[theme];
 	const root = document.documentElement.style;
 	root.setProperty('--accent', hex);
-	root.setProperty('--bg-primary', `color-mix(in srgb, ${hex} 6%, ${base.primary})`);
-	root.setProperty('--bg-secondary', `color-mix(in srgb, ${hex} 3%, ${base.secondary})`);
-	root.setProperty('--text-main', `color-mix(in srgb, ${hex} 8%, ${base.text})`);
+	const primary = mix(hex, base.primary, 0.06);
+	const secondary = mix(hex, base.secondary, 0.03);
+	root.setProperty('--bg-primary', primary);
+	root.setProperty('--bg-secondary', secondary);
+	root.setProperty('--bg-list', mix(primary, secondary, 0.4));
+	root.setProperty('--text-main', mix(hex, base.text, 0.08));
+	root.setProperty('--accent-soft', rgba(hex, theme === 'dark' ? 0.17 : 0.13));
+}
+
+const channel = (hex: string, i: number): number => parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16);
+
+function rgba(hex: string, alpha: number): string {
+	return `rgba(${channel(hex, 0)}, ${channel(hex, 1)}, ${channel(hex, 2)}, ${alpha})`;
+}
+
+/**
+ * `color-mix(in srgb, a p, b)` computed in JS. Older Android WebViews (Chrome
+ * < 111) don't support color-mix(), which left the vars invalid and every
+ * surface using them transparent (e.g. the tablet folder drawer).
+ */
+function mix(a: string, b: string, p: number): string {
+	let out = '#';
+	for (let i = 0; i < 3; i++) {
+		const v = Math.round(channel(a, i) * p + channel(b, i) * (1 - p));
+		out += v.toString(16).padStart(2, '0');
+	}
+	return out;
 }

@@ -28,7 +28,7 @@
 
 	--bg-app: var(--bg-primary);
 	--bg-sidebar: transparent;
-	--bg-list: color-mix(in srgb, var(--bg-primary) 40%, var(--bg-secondary));
+	--bg-list: #f7f7f5; /* primary 40% over secondary; re-mixed in applyPalette */
 	--bg-editor: var(--bg-secondary);
 	--bg-hover: rgba(0, 0, 0, 0.045);
 	--bg-active: rgba(0, 0, 0, 0.07);
@@ -41,7 +41,7 @@
 	/* Accent is set at runtime from Settings (see accents.ts); the value here is
 	   the default (yellow) used before the store applies the stored choice. */
 	--accent: #c99700;
-	--accent-soft: color-mix(in srgb, var(--accent) 13%, transparent);
+	--accent-soft: rgba(201, 151, 0, 0.13); /* re-derived from --accent in applyPalette */
 
 	--md-syntax: #c26b62;
 	--shadow-pane: 0 1px 3px rgba(0, 0, 0, 0.04), 0 6px 20px rgba(0, 0, 0, 0.05);
@@ -56,7 +56,7 @@
 
 	--bg-app: var(--bg-primary);
 	--bg-sidebar: transparent;
-	--bg-list: color-mix(in srgb, var(--bg-primary) 40%, var(--bg-secondary));
+	--bg-list: #1f1f21;
 	--bg-editor: var(--bg-secondary);
 	--bg-hover: rgba(255, 255, 255, 0.05);
 	--bg-active: rgba(255, 255, 255, 0.08);
@@ -67,7 +67,7 @@
 	--text-faint: #605d57;
 
 	--accent: #f0b429;
-	--accent-soft: color-mix(in srgb, var(--accent) 17%, transparent);
+	--accent-soft: rgba(240, 180, 41, 0.17);
 
 	--md-syntax: #e08a80;
 	--shadow-pane: 0 1px 3px rgba(0, 0, 0, 0.25), 0 8px 26px rgba(0, 0, 0, 0.35);

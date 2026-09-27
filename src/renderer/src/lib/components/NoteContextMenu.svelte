@@ -186,7 +186,7 @@
 		background: var(--bg-hover);
 	}
 	.item.danger:hover:not(:disabled) {
-		background: color-mix(in srgb, #e5484d 14%, transparent);
+		background: rgba(229, 72, 77, 0.14);
 		color: #e5484d;
 	}
 	.item.danger:hover:not(:disabled) svg {

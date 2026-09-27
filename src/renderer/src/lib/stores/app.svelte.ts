@@ -198,6 +198,10 @@ class AppState {
 
 		// Live updates from the filesystem watcher.
 		platform.onNotesChanged(() => this.refresh());
+		// Android can kill a backgrounded app before the save debounce fires.
+		document.addEventListener('visibilitychange', () => {
+			if (document.hidden) void this.flush();
+		});
 		// Git sync: reload from disk after a clean sync; surface conflicts.
 		platform.onSyncDone(() => {
 			this.conflictOpen = false;
@@ -588,6 +592,14 @@ class AppState {
 
 	queueSave(content: string): void {
 		if (!this.activeId && !this.draft) return;
+		// Only write real edits. Opening a note can emit editor updates without
+		// changing the text; writing then would bump the file's mtime and float
+		// the note to the top of the list. (activeContent mirrors the disk; the
+		// editor normalises CRLF, so compare against the normalised form.)
+		if (this.activeId && content === this.activeContent.replace(/\r\n?/g, '\n')) {
+			this.cancelPending();
+			return;
+		}
 		this.pending = { id: this.activeId ?? DRAFT_ID, content };
 		this.saving = true;
 		if (this.saveTimer) clearTimeout(this.saveTimer);
