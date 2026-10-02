@@ -16,10 +16,19 @@
 	const app = getAppState();
 	const SIDEBAR_W = 250;
 	const LIST_W = 300;
+	const HARNESS_W = 400;
+
+	// The harness pane's code is loaded on first open, then stays mounted.
+	const harnessModule = $derived(
+		app.harnessLoaded && app.settings.ai
+			? import('./lib/components/harness/HarnessPane.svelte')
+			: null
+	);
 
 	// Spring-driven widths so toggling/Zen feels physical, not linear.
 	const sidebarWidth = new Spring(SIDEBAR_W, { stiffness: 0.16, damping: 0.72 });
 	const listWidth = new Spring(LIST_W, { stiffness: 0.16, damping: 0.74 });
+	const harnessWidth = new Spring(0, { stiffness: 0.16, damping: 0.74 });
 
 	// In Zen mode the sidebar and note list animate away, centring the editor.
 	const showSidebar = $derived(app.sidebarOpen && !app.zen);
@@ -45,6 +54,10 @@
 	$effect(() => {
 		listWidth.target = showList ? LIST_W : 0;
 	});
+	$effect(() => {
+		harnessWidth.target = app.harnessOpen ? HARNESS_W : 0;
+	});
+	const harnessShown = $derived(app.layout === 'phone' ? phonePane === 'harness' : app.harnessOpen);
 
 	function onKeydown(e: KeyboardEvent): void {
 		const mod = e.metaKey || e.ctrlKey;
@@ -65,6 +78,12 @@
 			if (!app.activeId) return;
 			e.preventDefault();
 			app.togglePin(app.activeId);
+			return;
+		}
+		// Mod+J toggles the AI harness pane.
+		if (mod && !e.shiftKey && (e.key === 'j' || e.key === 'J') && app.settings.ai) {
+			e.preventDefault();
+			app.toggleHarness();
 			return;
 		}
 		// Mod+\ toggles Zen mode.
@@ -117,6 +136,7 @@
 		<div
 			class="body layout-{app.layout}"
 			class:drawer-open={app.drawerOpen}
+			class:harness-open={app.harnessOpen}
 			data-layout={app.layout}
 			data-pane={app.layout === 'phone' ? phonePane : undefined}
 			in:fade={{ duration: 220 }}
@@ -152,6 +172,18 @@
 					<Editor />
 				{/if}
 			</main>
+			<div
+				class="harness-wrap"
+				style:width={app.layout === 'desktop' ? `${harnessWidth.current}px` : null}
+				aria-hidden={!harnessShown}
+				inert={!harnessShown}
+			>
+				{#if harnessModule}
+					{#await harnessModule then m}
+						<m.default />
+					{/await}
+				{/if}
+			</div>
 		</div>
 	{:else}
 		<div class="body"></div>
@@ -221,6 +253,52 @@
 		inset: 0;
 		z-index: 15;
 		background: rgba(0, 0, 0, 0.22);
+	}
+
+	/* --- AI harness: side split / bottom sheet / own pane ----------------- */
+	.harness-wrap {
+		flex: 0 0 auto;
+		min-width: 0;
+		overflow: hidden;
+	}
+	.layout-desktop .harness-wrap {
+		padding: 0 10px 10px 0;
+	}
+	.layout-desktop .harness-wrap > :global(.harness) {
+		width: calc(400px - 10px);
+	}
+	.layout-tablet .harness-wrap {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		z-index: 18;
+		height: 58%;
+		padding: 0 8px;
+		transform: translateY(105%);
+		transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+	}
+	.layout-tablet.harness-open .harness-wrap {
+		transform: none;
+	}
+	.layout-tablet .harness-wrap > :global(.harness) {
+		border-radius: 14px 14px 0 0;
+		box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.16);
+	}
+	.layout-phone .harness-wrap {
+		display: none;
+	}
+	.layout-phone[data-pane='harness'] .harness-wrap {
+		display: block;
+		flex: 1;
+	}
+	.layout-phone[data-pane='harness'] .sidebar-wrap,
+	.layout-phone[data-pane='harness'] .content {
+		display: none;
+	}
+	.layout-phone .harness-wrap > :global(.harness) {
+		border-radius: 0;
+		box-shadow: none;
 	}
 
 	/* --- phone: one pane at a time (data-pane), the rest hidden but mounted - */

@@ -83,6 +83,7 @@
 		vimMode = 'normal';
 		const ed = buildEditor(node, content);
 		editor = ed;
+		app.editor = ed;
 		return {
 			destroy() {
 				app.flush();
@@ -90,6 +91,7 @@
 				// Only clear the shared ref if it still points at *this* instance —
 				// during a keyed swap the next editor may already have claimed it.
 				if (editor === ed) editor = undefined;
+				if (app.editor === ed) app.editor = null;
 			}
 		};
 	}
@@ -139,6 +141,17 @@
 		</div>
 	{:else}
 		<div class="editor-actions">
+			{#if app.settings.ai}
+				<button
+					class="act ai"
+					class:on={app.harnessOpen}
+					title="AI harness (Mod+J)"
+					aria-label="Toggle AI harness"
+					onclick={() => app.toggleHarness()}
+				>
+					AI
+				</button>
+			{/if}
 			<button
 				class="act pin"
 				class:on={activeMeta?.pinned}
@@ -326,6 +339,15 @@
 	.act:disabled:hover {
 		background: none;
 		color: var(--text-faint);
+	}
+	.act.ai {
+		padding: 0 8px;
+		font-size: 11px;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+	}
+	.act.ai.on {
+		color: var(--accent);
 	}
 	.act.dir {
 		padding: 0 9px;

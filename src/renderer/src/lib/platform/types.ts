@@ -1,8 +1,11 @@
 import type {
 	ConflictFile,
+	HttpRequest,
+	HttpResponse,
 	NoteMeta,
 	ResolveChoice,
 	StateKey,
+	SyncRepo,
 	SyncResponse,
 	TagNode
 } from '../../../../shared/types';
@@ -53,6 +56,17 @@ export interface PlatformApi {
 	/** Conflicted files of the merge awaiting resolution (conflict window). */
 	syncConflicts(): Promise<ConflictFile[]>;
 
+	/** The workspace's repos: root + nested folders with their own remotes. */
+	syncRepos?(): Promise<SyncRepo[]>;
+	/**
+	 * Android: add a nested repo — clone `url` into workspace folder `path`
+	 * (or connect an existing folder), with its own token. The root's
+	 * `.gitignore` gets the folder so its notes never reach the root remote.
+	 */
+	syncAddRepo?(path: string, url: string, token: string): Promise<SyncResponse>;
+	/** Android: stop syncing a nested repo (its files stay on disk). */
+	syncRemoveRepo?(path: string): Promise<void>;
+
 	/**
 	 * Hosts that own the working copy (Android): first-run connect/clone to an
 	 * HTTPS remote with a GitHub token (kept in secure storage), then pull.
@@ -60,6 +74,26 @@ export interface PlatformApi {
 	syncSetup?(url: string, token: string): Promise<SyncResponse>;
 	syncStatus?(): Promise<{ remote: string | null; hasToken: boolean }>;
 	syncForgetToken?(): Promise<void>;
+
+	/** AI harness: outbound HTTP (http/https only). Non-2xx comes back as data, not a throw. */
+	httpFetch(req: HttpRequest): Promise<HttpResponse>;
+	/**
+	 * Streamed request: body text arrives on `onChunk`. Hosts without streaming
+	 * (Android) omit this; callers fall back to `httpFetch` and parse the whole body.
+	 */
+	httpStream?(id: string, req: HttpRequest, onChunk: (text: string) => void): Promise<HttpResponse>;
+	httpAbort?(id: string): Promise<void>;
+
+	/** Secrets (API keys): OS keyring on desktop, Keystore on Android. */
+	getSecret(name: string): Promise<string | null>;
+	setSecret(name: string, value: string | null): Promise<void>;
+
+	/** Files under the workspace's hidden `.fr5a/` folder (paths relative to it). */
+	readMeta(rel: string): Promise<string | null>;
+	writeMeta(rel: string, content: string): Promise<void>;
+	/** Entries of a `.fr5a/` sub-directory: files newest first, then folders as `name/`. */
+	listMeta(rel: string): Promise<string[]>;
+	deleteMeta(rel: string): Promise<void>;
 
 	/**
 	 * Hardware back button (Android). `cb` returns true when it handled the

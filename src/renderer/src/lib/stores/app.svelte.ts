@@ -5,6 +5,7 @@ import { accentById, applyPalette, DEFAULT_ACCENT } from '../accents';
 import { setPinned, setLocked, titleFromContent } from '../editor/markdown';
 import { syncErrorMessage } from '../sync';
 import type { Layout } from '../layout';
+import type { Editor } from '@tiptap/core';
 
 const SAVE_DEBOUNCE = 500;
 const THEME_KEY = 'fr5a-theme';
@@ -20,7 +21,7 @@ const DEFAULT_SIDEBAR: SidebarState = {
 };
 
 export type View = 'editor' | 'settings';
-export type Pane = 'nav' | 'list' | 'editor';
+export type Pane = 'nav' | 'list' | 'editor' | 'harness';
 
 export interface Settings {
 	/** Font option ids (see fonts.ts). */
@@ -33,6 +34,8 @@ export interface Settings {
 	ghost: boolean;
 	/** Accent color id (see accents.ts). */
 	accent: string;
+	/** AI harness on. Off: its code is never loaded, no button, no Mod+J. */
+	ai: boolean;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -41,7 +44,8 @@ const DEFAULT_SETTINGS: Settings = {
 	arFont: 'naskh',
 	vim: false,
 	ghost: true,
-	accent: DEFAULT_ACCENT
+	accent: DEFAULT_ACCENT,
+	ai: true
 };
 
 /**
@@ -95,6 +99,17 @@ class AppState {
 	/** Global keyboard-shortcut cheat sheet overlay (toggle with Mod+/). */
 	cheatSheetOpen = $state(false);
 	theme = $state<'light' | 'dark'>('light');
+
+	/**
+	 * The live TipTap instance (set by Editor.svelte's mount action), so the AI
+	 * harness can read the buffer / caret and apply approved edits.
+	 */
+	editor = $state.raw<Editor | null>(null);
+
+	/** AI harness pane: side split (desktop), bottom sheet (tablet), own pane (phone). */
+	harnessOpen = $state(false);
+	/** Becomes true on first open; the pane's code is loaded lazily and then stays mounted. */
+	harnessLoaded = $state(false);
 
 	/** Bumped to force the editor to recreate (e.g. after an external rewrite). */
 	editorReloadToken = $state(0);
@@ -412,6 +427,31 @@ class AppState {
 		this.drawerOpen = !this.drawerOpen;
 	}
 
+	// --- AI harness ----------------------------------------------------------
+
+	openHarness(): void {
+		if (!this.settings.ai) return;
+		this.harnessLoaded = true;
+		this.harnessOpen = true;
+		this.drawerOpen = false;
+		if (this.layout === 'phone') {
+			this.view = 'editor';
+			this.pane = 'harness';
+		}
+	}
+
+	closeHarness(): void {
+		this.harnessOpen = false;
+		if (this.pane === 'harness') this.pane = this.activeId || this.draft ? 'editor' : 'list';
+	}
+
+	toggleHarness(): void {
+		// On a phone the pane is "open" only while it is the one on screen.
+		const visible = this.layout === 'phone' ? this.pane === 'harness' : this.harnessOpen;
+		if (visible) this.closeHarness();
+		else this.openHarness();
+	}
+
 	/** Does the top bar show a back button (phone layout only)? */
 	get canGoBack(): boolean {
 		return this.layout === 'phone' && (this.view === 'settings' || this.pane !== 'nav');
@@ -431,7 +471,15 @@ class AppState {
 			this.drawerOpen = false;
 			return true;
 		}
+		if (this.layout === 'tablet' && this.harnessOpen) {
+			this.closeHarness();
+			return true;
+		}
 		if (this.layout !== 'phone') return false;
+		if (this.pane === 'harness') {
+			this.closeHarness();
+			return true;
+		}
 		if (this.pane === 'editor') {
 			void this.flush();
 			this.pane = 'list';
@@ -546,10 +594,11 @@ class AppState {
 
 	setView(view: View): void {
 		this.view = view;
+		this.drawerOpen = false;
 	}
 
 	toggleSettings(): void {
-		this.view = this.view === 'settings' ? 'editor' : 'settings';
+		this.setView(this.view === 'settings' ? 'editor' : 'settings');
 	}
 
 	toggleZen(): void {
@@ -560,6 +609,11 @@ class AppState {
 
 	updateSettings(patch: Partial<Settings>): void {
 		this.settings = { ...this.settings, ...patch };
+		// Turning AI off unmounts the pane, so nothing of it stays alive.
+		if (patch.ai === false) {
+			this.closeHarness();
+			this.harnessLoaded = false;
+		}
 		localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
 		void platform.setState('settings', $state.snapshot(this.settings));
 		this.applyFonts();

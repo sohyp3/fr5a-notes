@@ -241,7 +241,24 @@ export function createGitSync(root: string) {
 		await run(['merge', '--abort']);
 	}
 
-	return { push, pull, resolve, abort };
+	/** A merge is stopped awaiting resolve/abort (false when not a repo). */
+	async function inMerge(): Promise<boolean> {
+		const r = await run(['rev-parse', '--is-inside-work-tree'], true);
+		return r.code === 0 && (await mergeInProgress());
+	}
+
+	/** URL of the remote this branch syncs to, or null. */
+	async function remoteUrl(): Promise<string | null> {
+		try {
+			await ensureRepo();
+			const { remote } = await upstream();
+			return (await run(['remote', 'get-url', remote], true)).stdout.trim() || null;
+		} catch {
+			return null;
+		}
+	}
+
+	return { push, pull, resolve, abort, inMerge, remoteUrl };
 }
 
 export type GitSync = ReturnType<typeof createGitSync>;

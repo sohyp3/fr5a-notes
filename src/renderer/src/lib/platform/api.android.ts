@@ -1,18 +1,29 @@
 import { App } from '@capacitor/app';
+import { CapacitorHttp } from '@capacitor/core';
 import { Directory, Encoding, Filesystem, type FileInfo } from '@capacitor/filesystem';
 import { Preferences } from '@capacitor/preferences';
 import { SecureStorage } from '@aparajita/capacitor-secure-storage';
 import { buildTagTree, parseTags } from '../../../../main/tags';
 import type {
 	ConflictFile,
+	HttpRequest,
+	HttpResponse,
 	NoteMeta,
+	SyncRepo,
 	StateKey,
 	SyncResponse,
 	SyncResult
 } from '../../../../shared/types';
 import { createCapFs } from './git/capFs';
 import { createCapHttp } from './git/capHttp';
-import { classify, createIsoGitSync } from './git/isoGit';
+import { classify, createIsoGitSync, GitSyncError } from './git/isoGit';
+import {
+	createMultiSync,
+	isReadOnlyRepo,
+	nestedIgnores,
+	syncOrder,
+	withNestedIgnored
+} from '../../../../shared/multiSync';
 import type { PlatformApi } from './types';
 
 /**
@@ -30,6 +41,8 @@ const DIR = Directory.Data;
 /** Workspace root, relative to Directory.Data. */
 export const NOTES_ROOT = 'notes';
 const TRASH_DIR = '.fr5a_trash';
+/** Hidden harness folder (sessions, skills); skipped by the walk like the trash. */
+const META_DIR = '.fr5a';
 const MD_EXT = new Set(['.md', '.markdown', '.mdown', '.txt']);
 const STATE_PREFIX = 'fr5a:';
 const CHANGE_DEBOUNCE = 120;
@@ -78,7 +91,7 @@ export function buildMeta(id: string, absPath: string, raw: string, mtime: numbe
 	const pinned = /^\s*<!--\s*pinned:\s*true\s*-->\s*$/im.test(raw);
 	const locked = LOCKED_RE.test(raw);
 	const body = raw.replace(
-		/^\s*<!--\s*(?:dir:\s*(?:rtl|ltr)|pinned:\s*(?:true|false)|locked:\s*(?:true|false))\s*-->\s*$/gim,
+		/^\s*<!--\s*(?:dir:\s*(?:rtl|ltr)|pinned:\s*(?:true|false)|locked:\s*(?:true|false)|ai:\s*local)\s*-->\s*$/gim,
 		''
 	);
 	let title = '';
@@ -102,6 +115,28 @@ function sortNotes(notes: NoteMeta[]): NoteMeta[] {
 	return notes.sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.mtime - a.mtime);
 }
 
+/** Keystore-backed secure storage key prefix for harness secrets (API keys). */
+const SECRET_PREFIX = 'secret:';
+
+/**
+ * CapacitorHttp serialises `data` itself; hand it parsed JSON for JSON bodies
+ * so it isn't double-encoded as a string.
+ */
+function capBody(req: HttpRequest): unknown {
+	if (req.body === undefined) return undefined;
+	const type = Object.entries(req.headers ?? {}).find(
+		([k]) => k.toLowerCase() === 'content-type'
+	)?.[1];
+	if (type?.includes('json')) {
+		try {
+			return JSON.parse(req.body);
+		} catch {
+			/* send as-is */
+		}
+	}
+	return req.body;
+}
+
 /** Keystore-backed secure storage key for the GitHub personal access token. */
 export const TOKEN_KEY = 'github-token';
 
@@ -118,6 +153,9 @@ export function createAndroidPlatform(): PlatformApi {
 	/** Path under Directory.Data for a workspace-relative id. */
 	const rel = (id: string) => join(NOTES_ROOT, id);
 	const abs = (id: string) => join(rootUri, id);
+
+	/** Workspace-relative id of a `.fr5a/` path (`..` can't climb out). */
+	const metaId = (path: string) => join(META_DIR, safeSubdir(path));
 
 	const emitChange = () => {
 		if (changeTimer) clearTimeout(changeTimer);
@@ -243,6 +281,56 @@ export function createAndroidPlatform(): PlatformApi {
 		dir: `/${NOTES_ROOT}`,
 		getToken
 	});
+
+	// Nested repos (e.g. `private/` → your own server): each its own working
+	// copy + token, listed in the root's .gitignore.
+	const REPOS_KEY = 'fr5a:syncRepos';
+	const repoTokenKey = (path: string) => `token:${path}`;
+	async function nestedRepos(): Promise<string[]> {
+		const { value } = await Preferences.get({ key: REPOS_KEY });
+		try {
+			return value ? (JSON.parse(value) as string[]) : [];
+		} catch {
+			return [];
+		}
+	}
+	async function setNestedRepos(paths: string[]): Promise<void> {
+		await Preferences.set({ key: REPOS_KEY, value: JSON.stringify([...new Set(paths)].sort()) });
+	}
+	function repoGit(path: string) {
+		return createIsoGitSync({
+			fs: createCapFs(),
+			http: createCapHttp(),
+			dir: `/${NOTES_ROOT}/${path}`,
+			getToken: async () => (await SecureStorage.getItem(repoTokenKey(path))) || null
+		});
+	}
+	async function ignoreNested(paths: string[]): Promise<void> {
+		for (const { repo, entries } of nestedIgnores(paths)) {
+			if (!(await (repo ? repoGit(repo) : git).isRepo())) continue;
+			const file = join(repo, '.gitignore');
+			const current = await readRaw(file).catch(() => '');
+			const next = withNestedIgnored(current, entries);
+			if (next !== null)
+				await Filesystem.writeFile({
+					path: rel(file),
+					directory: DIR,
+					data: next,
+					encoding: Encoding.UTF8
+				});
+		}
+	}
+	async function multi() {
+		const nested = await nestedRepos();
+		await ignoreNested(nested);
+		const repos = syncOrder(['', ...nested]).map((path) => ({
+			rel: path,
+			sync: path ? repoGit(path) : git,
+			readOnly: isReadOnlyRepo(path)
+		}));
+		return createMultiSync(repos, (code, message) => new GitSyncError(code, message));
+	}
+
 	let busy = false;
 	/** Files of the merge currently awaiting resolve/abort, if any. */
 	let pending: ConflictFile[] | null = null;
@@ -416,10 +504,112 @@ export function createAndroidPlatform(): PlatformApi {
 			else await Preferences.set({ key: k, value: JSON.stringify(value) });
 		},
 
-		syncPull: () => guarded(() => git.pull()),
-		syncPush: () => guarded(() => git.push()),
-		syncResolve: (choices) => guarded(() => git.resolve(choices)),
-		syncAbort: () => guarded(() => git.abort()),
+		// Native HTTP: no CORS, but no streaming either — the harness parses the
+		// buffered body (SSE included) in one go.
+		async httpFetch(req): Promise<HttpResponse> {
+			if (!/^https?:\/\//i.test(req.url))
+				throw new Error(`Only http(s) URLs are allowed: ${req.url}`);
+			const timeout = req.timeoutMs ?? 120_000;
+			const res = await CapacitorHttp.request({
+				url: req.url,
+				method: req.method ?? (req.body ? 'POST' : 'GET'),
+				headers: req.headers ?? {},
+				data: capBody(req),
+				responseType: 'text',
+				connectTimeout: timeout,
+				readTimeout: timeout
+			});
+			const headers: Record<string, string> = {};
+			for (const [k, v] of Object.entries(res.headers ?? {})) headers[k.toLowerCase()] = String(v);
+			const body = typeof res.data === 'string' ? res.data : JSON.stringify(res.data ?? '');
+			return { status: res.status, headers, body };
+		},
+
+		async getSecret(name) {
+			return ((await SecureStorage.getItem(SECRET_PREFIX + name)) as string | null) || null;
+		},
+		async setSecret(name, value) {
+			if (value) await SecureStorage.setItem(SECRET_PREFIX + name, value);
+			else await SecureStorage.remove(SECRET_PREFIX + name);
+		},
+
+		async readMeta(path) {
+			await ready;
+			try {
+				return await readRaw(metaId(path));
+			} catch {
+				return null;
+			}
+		},
+		async writeMeta(path, content) {
+			await ready;
+			// Not a note: no reindex / change event.
+			await Filesystem.writeFile({
+				path: rel(metaId(path)),
+				directory: DIR,
+				data: content,
+				encoding: Encoding.UTF8,
+				recursive: true
+			});
+		},
+		async listMeta(path) {
+			await ready;
+			const all = await list(metaId(path));
+			const files = all.filter((f) => f.type === 'file').sort((a, b) => b.mtime - a.mtime);
+			const dirs = all.filter((f) => f.type === 'directory' && f.name !== '.git');
+			return [...files.map((f) => f.name), ...dirs.map((f) => `${f.name}/`).sort()];
+		},
+		async deleteMeta(path) {
+			await ready;
+			await Filesystem.deleteFile({ path: rel(metaId(path)), directory: DIR }).catch(() => {});
+		},
+
+		syncPull: () => guarded(async () => (await multi()).pull()),
+		syncPush: () => guarded(async () => (await multi()).push()),
+		syncResolve: (choices) => guarded(async () => (await multi()).resolve(choices)),
+		syncAbort: () => guarded(async () => (await multi()).abort()),
+
+		async syncRepos(): Promise<SyncRepo[]> {
+			await ready;
+			const root: SyncRepo = {
+				path: '',
+				remote: await git.remoteUrl(),
+				hasToken: (await getToken()) !== null
+			};
+			const nested = await Promise.all(
+				(await nestedRepos()).map(async (path) => ({
+					path,
+					remote: await repoGit(path).remoteUrl(),
+					hasToken: !!(await SecureStorage.getItem(repoTokenKey(path)))
+				}))
+			);
+			return [root, ...nested];
+		},
+		async syncAddRepo(folder, url, token) {
+			const path = safeSubdir(folder);
+			if (!path || path === TRASH_DIR || path.startsWith(`${TRASH_DIR}/`))
+				return { ok: false, error: { code: 'git', message: 'Pick a folder inside your notes.' } };
+			if (!/^https:\/\/\S+$/i.test(url.trim()))
+				return { ok: false, error: { code: 'no-remote', message: 'Use an HTTPS clone URL.' } };
+			if (token.trim()) await SecureStorage.setItem(repoTokenKey(path), token.trim());
+			return guarded(async () => {
+				await ensureDir(path);
+				// Ignore first, so the root never commits the folder's notes.
+				await setNestedRepos([...(await nestedRepos()), path]);
+				await ignoreNested(await nestedRepos());
+				const repo = repoGit(path);
+				await repo.connect(url.trim());
+				const r = await repo.pull();
+				return r.status === 'conflict'
+					? { status: 'conflict', files: r.files.map((f) => ({ ...f, path: `${path}/${f.path}` })) }
+					: r;
+			});
+		},
+		async syncRemoveRepo(folder) {
+			const path = safeSubdir(folder);
+			await setNestedRepos((await nestedRepos()).filter((p) => p !== path));
+			await SecureStorage.remove(repoTokenKey(path));
+		},
 		syncConflicts: async () => pending ?? [],
 
 		async syncSetup(url, token) {

@@ -2,6 +2,7 @@
 	import { getAppState } from '../stores/app.svelte';
 	import { platform } from '../platform';
 	import GitSetup from './GitSetup.svelte';
+	import SyncRepos from './SyncRepos.svelte';
 	import { slide } from 'svelte/transition';
 	import { UI_FONTS, EN_FONTS, AR_FONTS } from '../fonts';
 	import { ACCENTS } from '../accents';
@@ -51,6 +52,36 @@
 
 		{#if platform.syncSetup}
 			<GitSetup />
+		{/if}
+
+		{#if platform.syncRepos}
+			<SyncRepos />
+		{/if}
+
+		<!-- AI: off = no harness code loaded at all (the section below is a lazy chunk). -->
+		<section class="group">
+			<h2>AI assistant</h2>
+			<div class="row">
+				<div class="label">
+					<span class="name">Enable AI harness</span>
+					<span class="desc">Chat, skills and fact-checking over your notes (Mod+J)</span>
+				</div>
+				<button
+					class="toggle"
+					class:on={s.ai}
+					role="switch"
+					aria-checked={s.ai}
+					aria-label="Enable AI harness"
+					onclick={() => app.updateSettings({ ai: !s.ai })}
+				>
+					<span class="knob"></span>
+				</button>
+			</div>
+		</section>
+		{#if s.ai}
+			{#await import('./harness/AiSettings.svelte') then m}
+				<m.default />
+			{/await}
 		{/if}
 
 		<!-- Appearance -->

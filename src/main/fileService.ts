@@ -48,7 +48,7 @@ export class FileService {
 		// Strip hidden metadata comments (dir / pinned / locked) so they never
 		// surface as the title or in the snippet.
 		const body = raw.replace(
-			/^\s*<!--\s*(?:dir:\s*(?:rtl|ltr)|pinned:\s*(?:true|false)|locked:\s*(?:true|false))\s*-->\s*$/gim,
+			/^\s*<!--\s*(?:dir:\s*(?:rtl|ltr)|pinned:\s*(?:true|false)|locked:\s*(?:true|false)|ai:\s*local)\s*-->\s*$/gim,
 			''
 		);
 		const lines = body.split('\n');

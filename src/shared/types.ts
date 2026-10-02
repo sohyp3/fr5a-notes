@@ -45,7 +45,7 @@ export interface SidebarState {
 }
 
 /** Keys the renderer may read/write in the persistent store. */
-export type StateKey = 'lastOpenFile' | 'sidebar' | 'settings' | 'theme';
+export type StateKey = 'lastOpenFile' | 'sidebar' | 'settings' | 'theme' | 'ai';
 
 /** One file left conflicted by a pull; `null` means that side deleted the file. */
 export interface ConflictFile {
@@ -67,6 +67,32 @@ export type SyncErrorCode =
 export type SyncResponse =
 	| { ok: true; result: SyncResult }
 	| { ok: false; error: { code: SyncErrorCode | 'busy' | 'no-workspace'; message: string } };
+
+/** An outbound HTTP request made on the renderer's behalf (LLM / web search / pages). */
+export interface HttpRequest {
+	url: string;
+	method?: 'GET' | 'POST';
+	headers?: Record<string, string>;
+	/** Text body (JSON is pre-stringified by the caller). */
+	body?: string;
+	/** Abort after this many ms (default 120s). */
+	timeoutMs?: number;
+}
+
+export interface HttpResponse {
+	status: number;
+	headers: Record<string, string>;
+	/** Whole body as text. For a streamed request: whatever was not delivered as chunks. */
+	body: string;
+}
+
+/** One git repo in the workspace: '' is the root, others are nested folders. */
+export interface SyncRepo {
+	path: string;
+	remote: string | null;
+	/** Android: a token is stored for this repo. */
+	hasToken?: boolean;
+}
 
 /** Channel names, kept in one place so main + preload can't drift. */
 export const Channels = {
@@ -97,7 +123,24 @@ export const Channels = {
 	syncResolve: 'sync:resolve',
 	syncAbort: 'sync:abort',
 	syncConflicts: 'sync:conflicts',
+	/** Workspace repos (root + nested) and their remotes. */
+	syncRepos: 'sync:repos',
+	syncAddRepo: 'sync:addRepo',
+	// Outbound HTTP for the AI harness (the renderer's CSP blocks fetch).
+	httpFetch: 'http:fetch',
+	httpStream: 'http:stream',
+	httpAbort: 'http:abort',
+	// Secrets (API keys) encrypted with safeStorage.
+	secretGet: 'secret:get',
+	secretSet: 'secret:set',
+	// Files under the workspace's hidden `.fr5a/` folder (harness sessions, skills).
+	metaRead: 'meta:read',
+	metaWrite: 'meta:write',
+	metaList: 'meta:list',
+	metaDelete: 'meta:delete',
 	// main -> renderer push
+	/** A streamed HTTP body chunk: (requestId, text). */
+	httpChunk: 'http:chunk',
 	notesChanged: 'notes:changed',
 	/** A pull stopped on conflicts; payload is ConflictFile[]. */
 	syncConflict: 'sync:conflict',

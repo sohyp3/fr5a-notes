@@ -401,7 +401,12 @@ export function createIsoGitSync({ fs, http, dir, getToken }: IsoGitDeps) {
 		return (await git.getConfig({ ...base, path: `remote.${REMOTE}.url` })) ?? null;
 	}
 
-	return { isRepo, connect, pull, push, resolve, abort, conflicts, remoteUrl };
+	/** A merge is stopped awaiting resolve/abort. */
+	async function inMerge(): Promise<boolean> {
+		return (await readState()) !== null;
+	}
+
+	return { isRepo, connect, pull, push, resolve, abort, conflicts, remoteUrl, inMerge };
 }
 
 export type IsoGitSync = ReturnType<typeof createIsoGitSync>;

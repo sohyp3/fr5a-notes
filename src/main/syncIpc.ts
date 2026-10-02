@@ -1,4 +1,5 @@
-import { createGitSync, GitSyncError } from './gitSync';
+import { GitSyncError } from './gitSync';
+import { addRepo, listRepos, workspaceSync } from './repos';
 import { Channels } from '../shared/types';
 import type { ConflictFile, ResolveChoice, SyncResponse, SyncResult } from '../shared/types';
 
@@ -60,18 +61,30 @@ export function registerSyncHandlers(ipc: IpcLike, deps: SyncIpcDeps) {
 		}
 	}
 
-	const sync = () => createGitSync(deps.getRoot()!);
+	// The root repo plus any nested repos (each with its own remote).
+	const sync = () => workspaceSync(deps.getRoot()!);
 
-	const pull = () => guarded(() => sync().pull());
-	const push = () => guarded(() => sync().push());
-	const resolve = (choices: ResolveChoice[]) => guarded(() => sync().resolve(choices));
-	const abort = () => guarded(() => sync().abort());
+	const pull = () => guarded(async () => (await sync()).pull());
+	const push = () => guarded(async () => (await sync()).push());
+	const resolve = (choices: ResolveChoice[]) =>
+		guarded(async () => (await sync()).resolve(choices));
+	const abort = () => guarded(async () => (await sync()).abort());
 
 	ipc.handle(Channels.syncPull, pull);
 	ipc.handle(Channels.syncPush, push);
 	ipc.handle(Channels.syncResolve, (_e, choices: ResolveChoice[]) => resolve(choices));
 	ipc.handle(Channels.syncAbort, abort);
 	ipc.handle(Channels.syncConflicts, () => pending ?? []);
+	// Clone a repo into a new folder (nested repo, e.g. a skill pack).
+	ipc.handle(Channels.syncAddRepo, (_e, folder: string, url: string) =>
+		guarded(async () => {
+			await addRepo(deps.getRoot()!, folder, url);
+		})
+	);
+	ipc.handle(Channels.syncRepos, () => {
+		const root = deps.getRoot();
+		return root ? listRepos(root) : [];
+	});
 
 	return {
 		/** Abort the pending merge if one is still open (conflict window closed via its frame). */

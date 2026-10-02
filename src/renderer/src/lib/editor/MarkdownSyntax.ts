@@ -115,7 +115,7 @@ function blockInfo(text: string): { nodeClass: string; prefixLen: number } | nul
 	// Hidden metadata comments, e.g. `<!-- dir: rtl -->` / `<!-- pinned: true -->`
 	// / `<!-- locked: true -->`.
 	if (
-		/^<!--\s*(?:dir:\s*(?:rtl|ltr)|pinned:\s*(?:true|false)|locked:\s*(?:true|false))\s*-->$/i.test(
+		/^<!--\s*(?:dir:\s*(?:rtl|ltr)|pinned:\s*(?:true|false)|locked:\s*(?:true|false)|ai:\s*local)\s*-->$/i.test(
 			text.trim()
 		)
 	) {

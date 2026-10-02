@@ -12,6 +12,7 @@ export const SHORTCUTS: Shortcut[] = [
 	{ keys: ['Mod', '/'], desc: 'Toggle this shortcuts cheat sheet' },
 	{ keys: ['Mod', 'N'], desc: 'New note' },
 	{ keys: ['Mod', '\\'], desc: 'Toggle Zen mode' },
+	{ keys: ['Mod', 'J'], desc: 'Toggle the AI harness pane' },
 	{ keys: ['Mod', ','], desc: 'Open / close Settings' },
 	{ keys: ['Mod', 'B'], desc: 'Bold  **text**' },
 	{ keys: ['Mod', 'I'], desc: 'Italic  *text*' },

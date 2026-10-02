@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Menu, net } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
@@ -7,8 +7,11 @@ import { NoteIndex } from './db';
 import { FileService } from './fileService';
 import { buildTagTree } from './tags';
 import { registerSyncHandlers } from './syncIpc';
+import { createHttp } from './http';
+import { createSecrets } from './secrets';
+import { deleteMeta, listMeta, readMeta, writeMeta } from './metaFiles';
 import { Channels } from '../shared/types';
-import type { NoteMeta, StateKey } from '../shared/types';
+import type { HttpRequest, NoteMeta, StateKey } from '../shared/types';
 // electron-vite copies the file into the build output and rewrites this to the
 // runtime path (works in both dev and the packaged app).
 import icon from '../../resources/icon.png?asset';
@@ -32,12 +35,20 @@ interface StoreSchema {
 	/** Renderer settings: theme colors, fonts, vim toggle, ghost syntax. */
 	settings?: unknown;
 	theme?: string;
+	/** AI harness: provider profiles, search provider, privacy rules (no keys). */
+	ai?: unknown;
+	/** safeStorage-encrypted secrets (API keys), base64. */
+	secrets?: Record<string, string>;
 }
 
 const store = new Store<StoreSchema>({ name: 'fr5a' });
 
 /** Renderer-writable keys — anything else on the wire is rejected. */
-const RENDERER_KEYS = new Set<StateKey>(['lastOpenFile', 'sidebar', 'settings', 'theme']);
+const RENDERER_KEYS = new Set<StateKey>(['lastOpenFile', 'sidebar', 'settings', 'theme', 'ai']);
+
+const secrets = createSecrets(store);
+// net.fetch goes through Chromium's stack, so system proxy / VPN settings apply.
+const http = createHttp((url, init) => net.fetch(url, init));
 
 /** One-time migration from the old hand-rolled fr5a-config.json. */
 async function migrateLegacyConfig(): Promise<void> {
@@ -257,6 +268,29 @@ function registerIpc(): void {
 		if (value === null || value === undefined) store.delete(key);
 		else store.set(key, value);
 	});
+
+	// AI harness: outbound HTTP (the renderer's CSP blocks fetch), secrets, `.fr5a/` files.
+	ipcMain.handle(Channels.httpFetch, (_e, req: HttpRequest) => http.fetch(req));
+	ipcMain.handle(Channels.httpStream, (e, id: string, req: HttpRequest) =>
+		http.stream(id, req, (text) => {
+			if (!e.sender.isDestroyed()) e.sender.send(Channels.httpChunk, id, text);
+		})
+	);
+	ipcMain.handle(Channels.httpAbort, (_e, id: string) => http.abort(id));
+	ipcMain.handle(Channels.secretGet, (_e, name: string) => secrets.get(name));
+	ipcMain.handle(Channels.secretSet, (_e, name: string, value: string | null) =>
+		secrets.set(name, value)
+	);
+	const root = () => {
+		if (!fileService) throw new Error('No workspace open');
+		return fileService.root;
+	};
+	ipcMain.handle(Channels.metaRead, (_e, rel: string) => readMeta(root(), rel));
+	ipcMain.handle(Channels.metaWrite, (_e, rel: string, content: string) =>
+		writeMeta(root(), rel, content)
+	);
+	ipcMain.handle(Channels.metaList, (_e, rel: string) => listMeta(root(), rel));
+	ipcMain.handle(Channels.metaDelete, (_e, rel: string) => deleteMeta(root(), rel));
 
 	// Git sync. The renderer never runs git itself; results/errors come back as data.
 	syncHandlers = registerSyncHandlers(ipcMain, {

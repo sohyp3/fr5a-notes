@@ -55,9 +55,21 @@ The Editor component mounts TipTap via a Svelte **action** keyed on `` `${editor
 
 Tag autocomplete (`TagSuggest.ts`): a `@tiptap/suggestion` plugin on `#` showing a floating dropdown (plain DOM, `.tag-suggest` in app.css) of tags from the index; Tab/Enter completes. It has `priority: 1000` so its Tab handling beats `ListBehavior`'s Tab-indent while open.
 
+## AI harness (`lib/harness/`, `components/harness/`)
+
+On-device agent loop over OpenAI-compatible providers; only the HTTP request leaves the device. The renderer CSP blocks `fetch`, so network goes through `platform.httpFetch`/`httpStream` (desktop: `main/http.ts` via `net.fetch`, streamed over `http:chunk`; Android: buffered `CapacitorHttp`, the SSE body is parsed whole). Pure, Node-tested modules: `openai.ts` (client + delta accumulator), `sse.ts`, `loop.ts` (model → tools → model, `maxSteps`), `tools.ts` (read/list/search notes, `ask_user`, `write_note`, `web_search`, `fetch_url`), `context.ts` (system prompt, token budget), `privacy.ts`, `session.ts`, `skills.ts`, `web.ts`, `diff.ts`, `edits.ts`. Runtime: `harness.svelte.ts` (tabs, streaming batched per rAF, question/approval promises) and `apply.ts` (writes to the open note go through `app.editor.commands.setContent` so undo + auto-save apply). `write_note` never writes without the diff card's Apply.
+
+- Config (`ai` state key, `config.svelte.ts`) holds provider profiles, search provider, local-only folders; API keys go to `platform.getSecret/setSecret` (desktop `safeStorage`, Android Keystore) — never into state or notes.
+- Sessions (`.fr5a/sessions/*.md`, `<!-- turn: … -->` separators) and skills (`.fr5a/skills/*.md`, frontmatter + prompt; built-ins seeded into an empty folder) are read/written via `platform.readMeta/writeMeta/listMeta` (paths relative to `.fr5a/`, can't escape it). Dot-folders aren't indexed as notes.
+- The pane is lazy-loaded (`app.harnessLoaded`) and then always mounted: desktop side split (Mod+J), tablet bottom sheet, phone `pane='harness'`.
+
+## Multi-repo sync
+
+`shared/multiSync.ts` runs pull/push over the root repo plus nested repos (folders with their own `.git`, e.g. `private/`, `.fr5a/`), stops at the first conflict (paths prefixed with the repo folder), and routes resolve/abort to the repo mid-merge. Nested folders are added to the root `.gitignore` (`withNestedIgnored`) before any commit, so their files never reach the root remote. Desktop discovers nested repos on disk (`main/repos.ts`); Android keeps a list + per-repo token (`syncAddRepo`).
+
 ## Per-file metadata (hidden HTML comments)
 
-Direction and pinning live in comment lines at the top of the file: `<!-- dir: rtl -->` and `<!-- pinned: true -->`. They are parsed in both `main/fileService.ts` (stripped from title/snippet; `pinned` indexed) and renderer `markdown.ts` (`detectDir`/`setDir`/`detectPinned`/`setPinned`), and hidden in the editor via the `md-meta` node class in `MarkdownSyntax.ts`. When adding a new metadata key, update all three places.
+Direction and pinning live in comment lines at the top of the file: `<!-- dir: rtl -->` and `<!-- pinned: true -->` (also `<!-- locked: true -->`, and `<!-- ai: local -->` = only local AI providers may read the note, see `harness/privacy.ts`). They are parsed in both `main/fileService.ts` (stripped from title/snippet; `pinned` indexed) and renderer `markdown.ts` (`detectDir`/`setDir`/`detectPinned`/`setPinned`), and hidden in the editor via the `md-meta` node class in `MarkdownSyntax.ts`. When adding a new metadata key, update all three places.
 
 ## Renderer state
 

@@ -2,9 +2,12 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { Channels } from '../shared/types';
 import type {
 	ConflictFile,
+	HttpRequest,
+	HttpResponse,
 	NoteMeta,
 	ResolveChoice,
 	StateKey,
+	SyncRepo,
 	SyncResponse,
 	TagNode
 } from '../shared/types';
@@ -59,6 +62,41 @@ const api = {
 	syncAbort: (): Promise<SyncResponse> => ipcRenderer.invoke(Channels.syncAbort),
 	/** Conflicted files of the merge awaiting resolution (conflict window). */
 	syncConflicts: (): Promise<ConflictFile[]> => ipcRenderer.invoke(Channels.syncConflicts),
+	/** Root + nested repos and their remotes. */
+	syncRepos: (): Promise<SyncRepo[]> => ipcRenderer.invoke(Channels.syncRepos),
+	/** Clone `url` into workspace folder `path` with system git (token unused on desktop). */
+	syncAddRepo: (path: string, url: string): Promise<SyncResponse> =>
+		ipcRenderer.invoke(Channels.syncAddRepo, path, url),
+
+	// AI harness. HTTP runs in main (the renderer's CSP blocks fetch).
+	httpFetch: (req: HttpRequest): Promise<HttpResponse> =>
+		ipcRenderer.invoke(Channels.httpFetch, req),
+	/** Stream a response body; chunks arrive on `onChunk` until the promise settles. */
+	httpStream: async (
+		id: string,
+		req: HttpRequest,
+		onChunk: (text: string) => void
+	): Promise<HttpResponse> => {
+		const listener = (_e: unknown, chunkId: string, text: string) => {
+			if (chunkId === id) onChunk(text);
+		};
+		ipcRenderer.on(Channels.httpChunk, listener);
+		try {
+			return await ipcRenderer.invoke(Channels.httpStream, id, req);
+		} finally {
+			ipcRenderer.off(Channels.httpChunk, listener);
+		}
+	},
+	httpAbort: (id: string): Promise<void> => ipcRenderer.invoke(Channels.httpAbort, id),
+	getSecret: (name: string): Promise<string | null> => ipcRenderer.invoke(Channels.secretGet, name),
+	setSecret: (name: string, value: string | null): Promise<void> =>
+		ipcRenderer.invoke(Channels.secretSet, name, value),
+	readMeta: (rel: string): Promise<string | null> => ipcRenderer.invoke(Channels.metaRead, rel),
+	writeMeta: (rel: string, content: string): Promise<void> =>
+		ipcRenderer.invoke(Channels.metaWrite, rel, content),
+	/** Files newest first, then folders as `name/`. */
+	listMeta: (rel: string): Promise<string[]> => ipcRenderer.invoke(Channels.metaList, rel),
+	deleteMeta: (rel: string): Promise<void> => ipcRenderer.invoke(Channels.metaDelete, rel),
 
 	/** A pull stopped on conflicts; returns an unsubscribe fn. */
 	onSyncConflict: (cb: (files: ConflictFile[]) => void): (() => void) => {

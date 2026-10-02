@@ -241,3 +241,74 @@ test('desktop mouse windows keep the side-by-side layout at any width', async ({
 		await ctx.close();
 	}
 });
+
+test('AI harness: question → approved write → saved session', async ({ page }) => {
+	await openPlan(page);
+	await page.getByRole('button', { name: 'Toggle AI harness' }).tap();
+	const harness = page.getByRole('region', { name: 'AI harness' });
+	await expect(harness).toBeVisible();
+	if ((await layoutOf(page)) === 'phone') await expect(editorPane(page)).toBeHidden();
+
+	// Built-in skills are seeded into `.fr5a/skills/` on first open.
+	await expect(harness.getByRole('button', { name: /\/fact-check/ })).toBeVisible();
+
+	const input = harness.locator('textarea');
+	await input.fill('help me with tone');
+	await input.press('Enter');
+
+	await expect(harness.getByText('Which tone?', { exact: true })).toBeVisible();
+	await harness.getByRole('button', { name: 'Casual' }).tap();
+
+	await expect(harness.getByText(/append.*current note \(Work\/plan\.md\)/)).toBeVisible();
+	await expect(harness.locator('.dl.add').filter({ hasText: 'AI line' })).toHaveText('+AI line');
+	await harness.getByRole('button', { name: 'Apply' }).tap();
+
+	await expect(harness.getByText('Done: Applied to Work/plan.md (append)')).toBeVisible();
+	expect(await editorText(page)).toBe('# Plan\n\nfirst line\n\nAI line\n');
+
+	const sessions = await page.evaluate(() =>
+		Object.entries((window as unknown as { __meta: Record<string, string> }).__meta).filter(([k]) =>
+			k.startsWith('sessions/')
+		)
+	);
+	expect(sessions).toHaveLength(1);
+	expect(sessions[0][1]).toContain('<!-- turn: you -->\n\nhelp me with tone');
+	expect(sessions[0][1]).toContain('<!-- turn: tool ask_user -->');
+
+	// Closing returns to the note (phone: back to the editor pane).
+	await harness.getByRole('button', { name: 'Close AI pane' }).tap();
+	await expect(editorPane(page)).toBeVisible();
+});
+
+test('AI harness: @folder/ mention inlines the folder', async ({ page }) => {
+	await openPlan(page);
+	await page.getByRole('button', { name: 'Toggle AI harness' }).tap();
+	const harness = page.getByRole('region', { name: 'AI harness' });
+	const input = harness.locator('textarea');
+	await input.fill('@Wo');
+	// Folder suggestions come first; Enter picks the highlighted one.
+	await expect(harness.locator('.suggest [role=option]').first()).toContainText('Work/');
+	await input.press('Enter');
+	await expect(input).toHaveValue('@Work/ ');
+	await input.pressSequentially('context?');
+	await input.press('Enter');
+	await expect(harness.getByText('ctx: Work/plan.md | index of @Work/')).toBeVisible();
+	await expect(harness.locator('.chip.dir')).toHaveText(/Work\//);
+});
+
+test('AI off: no button, no pane', async ({ page }) => {
+	await openPlan(page);
+	await expect(page.getByRole('button', { name: 'Toggle AI harness' })).toBeVisible();
+	// Settings → AI toggle.
+	const layout = await layoutOf(page);
+	if (layout === 'phone') await page.getByRole('button', { name: 'Back' }).tap();
+	if (layout === 'phone') await page.getByRole('button', { name: 'Back' }).tap();
+	if (layout === 'tablet') await page.getByRole('button', { name: 'Open folders' }).tap();
+	await page.getByRole('button', { name: 'Settings', exact: true }).tap();
+	const sw = page.getByRole('switch', { name: 'Enable AI harness' });
+	await expect(sw).toHaveAttribute('aria-checked', 'true');
+	await sw.tap();
+	await expect(sw).toHaveAttribute('aria-checked', 'false');
+	await expect(page.getByText('Max steps per run')).toHaveCount(0);
+	await expect(page.locator('.harness')).toHaveCount(0);
+});
