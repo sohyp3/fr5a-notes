@@ -97,10 +97,12 @@ export function installFakeApi(): void {
 		setState: async (key: string, value: unknown) => {
 			state[key] = value;
 		},
-		httpFetch: async (req: { body?: string }) => ({
+		httpFetch: async (req: { url: string; body?: string }) => ({
 			status: 200,
 			headers: {},
-			body: fakeModel(req.body ?? '{}')
+			body: req.url.endsWith('/models')
+				? JSON.stringify({ data: [{ id: 'big-pickle' }, { id: 'gpt-5-nano' }, { id: 'm' }] })
+				: fakeModel(req.body ?? '{}')
 		}),
 		httpStream: async (_id: string, req: { body?: string }, onChunk: (t: string) => void) => {
 			const text = fakeModel(req.body ?? '{}');

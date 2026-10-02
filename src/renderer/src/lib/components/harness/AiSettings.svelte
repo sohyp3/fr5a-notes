@@ -9,6 +9,8 @@
 	import { getHarness } from '../../harness/harness.svelte';
 	import { syncErrorMessage } from '../../sync';
 	import {
+		isBuiltinProvider,
+		KEY_URLS,
 		OPENCODE_ZEN,
 		ZEN_KEY_URL,
 		type ProviderProfile,
@@ -95,9 +97,37 @@
 		}
 	}
 
+	// Per provider: is a key saved, the key being typed, model list loading.
+	let hasKey = $state<Record<string, boolean>>({});
+	let keyInput = $state<Record<string, string>>({});
+	let loadingModels = $state<Record<string, boolean>>({});
+
+	async function refreshModels(id: string): Promise<void> {
+		loadingModels[id] = true;
+		await ai.fetchModels(id);
+		loadingModels[id] = false;
+	}
+
+	async function saveKey(id: string): Promise<void> {
+		const key = keyInput[id]?.trim();
+		if (!key) return;
+		await ai.setApiKey(id, key);
+		keyInput[id] = '';
+		hasKey[id] = true;
+		await refreshModels(id);
+	}
+
 	onMount(async () => {
 		await ai.load();
 		hasSearchKey = !!(await ai.searchKey());
+		// Fetch model lists for providers that can answer (key saved, local, or Zen's public list).
+		await Promise.all(
+			cfg.providers.map(async (p) => {
+				hasKey[p.id] = !!(await ai.apiKey(p.id));
+				if ((hasKey[p.id] || p.local || p.id === OPENCODE_ZEN.id) && !ai.models[p.id])
+					await refreshModels(p.id);
+			})
+		);
 		await loadSkills();
 	});
 
@@ -143,9 +173,14 @@
 			message = { kind: 'error', text: 'Base URL and model are required.' };
 			return;
 		}
-		if (draft.apiKey.trim()) await ai.setApiKey(draft.id, draft.apiKey.trim());
+		const id = draft.id;
+		if (draft.apiKey.trim()) {
+			await ai.setApiKey(id, draft.apiKey.trim());
+			hasKey[id] = true;
+		}
 		ai.saveProvider(profileOf(draft));
 		draft = null;
+		void refreshModels(id);
 	}
 
 	async function test(): Promise<void> {
@@ -199,23 +234,83 @@
 	<h2>AI</h2>
 
 	{#each cfg.providers as p (p.id)}
-		<div class="row">
-			<label class="label radio">
-				<input
-					type="radio"
-					name="default-provider"
-					checked={cfg.defaultProvider === p.id}
-					onchange={() => ai.update({ defaultProvider: p.id })}
-				/>
-				<span class="name"
-					>{p.name}
-					{#if p.local}<span class="badge">local</span>{/if}</span
-				>
-				<span class="desc">{p.model} · {p.baseUrl}</span>
-			</label>
-			<div class="actions">
-				<button class="btn" onclick={() => edit(p)}>Edit</button>
-				<button class="btn" onclick={() => ai.removeProvider(p.id)}>Remove</button>
+		{@const models = ai.models[p.id] ?? []}
+		<div class="row stack provider" class:is-default={cfg.defaultProvider === p.id}>
+			<div class="phead">
+				<label class="label radio">
+					<input
+						type="radio"
+						name="default-provider"
+						checked={cfg.defaultProvider === p.id}
+						onchange={() => ai.update({ defaultProvider: p.id })}
+					/>
+					<span class="name"
+						>{p.name}
+						{#if cfg.defaultProvider === p.id}<span class="badge">default</span>{/if}
+						{#if p.local}<span class="badge">local</span>{/if}
+						{#if !p.local && !hasKey[p.id]}<span class="badge warn">no key</span>{/if}</span
+					>
+					<span class="desc">{p.baseUrl}</span>
+				</label>
+				<div class="actions">
+					<button class="btn" onclick={() => edit(p)}>Edit</button>
+					{#if !isBuiltinProvider(p.id)}
+						<button class="btn" onclick={() => ai.removeProvider(p.id)}>Remove</button>
+					{/if}
+				</div>
+			</div>
+			<div class="pgrid">
+				<label class="field" for="key-{p.id}">
+					<span class="small">API key</span>
+					<div class="inline">
+						<input
+							id="key-{p.id}"
+							type="password"
+							autocomplete="off"
+							bind:value={keyInput[p.id]}
+							placeholder={hasKey[p.id] ? '•••••• saved' : p.local ? 'optional' : 'paste your key'}
+						/>
+						<button class="btn" disabled={!keyInput[p.id]?.trim()} onclick={() => saveKey(p.id)}
+							>Save</button
+						>
+					</div>
+					{#if KEY_URLS[p.id]}
+						<span class="desc"
+							>Get one at <a href={KEY_URLS[p.id]} target="_blank" rel="noreferrer"
+								>{KEY_URLS[p.id].replace(/^https:\/\//, '')}</a
+							></span
+						>
+					{/if}
+				</label>
+				<label class="field" for="model-{p.id}">
+					<span class="small">Model</span>
+					<div class="inline">
+						<select
+							id="model-{p.id}"
+							value={p.model}
+							onchange={(e) => ai.setModel(p.id, (e.currentTarget as HTMLSelectElement).value)}
+						>
+							{#if !models.includes(p.model)}<option value={p.model}>{p.model}</option>{/if}
+							{#each models as m (m)}<option value={m}>{m}</option>{/each}
+						</select>
+						<button
+							class="btn icon"
+							title="Reload the model list"
+							aria-label="Reload models for {p.name}"
+							disabled={loadingModels[p.id]}
+							onclick={() => refreshModels(p.id)}>{loadingModels[p.id] ? '…' : '↻'}</button
+						>
+					</div>
+					<span class="desc"
+						>{ai.modelErrors[p.id]
+							? `Couldn't list models: ${ai.modelErrors[p.id]}`
+							: models.length
+								? `${models.length} models`
+								: hasKey[p.id] || p.local || p.id === OPENCODE_ZEN.id
+									? 'Loading models…'
+									: 'Save a key to list models'}</span
+					>
+				</label>
 			</div>
 		</div>
 	{/each}
@@ -615,6 +710,41 @@
 		background: var(--accent-soft);
 		font-family: var(--font-mono);
 		font-size: 11.5px;
+	}
+	a {
+		color: var(--accent);
+	}
+	.provider {
+		gap: 10px;
+		padding: 14px 2px;
+		box-shadow: inset 0 -1px 0 var(--bg-hover);
+	}
+	.phead {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+	}
+	.pgrid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+		gap: 12px;
+		padding-inline-start: 26px;
+	}
+	.small {
+		font-size: 12px;
+		font-weight: 500;
+		color: var(--text-muted);
+	}
+	.badge.warn {
+		background: rgba(220, 120, 40, 0.16);
+	}
+	.btn.icon {
+		padding: 7px 10px;
+	}
+	.inline select {
+		flex: 1;
+		min-width: 0;
 	}
 	.inline {
 		display: flex;

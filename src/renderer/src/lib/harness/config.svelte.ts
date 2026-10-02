@@ -1,5 +1,7 @@
 import { platform } from '../platform';
+import { listModels } from './openai';
 import {
+	BUILTIN_PROVIDERS,
 	DEFAULT_AI_CONFIG,
 	providerKeyName,
 	SEARCH_KEY_NAME,
@@ -19,9 +21,44 @@ class AiSettings {
 	load(): Promise<void> {
 		return (this.loading ??= (async () => {
 			const stored = await platform.getState<Partial<AiConfig>>('ai');
-			if (stored) this.config = { ...DEFAULT_AI_CONFIG, ...stored };
+			if (stored) {
+				const providers = stored.providers ?? [];
+				// Built-ins always exist (older configs may predate one), in front.
+				const missing = BUILTIN_PROVIDERS.filter((b) => !providers.some((p) => p.id === b.id));
+				this.config = {
+					...DEFAULT_AI_CONFIG,
+					...stored,
+					providers: [...missing, ...providers]
+				};
+			}
 			this.loaded = true;
 		})());
+	}
+
+	/** Model ids per provider, fetched from its `/models` endpoint (not persisted). */
+	models = $state<Record<string, string[]>>({});
+	modelErrors = $state<Record<string, string>>({});
+
+	async fetchModels(id: string): Promise<void> {
+		const p = this.config.providers.find((x) => x.id === id);
+		if (!p) return;
+		try {
+			const ids = await listModels(platform, p, await this.apiKey(id));
+			this.models = { ...this.models, [id]: ids };
+			const { [id]: _drop, ...rest } = this.modelErrors;
+			void _drop;
+			this.modelErrors = rest;
+		} catch (err) {
+			this.modelErrors = {
+				...this.modelErrors,
+				[id]: err instanceof Error ? err.message : String(err)
+			};
+		}
+	}
+
+	setModel(id: string, model: string): void {
+		const p = this.config.providers.find((x) => x.id === id);
+		if (p && model) this.saveProvider({ ...p, model });
 	}
 
 	update(patch: Partial<AiConfig>): void {

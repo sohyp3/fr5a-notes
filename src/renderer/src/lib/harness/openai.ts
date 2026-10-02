@@ -127,6 +127,41 @@ function errorMessage(status: number, body: string): string {
 	return `${status}: ${body.slice(0, 300) || 'request failed'}`;
 }
 
+/** Ids that aren't chat models (OpenAI lists embeddings, audio, images… too). */
+const NOT_CHAT =
+	/embed|tts|whisper|dall-e|gpt-image|image|audio|moderation|realtime|transcribe|davinci|babbage|search|computer-use/i;
+
+/** Chat model ids from an OpenAI-compatible `GET /models`, sorted. */
+export async function listModels(
+	http: Http,
+	profile: Pick<ProviderProfile, 'baseUrl'>,
+	apiKey: string | null
+): Promise<string[]> {
+	const base = profile.baseUrl
+		.trim()
+		.replace(/\/+$/, '')
+		.replace(/\/chat\/completions$/, '');
+	const res = await http.httpFetch({
+		url: `${base}/models`,
+		headers: {
+			Accept: 'application/json',
+			...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
+		},
+		timeoutMs: 20_000
+	});
+	if (res.status < 200 || res.status >= 300)
+		throw new ProviderError(errorMessage(res.status, res.body), res.status);
+	let rows: { id?: string; name?: string }[];
+	try {
+		const j = JSON.parse(res.body);
+		rows = j?.data ?? j?.models ?? [];
+	} catch {
+		throw new ProviderError('The provider returned a model list that is not JSON.');
+	}
+	const ids = rows.map((r) => r.id ?? r.name ?? '').filter(Boolean);
+	return [...new Set(ids.filter((id) => !NOT_CHAT.test(id)))].sort();
+}
+
 let seq = 0;
 
 export async function chatCompletion(

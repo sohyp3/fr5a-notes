@@ -309,7 +309,7 @@
 				onchange={(e) => (tab.providerId = (e.currentTarget as HTMLSelectElement).value || null)}
 			>
 				{#each ai.config.providers as p (p.id)}
-					<option value={p.id}>{p.name}{p.local ? ' · local' : ''}</option>
+					<option value={p.id}>{p.name} · {p.model}</option>
 				{:else}
 					<option value="">No provider</option>
 				{/each}

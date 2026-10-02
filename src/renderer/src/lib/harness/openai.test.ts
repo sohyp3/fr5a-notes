@@ -102,3 +102,35 @@ describe('chatCompletion', () => {
 		);
 	});
 });
+
+describe('listModels', () => {
+	it('lists chat models with the key, dropping embeddings / audio / images', async () => {
+		let seen: { url: string; headers?: Record<string, string> } | null = null;
+		const http: Http = {
+			httpFetch: async (req) => {
+				seen = req;
+				return {
+					status: 200,
+					headers: {},
+					body: JSON.stringify({
+						data: [
+							{ id: 'gpt-4o' },
+							{ id: 'text-embedding-3-small' },
+							{ id: 'whisper-1' },
+							{ id: 'big-pickle' }
+						]
+					})
+				};
+			}
+		};
+		const { listModels } = await import('./openai');
+		expect(await listModels(http, { baseUrl: 'https://x/v1/' }, 'k')).toEqual([
+			'big-pickle',
+			'gpt-4o'
+		]);
+		expect(seen).toMatchObject({
+			url: 'https://x/v1/models',
+			headers: { Authorization: 'Bearer k' }
+		});
+	});
+});

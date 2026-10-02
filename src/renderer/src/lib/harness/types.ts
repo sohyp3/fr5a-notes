@@ -50,8 +50,39 @@ export const OPENCODE_ZEN: ProviderProfile = {
 
 export const ZEN_KEY_URL = 'https://opencode.ai/zen';
 
+export const OPENAI: ProviderProfile = {
+	id: 'openai',
+	name: 'OpenAI',
+	baseUrl: 'https://api.openai.com/v1',
+	model: 'gpt-4o-mini',
+	local: false,
+	tools: true,
+	contextTokens: 128_000
+};
+
+export const DEEPSEEK: ProviderProfile = {
+	id: 'deepseek',
+	name: 'DeepSeek',
+	baseUrl: 'https://api.deepseek.com/v1',
+	model: 'deepseek-chat',
+	local: false,
+	tools: true,
+	contextTokens: 64_000
+};
+
+/** Always listed in Settings → AI (just add a key); custom ones come after. */
+export const BUILTIN_PROVIDERS = [OPENCODE_ZEN, OPENAI, DEEPSEEK];
+export const isBuiltinProvider = (id: string) => BUILTIN_PROVIDERS.some((p) => p.id === id);
+
+/** Where to get a key, per built-in provider. */
+export const KEY_URLS: Record<string, string> = {
+	[OPENCODE_ZEN.id]: ZEN_KEY_URL,
+	[OPENAI.id]: 'https://platform.openai.com/api-keys',
+	[DEEPSEEK.id]: 'https://platform.deepseek.com/api_keys'
+};
+
 export const DEFAULT_AI_CONFIG: AiConfig = {
-	providers: [OPENCODE_ZEN],
+	providers: [...BUILTIN_PROVIDERS],
 	defaultProvider: OPENCODE_ZEN.id,
 	search: null,
 	localOnlyFolders: [],
