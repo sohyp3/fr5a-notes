@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
 import { installFakeApi } from './fakeApi';
 
 /**
@@ -32,6 +32,12 @@ async function openFolder(page: Page, name: RegExp) {
 	const layout = await layoutOf(page);
 	if (layout === 'tablet') await page.getByRole('button', { name: 'Open folders' }).tap();
 	await sidebar(page).getByRole('button', { name }).tap();
+	// The drawer slides shut over the list (tablet) / the list slides in
+	// (phone): let it settle before gestures that start from measured points.
+	if (layout === 'tablet')
+		await expect.poll(() => leftEdge(page, '.sidebar-wrap')).toBeLessThanOrEqual(0);
+	if (layout === 'phone')
+		await expect.poll(() => list(page).evaluate((el) => el.getBoundingClientRect().x)).toBe(0);
 }
 
 async function openPlan(page: Page) {
@@ -39,6 +45,43 @@ async function openPlan(page: Page) {
 	await list(page).getByText('Plan', { exact: true }).tap();
 	await expect(page.locator('.ProseMirror')).toContainText('first line');
 }
+
+/** Touch devices open notes in view mode: switch to editing. */
+async function edit(page: Page) {
+	await page.getByRole('button', { name: 'Edit note' }).tap();
+	await expect(page.locator('.ProseMirror')).toHaveAttribute('contenteditable', 'true');
+}
+
+/** A one-finger drag across `target` (CDP touch events, so pointer + touch-action apply). */
+async function swipe(page: Page, target: Locator, dx: number, dy = 0) {
+	const box = (await target.boundingBox())!;
+	const cdp = await page.context().newCDPSession(page);
+	const x = box.x + box.width / 2;
+	const y = box.y + box.height / 2;
+	await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+	for (let i = 1; i <= 10; i++)
+		await cdp.send('Input.dispatchTouchEvent', {
+			type: 'touchMove',
+			touchPoints: [{ x: x + (dx * i) / 10, y: y + (dy * i) / 10 }]
+		});
+	await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+}
+
+/** Settings from wherever the layout keeps its button. */
+async function openSettings(page: Page) {
+	if ((await layoutOf(page)) === 'tablet')
+		await page.getByRole('button', { name: 'Open folders' }).tap();
+	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).tap();
+}
+
+async function openHarness(page: Page) {
+	await page.getByRole('button', { name: 'Toggle AI harness' }).tap();
+	const harness = page.getByRole('region', { name: 'AI harness' });
+	await expect(harness).toBeVisible();
+	return harness;
+}
+
+const width = (loc: Locator) => loc.evaluate((el) => el.getBoundingClientRect().width);
 
 test.beforeEach(async ({ page }) => {
 	await page.addInitScript(installFakeApi);
@@ -54,9 +97,14 @@ test('layout matches the device', async ({ page }, info) => {
 			: 'desktop';
 	expect(await layoutOf(page)).toBe(expected);
 	await expect(page.locator('html')).toHaveAttribute('data-touch', '');
-	// Push / Pull live in the top bar on every layout, at finger size.
+	// Push / Pull sit in the top bar (phones: its overflow menu), at finger size.
+	if (expected === 'phone') {
+		await expect(page.getByRole('button', { name: 'Pull', exact: true })).toHaveCount(0);
+		await page.getByRole('button', { name: 'More', exact: true }).tap();
+		await expect(page.locator('.sheet-root')).toBeVisible();
+	}
 	for (const name of ['Pull', 'Push']) {
-		const btn = page.getByRole('button', { name, exact: true });
+		const btn = page.getByRole(expected === 'phone' ? 'menuitem' : 'button', { name, exact: true });
 		await expect(btn).toBeVisible();
 		expect((await btn.boundingBox())!.height).toBeGreaterThanOrEqual(44);
 	}
@@ -122,11 +170,14 @@ test('tablet landscape: three panes with touch-sized targets', async ({ page }) 
 	const row = sidebar(page).locator('.folder-row').first();
 	expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(42);
 	await openPlan(page);
+	await expect(toolbar(page)).toHaveCount(0);
+	await edit(page);
 	await expect(toolbar(page)).toBeVisible();
 });
 
 test('formatting toolbar: every button edits the note and keeps focus', async ({ page }) => {
 	await openPlan(page);
+	await edit(page);
 	await expect(toolbar(page)).toBeVisible();
 	await page.locator('.ProseMirror p').last().tap();
 	await page.keyboard.press('End');
@@ -163,6 +214,10 @@ test('long-press a note opens its menu without opening the note', async ({ page 
 	await page.waitForTimeout(750);
 	await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
 	await expect(page.getByRole('menu')).toBeVisible();
+	// Phones get a bottom action sheet; wider layouts the anchored menu.
+	const phone = (await layoutOf(page)) === 'phone';
+	await expect(page.locator('.sheet-root')).toHaveCount(phone ? 1 : 0);
+	await expect(page.getByRole('menuitem', { name: 'Pin' })).toBeVisible();
 	await expect(list(page).locator('.card.active')).toHaveCount(0);
 	// A normal tap still opens the note.
 	await page.keyboard.press('Escape');
@@ -174,6 +229,7 @@ test('long-press a note opens its menu without opening the note', async ({ page 
 
 test('rotating keeps the same editor, text and caret', async ({ page }) => {
 	await openPlan(page);
+	await edit(page);
 	await page.locator('.ProseMirror p').last().tap();
 	await page.keyboard.press('End');
 	await page.keyboard.type(' typed');
@@ -211,12 +267,14 @@ test('rotating keeps the same editor, text and caret', async ({ page }) => {
 test('ghost syntax: no hover reveal on touch, shown at the caret', async ({ page }) => {
 	await expect(page.locator('html')).toHaveAttribute('data-hover', 'none');
 	await openPlan(page);
+	await edit(page);
 	const heading = page.locator('.ProseMirror p').first();
 	const hash = heading.locator('.md-syntax').first();
 	const fontSize = () => hash.evaluate((el) => getComputedStyle(el).fontSize);
 	await page.locator('.ProseMirror p').last().tap();
 	await heading.hover();
-	expect(await fontSize()).toBe('0px');
+	// (Poll: the caret just left the heading, whose syntax fades out over 130ms.)
+	await expect.poll(fontSize).toBe('0px');
 	await heading.tap({ position: { x: 2, y: 8 } });
 	await page.keyboard.press('Home');
 	await expect.poll(fontSize).not.toBe('0px');
@@ -256,7 +314,7 @@ test('AI harness: question → approved write → saved session', async ({ page 
 	await input.fill('help me with tone');
 	await input.press('Enter');
 
-	await expect(harness.getByText('Which tone?', { exact: true })).toBeVisible();
+	await expect(harness.getByRole('heading', { name: 'Which tone?' })).toBeVisible();
 	await harness.getByRole('button', { name: 'Casual' }).tap();
 
 	await expect(harness.getByText(/append.*current note \(Work\/plan\.md\)/)).toBeVisible();
@@ -293,6 +351,9 @@ test('AI harness: @folder/ mention inlines the folder', async ({ page }) => {
 	await input.pressSequentially('context?');
 	await input.press('Enter');
 	await expect(harness.getByText('ctx: Work/plan.md | index of @Work/')).toBeVisible();
+	// The context summary counts it; expanding shows the attachment itself.
+	await expect(harness.locator('.ctx-sum')).toContainText('+1 attached');
+	await harness.locator('.ctx-sum').tap();
 	await expect(harness.locator('.chip.dir')).toHaveText(/Work\//);
 });
 
@@ -303,12 +364,375 @@ test('AI off: no button, no pane', async ({ page }) => {
 	const layout = await layoutOf(page);
 	if (layout === 'phone') await page.getByRole('button', { name: 'Back' }).tap();
 	if (layout === 'phone') await page.getByRole('button', { name: 'Back' }).tap();
-	if (layout === 'tablet') await page.getByRole('button', { name: 'Open folders' }).tap();
-	await page.getByRole('button', { name: 'Settings', exact: true }).tap();
+	await openSettings(page);
+	await page
+		.getByRole('navigation', { name: 'Settings sections' })
+		.getByRole('button', { name: /AI assistant/ })
+		.tap();
 	const sw = page.getByRole('switch', { name: 'Enable AI harness' });
 	await expect(sw).toHaveAttribute('aria-checked', 'true');
 	await sw.tap();
 	await expect(sw).toHaveAttribute('aria-checked', 'false');
 	await expect(page.getByText('Max steps per run')).toHaveCount(0);
 	await expect(page.locator('.harness')).toHaveCount(0);
+});
+// --- view / edit mode ------------------------------------------------------------
+
+test('notes open in view mode on touch: no keyboard until Edit', async ({ page }) => {
+	await openPlan(page);
+	const pm = page.locator('.ProseMirror');
+	await expect(pm).toHaveAttribute('contenteditable', 'false');
+	await expect(toolbar(page)).toHaveCount(0);
+	expect(await page.evaluate(() => !!document.activeElement?.closest('.ProseMirror'))).toBe(false);
+	// A stray tap on the text doesn't start editing.
+	await page.locator('.ProseMirror p').last().tap();
+	await expect(pm).toHaveAttribute('contenteditable', 'false');
+
+	await edit(page);
+	await expect(toolbar(page)).toBeVisible();
+	await page.keyboard.type('X');
+	await expect.poll(() => editorText(page)).toContain('X');
+
+	await page.getByRole('button', { name: 'Done editing' }).tap();
+	await expect(pm).toHaveAttribute('contenteditable', 'false');
+	await expect(toolbar(page)).toHaveCount(0);
+
+	// Double-tap edits right there.
+	await page.locator('.ProseMirror p').last().dblclick();
+	await expect(pm).toHaveAttribute('contenteditable', 'true');
+});
+
+test('editor header sits above the text, also when scrolled', async ({ page }) => {
+	await openPlan(page);
+	await edit(page);
+	await page.locator('.ProseMirror p').last().tap();
+	for (let i = 0; i < 40; i++) await page.keyboard.press('Enter');
+	const scroll = page.locator('.editor-pane .scroll');
+	await scroll.evaluate((el) => (el.scrollTop = 300));
+	await expect(page.locator('.editor-head')).toHaveClass(/scrolled/);
+	const head = (await page.locator('.editor-head').boundingBox())!;
+	const body = (await scroll.boundingBox())!;
+	expect(body.y).toBeGreaterThanOrEqual(head.y + head.height - 1);
+	// What's under the AI button is the button, not note text.
+	const hit = await page.getByRole('button', { name: 'Toggle AI harness' }).evaluate((el) => {
+		const r = el.getBoundingClientRect();
+		return (
+			document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest('.editor-head') !==
+			null
+		);
+	});
+	expect(hit).toBe(true);
+});
+
+// --- settings ----------------------------------------------------------------------
+
+test('settings: sections instead of one long page', async ({ page }) => {
+	await openSettings(page);
+	const nav = page.getByRole('navigation', { name: 'Settings sections' });
+	await expect(nav).toBeVisible();
+	await nav.getByRole('button', { name: /Appearance/ }).tap();
+	await expect(page.getByRole('radiogroup', { name: 'Theme' })).toBeVisible();
+	// Other sections' controls aren't piled onto the same page.
+	await expect(page.getByRole('switch', { name: 'Enable AI harness' })).toHaveCount(0);
+	if ((await layoutOf(page)) === 'phone') {
+		// Phones drill in: the section replaces the list; back returns to it.
+		await expect(nav).toHaveCount(0);
+		await page.getByRole('button', { name: 'All settings' }).tap();
+		await expect(nav).toBeVisible();
+		await page.getByRole('button', { name: 'Back' }).tap();
+		await expect(nav).toHaveCount(0);
+	} else {
+		await nav.getByRole('button', { name: /General/ }).tap();
+		await expect(page.getByRole('radiogroup', { name: 'Open notes in' })).toBeVisible();
+	}
+});
+
+// --- swipe actions -------------------------------------------------------------------
+
+test('swipe reveals an action; only tapping it commits', async ({ page }) => {
+	await openFolder(page, /^All Notes/);
+	const card = list(page).getByRole('button', { name: /Hello/ });
+	const trashed = () =>
+		page.evaluate(() => (window as unknown as { __trashed: string[] }).__trashed);
+
+	// A mostly-vertical drag is a scroll: nothing is revealed.
+	await swipe(page, card, -20, 80);
+	await expect(list(page).locator('.action')).toHaveCount(0);
+
+	// Swipe left: "Trash" shows, but nothing happens until it is tapped.
+	await swipe(page, card, -150);
+	const trash = list(page).getByRole('button', { name: 'Trash', exact: true });
+	await expect(trash).toBeVisible();
+	expect((await trash.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+	await page.waitForTimeout(300);
+	expect(await trashed()).toEqual([]);
+
+	// Tapping elsewhere closes it.
+	await list(page)
+		.locator('.list')
+		.tap({ position: { x: 20, y: 300 } });
+	await expect(list(page).locator('.action')).toHaveCount(0);
+	expect(await trashed()).toEqual([]);
+
+	// Swipe right → Pin, tap to commit.
+	await swipe(page, card, 150);
+	await list(page).getByRole('button', { name: 'Pin', exact: true }).tap();
+	await expect
+		.poll(() =>
+			page.evaluate(() =>
+				(window as unknown as { __writes: { content: string }[] }).__writes.some((w) =>
+					w.content.includes('<!-- pinned: true -->')
+				)
+			)
+		)
+		.toBe(true);
+
+	await swipe(page, card, -150);
+	await list(page).getByRole('button', { name: 'Trash', exact: true }).tap();
+	await expect.poll(trashed).toEqual(['hello.md']);
+});
+
+test('trash: deleting forever asks first', async ({ page }) => {
+	await openFolder(page, /^Trash/);
+	const card = list(page).getByRole('button', { name: /Old/ });
+	const deleted = () =>
+		page.evaluate(() => (window as unknown as { __deleted: string[] }).__deleted);
+	await swipe(page, card, -150);
+	await list(page).getByRole('button', { name: 'Delete forever' }).tap();
+	const dialog = page.getByRole('alertdialog');
+	await expect(dialog).toContainText('Delete forever?');
+	await dialog.getByRole('button', { name: 'Cancel' }).tap();
+	await expect(dialog).toHaveCount(0);
+	expect(await deleted()).toEqual([]);
+
+	await swipe(page, card, -150);
+	await list(page).getByRole('button', { name: 'Delete forever' }).tap();
+	await page.getByRole('alertdialog').getByRole('button', { name: 'Delete forever' }).tap();
+	await expect.poll(deleted).toEqual(['.fr5a_trash/old.md']);
+});
+
+// --- changes (git status) ------------------------------------------------------------
+
+test('changes: an edited note shows up with its diff', async ({ page }) => {
+	await openPlan(page);
+	await edit(page);
+	await page.locator('.ProseMirror p').last().tap();
+	await page.keyboard.press('End');
+	await page.keyboard.type(' extra');
+	await expect
+		.poll(() => page.evaluate(() => (window as unknown as { __writes: unknown[] }).__writes.length))
+		.toBeGreaterThan(0);
+
+	if ((await layoutOf(page)) === 'phone') {
+		await page.getByRole('button', { name: 'More', exact: true }).tap();
+		await page.getByRole('menuitem', { name: /^Changes/ }).tap();
+		await page.locator('.file').filter({ hasText: 'plan.md' }).tap();
+	} else {
+		await page.locator('.titlebar').getByRole('button', { name: 'Changes' }).tap();
+		await expect(page.locator('.file').filter({ hasText: 'plan.md' })).toBeVisible();
+	}
+	await expect(page.getByRole('heading', { name: 'Changes' })).toBeVisible();
+	await expect(page.locator('.dl.add').filter({ hasText: 'first line extra' })).toBeVisible();
+	await expect(page.locator('.dl.del').filter({ hasText: /^.*first line$/ })).toBeVisible();
+	// Closing the view leaves the same editor (never unmounted underneath).
+	await page.getByRole('button', { name: 'Close changes' }).tap();
+	await expect(page.locator('.ProseMirror')).toContainText('first line extra');
+});
+
+// --- layout ----------------------------------------------------------------------------
+
+test('note list can be hidden on wide layouts, landscape included', async ({ page }) => {
+	test.skip((await layoutOf(page)) === 'phone', 'phones show one pane at a time');
+	const btn = page.getByRole('button', { name: 'Toggle note list' });
+	expect((await btn.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+	await expect.poll(() => width(list(page))).toBeGreaterThan(200);
+	await btn.tap();
+	await expect(list(page)).toHaveAttribute('aria-hidden', 'true');
+	await expect.poll(() => width(list(page))).toBeLessThan(2);
+	await btn.tap();
+	await expect.poll(() => width(list(page))).toBeGreaterThan(200);
+});
+
+test('phone: panes slide without remounting the editor', async ({ page }) => {
+	test.skip((await layoutOf(page)) !== 'phone', 'phone layout only');
+	await openPlan(page);
+	await page.evaluate(
+		() => ((document.querySelector('.ProseMirror') as HTMLElement).dataset.mark = '1')
+	);
+	await page.getByRole('button', { name: 'Back' }).tap();
+	await expect(editorPane(page)).toBeHidden();
+	// Waiting off to the right, still mounted.
+	await expect(page.locator('.editor-wrap')).toHaveAttribute('data-pos', 'after');
+	await list(page).getByText('Plan', { exact: true }).tap();
+	await expect(editorPane(page)).toBeVisible();
+	await expect(page.locator('.list-wrap')).toHaveAttribute('data-pos', 'before');
+	await expect(page.locator('.ProseMirror[data-mark="1"]')).toHaveCount(1);
+});
+
+test('tablet: the AI sheet expands and its scrim closes it', async ({ page }) => {
+	test.skip((await layoutOf(page)) !== 'tablet', 'tablet layout only');
+	await openPlan(page);
+	await openHarness(page);
+	const wrap = page.locator('.harness-wrap');
+	const half = await wrap.evaluate((el) => el.getBoundingClientRect().height);
+	await page.getByRole('button', { name: 'Expand AI sheet' }).tap();
+	await expect(page.locator('.body')).toHaveClass(/sheet-expanded/);
+	await expect
+		.poll(() => wrap.evaluate((el) => el.getBoundingClientRect().height))
+		.toBeGreaterThan(half + 200);
+	await page.getByRole('button', { name: 'Shrink AI sheet' }).tap();
+	await expect(page.locator('.body')).not.toHaveClass(/sheet-expanded/);
+	await page
+		.getByRole('button', { name: 'Close AI', exact: true })
+		.tap({ position: { x: 20, y: 20 } });
+	await expect(page.locator('.body')).not.toHaveClass(/harness-open/);
+});
+
+test('reduced motion zeroes the motion tokens', async ({ page }) => {
+	const dur = () =>
+		page.evaluate(() =>
+			getComputedStyle(document.documentElement).getPropertyValue('--dur-pane').trim()
+		);
+	expect(await dur()).toBe('180ms');
+	await page.emulateMedia({ reducedMotion: 'reduce' });
+	expect(await dur()).toBe('0ms');
+});
+
+// --- AI harness ------------------------------------------------------------------------
+
+test('AI harness: several questions in one full-width card', async ({ page }) => {
+	await openPlan(page);
+	const harness = await openHarness(page);
+	const input = harness.locator('textarea');
+	await input.fill('multi?');
+	await input.press('Enter');
+
+	const panel = harness.getByRole('group', { name: 'Question from the AI' });
+	await expect(panel.getByRole('heading', { name: 'Who is it for?' })).toBeVisible();
+	expect(await width(panel)).toBeGreaterThan((await width(harness)) * 0.95);
+	await expect(panel.getByText('internal readers')).toBeVisible();
+	await expect(panel.getByRole('tab')).toHaveCount(2);
+	// While a question is open, the prompt makes room for it.
+	await expect(harness.locator('textarea')).toHaveCount(0);
+
+	await panel.getByRole('button', { name: /Team/ }).tap();
+	await expect(panel.getByRole('heading', { name: 'Which sections?' })).toBeVisible();
+	await panel.getByRole('button', { name: /Intro/ }).tap();
+	await panel.getByRole('button', { name: /Body/ }).tap();
+	await panel.getByRole('button', { name: 'Submit answers' }).tap();
+
+	await expect(harness.getByText(/Who is it for\? → Team/)).toBeVisible();
+	await expect(harness.getByText(/Which sections\? → Intro, Body/)).toBeVisible();
+	await expect(harness.locator('textarea')).toBeVisible();
+});
+
+test('AI harness: replies render Markdown and JSON, never raw HTML', async ({ page }) => {
+	await openPlan(page);
+	const harness = await openHarness(page);
+	const input = harness.locator('textarea');
+	await input.fill('md?');
+	await input.press('Enter');
+	const md = harness.locator('.msg.ai .md');
+	await expect(md.locator('h1')).toHaveText('Title');
+	await expect(md.locator('li strong')).toHaveText('bold');
+	await expect(md.locator('a')).toHaveAttribute('href', 'https://example.com');
+	await expect(md.locator('.md-code .j-key')).toHaveText('"a"');
+	await expect(md.locator('img')).toHaveCount(0);
+	await expect(md).toContainText('<img src=x');
+	expect(
+		await page.evaluate(() => (window as unknown as { __xss?: number }).__xss)
+	).toBeUndefined();
+});
+
+test('AI harness: a dropped connection can be retried', async ({ page }) => {
+	await openPlan(page);
+	const harness = await openHarness(page);
+	const input = harness.locator('textarea');
+	await input.fill('flaky? context?');
+	await input.press('Enter');
+	const alert = harness.getByRole('alert');
+	await expect(alert).toContainText('Network problem');
+	await alert.getByRole('button', { name: 'Retry' }).tap();
+	await expect(harness.getByText(/^ctx: /)).toBeVisible();
+	await expect(harness.getByRole('alert')).toHaveCount(0);
+	// Retry re-ran the same message rather than adding a second one.
+	await expect(harness.locator('.msg.you')).toHaveCount(1);
+});
+
+test('AI harness: jump to latest after scrolling up', async ({ page }) => {
+	await openPlan(page);
+	const harness = await openHarness(page);
+	const input = harness.locator('textarea');
+	await input.fill('long?');
+	await input.press('Enter');
+	await expect(harness.getByText('line 80', { exact: true })).toBeVisible();
+	await harness.locator('.transcript').evaluate((el) => (el.scrollTop = 0));
+	const jump = harness.getByRole('button', { name: 'Latest' });
+	await expect(jump).toBeVisible();
+	await jump.tap();
+	await expect(jump).toHaveCount(0);
+	await expect(harness.getByText('line 80', { exact: true })).toBeInViewport();
+});
+
+test('AI harness: web search turns on from the context panel', async ({ page }) => {
+	await openPlan(page);
+	const harness = await openHarness(page);
+	await harness.locator('.ctx-sum').tap();
+	await harness.getByRole('button', { name: /Search off/ }).tap();
+	await expect(harness.getByRole('button', { name: /Search on · DuckDuckGo/ })).toBeVisible();
+	await expect(harness.locator('.ctx-sum')).toContainText('web');
+});
+
+// --- mouse desktop ---------------------------------------------------------------------
+
+async function desktopPage(browser: Browser) {
+	const ctx = await browser.newContext({
+		viewport: { width: 1280, height: 800 },
+		isMobile: false,
+		hasTouch: false
+	});
+	const page = await ctx.newPage();
+	await page.addInitScript(installFakeApi);
+	await page.goto('/');
+	await expect(page.locator('.body')).toHaveAttribute('data-layout', 'desktop');
+	return { ctx, page };
+}
+
+test('desktop: panes resize by dragging their edges; the list toggles', async ({ browser }) => {
+	const { ctx, page } = await desktopPage(browser);
+	const sep = page.getByRole('separator', { name: 'Resize note list' });
+	const before = await width(list(page));
+	const b = (await sep.boundingBox())!;
+	const y = b.y + 200;
+	await page.mouse.move(b.x, y);
+	await page.mouse.down();
+	await page.mouse.move(b.x + 80, y, { steps: 6 });
+	await page.mouse.up();
+	await expect.poll(() => width(list(page))).toBeGreaterThan(before + 60);
+	// Double-click puts it back.
+	await page.mouse.dblclick(b.x + 80, y);
+	await expect.poll(() => width(list(page))).toBeLessThan(before + 5);
+
+	await page.keyboard.press('Control+Shift+L');
+	await expect(list(page)).toHaveAttribute('aria-hidden', 'true');
+	await page.keyboard.press('Control+Shift+L');
+	await expect(list(page)).toHaveAttribute('aria-hidden', 'false');
+	await ctx.close();
+});
+
+test('desktop: notes open editable; the note menu is anchored, not a sheet', async ({
+	browser
+}) => {
+	const { ctx, page } = await desktopPage(browser);
+	await sidebar(page)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	await list(page).getByText('Plan', { exact: true }).click();
+	await expect(page.locator('.ProseMirror')).toHaveAttribute('contenteditable', 'true');
+	await list(page).getByRole('button', { name: /Hello/ }).click({ button: 'right' });
+	await expect(page.getByRole('menu')).toBeVisible();
+	await expect(page.locator('.sheet-root')).toHaveCount(0);
+	await page.keyboard.press('Escape');
+	await expect(page.getByRole('menu')).toHaveCount(0);
+	await ctx.close();
 });

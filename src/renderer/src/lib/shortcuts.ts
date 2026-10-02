@@ -13,13 +13,15 @@ export const SHORTCUTS: Shortcut[] = [
 	{ keys: ['Mod', 'N'], desc: 'New note' },
 	{ keys: ['Mod', '\\'], desc: 'Toggle Zen mode' },
 	{ keys: ['Mod', 'J'], desc: 'Toggle the AI harness pane' },
+	{ keys: ['Mod', '⇧', 'L'], desc: 'Show / hide the note list' },
+	{ keys: ['Mod', '⇧', 'E'], desc: 'View / edit mode for the open note' },
 	{ keys: ['Mod', ','], desc: 'Open / close Settings' },
 	{ keys: ['Mod', 'B'], desc: 'Bold  **text**' },
 	{ keys: ['Mod', 'I'], desc: 'Italic  *text*' },
 	{ keys: ['Mod', 'E'], desc: 'Inline code  `text`' },
 	{ keys: ['Mod', 'P'], desc: 'Pin / unpin the current note' },
 	{ keys: ['Mod', '⇧', 'X'], desc: 'Strikethrough  ~~text~~' },
-	{ keys: ['Esc'], desc: 'Close overlay · exit Settings / Zen' }
+	{ keys: ['Esc'], desc: 'Close overlay · exit Settings / Changes / Zen' }
 ];
 
 export const VIM_SHORTCUTS: Shortcut[] = [

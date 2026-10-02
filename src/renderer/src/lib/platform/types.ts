@@ -1,5 +1,6 @@
 import type {
 	ConflictFile,
+	GitChange,
 	HttpRequest,
 	HttpResponse,
 	NoteMeta,
@@ -66,6 +67,11 @@ export interface PlatformApi {
 	syncAddRepo?(path: string, url: string, token: string): Promise<SyncResponse>;
 	/** Android: stop syncing a nested repo (its files stay on disk). */
 	syncRemoveRepo?(path: string): Promise<void>;
+	/**
+	 * Notes changed since the last commit (root + nested repos), with the
+	 * committed text for diffing. Null when the workspace isn't under git.
+	 */
+	gitChanges?(): Promise<GitChange[] | null>;
 
 	/**
 	 * Hosts that own the working copy (Android): first-run connect/clone to an

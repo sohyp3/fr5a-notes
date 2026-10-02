@@ -33,7 +33,7 @@ function deps(over: Partial<ToolDeps> = {}): ToolDeps {
 		config: { ...DEFAULT_AI_CONFIG, localOnlyFolders: ['private'] },
 		notes: () => [note('a.md', 'Alpha'), note('private/s.md', 'Secret')],
 		readNote: async (id) => files[id],
-		ask: async () => 'B',
+		ask: async () => ['B'],
 		proposeWrite: async () => 'Applied',
 		...over
 	};

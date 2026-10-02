@@ -15,13 +15,22 @@ export interface ProviderProfile {
 	contextTokens: number;
 }
 
-export type SearchKind = 'searxng' | 'brave' | 'tavily';
+export type SearchKind = 'duckduckgo' | 'searxng' | 'brave' | 'tavily';
 
 export interface SearchProfile {
 	kind: SearchKind;
-	/** SearXNG instance URL (ignored for Brave / Tavily). */
+	/** SearXNG instance URL (ignored by the others). */
 	baseUrl: string;
 }
+
+/** Web search choices, in the order Settings lists them. */
+export const SEARCH_KINDS: { kind: SearchKind; label: string; hint: string; needsKey: boolean }[] =
+	[
+		{ kind: 'duckduckgo', label: 'DuckDuckGo', hint: 'No key needed', needsKey: false },
+		{ kind: 'searxng', label: 'SearXNG', hint: 'Your own instance', needsKey: false },
+		{ kind: 'brave', label: 'Brave Search', hint: 'API key', needsKey: true },
+		{ kind: 'tavily', label: 'Tavily', hint: 'API key', needsKey: true }
+	];
 
 /** Persisted under the `ai` state key. API keys live in secrets, never here. */
 export interface AiConfig {

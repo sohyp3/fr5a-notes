@@ -19,7 +19,24 @@ export async function webSearch(
 ): Promise<SearchResult[]> {
 	const q = encodeURIComponent(query);
 	let res;
-	if (profile.kind === 'searxng') {
+	if (profile.kind === 'duckduckgo') {
+		// The no-JavaScript results page: no key, no account.
+		res = await http.httpFetch({
+			url: `https://html.duckduckgo.com/html/?q=${q}`,
+			headers: { Accept: 'text/html', 'User-Agent': UA },
+			timeoutMs: 30_000
+		});
+		if (res.status < 200 || res.status >= 300)
+			throw new Error(
+				`Search failed (${res.status}). DuckDuckGo may be rate-limiting; retry later.`
+			);
+		const results = parseDuckDuckGo(res.body);
+		if (!results.length && /anomaly|captcha/i.test(res.body))
+			throw new Error(
+				'DuckDuckGo asked for a captcha. Retry later, or use SearXNG / Brave / Tavily in Settings → AI.'
+			);
+		return results.slice(0, max);
+	} else if (profile.kind === 'searxng') {
 		const base = profile.baseUrl.trim().replace(/\/+$/, '');
 		if (!base) throw new Error('Set your SearXNG URL in Settings → AI.');
 		res = await http.httpFetch({
@@ -47,7 +64,43 @@ export async function webSearch(
 	return parseSearch(profile.kind, res.body).slice(0, max);
 }
 
+/**
+ * Results from DuckDuckGo's HTML page: each `result__a` link starts a result,
+ * the next `result__snippet` describes it. Ads (redirects through
+ * duckduckgo.com itself) are dropped; `/l/?uddg=` redirects are unwrapped.
+ */
+export function parseDuckDuckGo(html: string): SearchResult[] {
+	const out: SearchResult[] = [];
+	const el =
+		/<(a|div|td|span)\b([^>]*\bclass="[^"]*\bresult__(a|snippet)\b[^"]*"[^>]*)>([\s\S]*?)<\/\1>/g;
+	for (const m of html.matchAll(el)) {
+		const [, , attrs, kind, inner] = m;
+		if (kind === 'snippet') {
+			const last = out[out.length - 1];
+			if (last && !last.snippet) last.snippet = stripTags(inner).slice(0, 300);
+			continue;
+		}
+		const href = decode(/\bhref="([^"]*)"/.exec(attrs)?.[1] ?? '');
+		let url = href.startsWith('//') ? `https:${href}` : href;
+		const wrapped = /[?&]uddg=([^&]+)/.exec(url);
+		if (wrapped) {
+			try {
+				url = decodeURIComponent(wrapped[1]);
+			} catch {
+				continue;
+			}
+		}
+		if (!/^https?:\/\//i.test(url) || /^https?:\/\/([^/]+\.)?duckduckgo\.com\//i.test(url)) {
+			out.push({ title: '', url: '', snippet: 'skip' }); // keeps its snippet from attaching upward
+			continue;
+		}
+		out.push({ title: stripTags(inner) || url, url, snippet: '' });
+	}
+	return out.filter((r) => r.url);
+}
+
 export function parseSearch(kind: SearchProfile['kind'], body: string): SearchResult[] {
+	if (kind === 'duckduckgo') return parseDuckDuckGo(body);
 	const j = JSON.parse(body);
 	const rows: { title?: string; url?: string; content?: string; description?: string }[] =
 		kind === 'brave' ? (j?.web?.results ?? []) : (j?.results ?? []);

@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { Channels } from '../shared/types';
 import type {
 	ConflictFile,
+	GitChange,
 	HttpRequest,
 	HttpResponse,
 	NoteMeta,
@@ -67,6 +68,8 @@ const api = {
 	/** Clone `url` into workspace folder `path` with system git (token unused on desktop). */
 	syncAddRepo: (path: string, url: string): Promise<SyncResponse> =>
 		ipcRenderer.invoke(Channels.syncAddRepo, path, url),
+	/** Notes changed since the last commit; null when the folder isn't under git. */
+	gitChanges: (): Promise<GitChange[] | null> => ipcRenderer.invoke(Channels.gitChanges),
 
 	// AI harness. HTTP runs in main (the renderer's CSP blocks fetch).
 	httpFetch: (req: HttpRequest): Promise<HttpResponse> =>

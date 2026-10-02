@@ -1,5 +1,5 @@
 import { platform } from '../platform';
-import type { NoteMeta, TagNode, SidebarState } from '../../../../shared/types';
+import type { GitChange, NoteMeta, TagNode, SidebarState } from '../../../../shared/types';
 import { uiStack, editorStack } from '../fonts';
 import { accentById, applyPalette, DEFAULT_ACCENT } from '../accents';
 import { setPinned, setLocked, titleFromContent } from '../editor/markdown';
@@ -20,8 +20,34 @@ const DEFAULT_SIDEBAR: SidebarState = {
 	tagExpanded: {}
 };
 
-export type View = 'editor' | 'settings';
+export type View = 'editor' | 'settings' | 'changes';
 export type Pane = 'nav' | 'list' | 'editor' | 'harness';
+export type SettingsSection = 'general' | 'appearance' | 'editor' | 'sync' | 'ai' | 'shortcuts';
+/** How a note opens: 'auto' = view on touch devices (no keyboard pop-up), edit with a mouse. */
+export type OpenIn = 'auto' | 'view' | 'edit';
+
+/** Resizable pane widths (px) and their limits. */
+export const PANE_WIDTHS = {
+	sidebar: { def: 250, min: 180, max: 420 },
+	list: { def: 300, min: 220, max: 560 },
+	harness: { def: 400, min: 300, max: 760 }
+} as const;
+export type PaneName = keyof typeof PANE_WIDTHS;
+
+/** Pane layout persisted with the sidebar state. */
+interface PanePrefs {
+	sidebarOpen: boolean;
+	listOpen: boolean;
+	widths: Record<PaneName, number>;
+}
+
+export interface ConfirmRequest {
+	title: string;
+	body?: string;
+	confirm: string;
+	danger?: boolean;
+	resolve(ok: boolean): void;
+}
 
 export interface Settings {
 	/** Font option ids (see fonts.ts). */
@@ -36,6 +62,8 @@ export interface Settings {
 	accent: string;
 	/** AI harness on. Off: its code is never loaded, no button, no Mod+J. */
 	ai: boolean;
+	/** Open notes in view or edit mode. */
+	openIn: OpenIn;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -45,8 +73,12 @@ const DEFAULT_SETTINGS: Settings = {
 	vim: false,
 	ghost: true,
 	accent: DEFAULT_ACCENT,
-	ai: true
+	ai: true,
+	openIn: 'auto'
 };
+
+const clampWidth = (pane: PaneName, px: number) =>
+	Math.round(Math.min(PANE_WIDTHS[pane].max, Math.max(PANE_WIDTHS[pane].min, px)));
 
 /**
  * Central application state. A single instance is shared across components via
@@ -96,6 +128,44 @@ class AppState {
 	/** Soft-deleted notes (ids carry the `.fr5a_trash/` prefix). */
 	trashNotes = $state<NoteMeta[]>([]);
 	sidebarOpen = $state(true);
+	/** Note list pane shown (desktop + tablet layouts; persisted). */
+	listOpen = $state(true);
+	/** Pane widths in px, resizable by dragging pane edges (persisted). */
+	widths = $state<Record<PaneName, number>>({
+		sidebar: PANE_WIDTHS.sidebar.def,
+		list: PANE_WIDTHS.list.def,
+		harness: PANE_WIDTHS.harness.def
+	});
+	/** A pane edge is being dragged: widths track the pointer without springing. */
+	resizing = $state(false);
+	private paneTimer: ReturnType<typeof setTimeout> | null = null;
+
+	/**
+	 * The open note is editable. In view mode the text can't be changed and no
+	 * caret / on-screen keyboard appears until Edit is tapped.
+	 */
+	editing = $state(true);
+	/** Text of the open note when it was opened — the "since opened" diff without git. */
+	baseline = $state<{ id: string | null; text: string } | null>(null);
+
+	/** Section Settings shows (transient). */
+	settingsSection = $state<SettingsSection>('general');
+	/** Phones: a section is open (else the list of sections). */
+	settingsDrill = $state(false);
+	/** Notes changed since the last commit; null = not a git repo (or not loaded yet). */
+	changes = $state<GitChange[] | null>(null);
+	changesLoading = $state(false);
+	/** Path the Changes view selects first. */
+	changesFocus = $state<string | null>(null);
+	private changesTimer: ReturnType<typeof setTimeout> | null = null;
+
+	/** Note card whose swipe actions are revealed (one at a time). */
+	swipeOpen = $state<string | null>(null);
+	/** A pending confirmation dialog. */
+	confirmRequest = $state<ConfirmRequest | null>(null);
+	/** Tablet AI bottom sheet: expanded to (almost) full height. */
+	sheetExpanded = $state(false);
+
 	/** Global keyboard-shortcut cheat sheet overlay (toggle with Mod+/). */
 	cheatSheetOpen = $state(false);
 	theme = $state<'light' | 'dark'>('light');
@@ -201,6 +271,15 @@ class AppState {
 		// Sidebar layout (section visibility + expanded folders/tags).
 		const sidebar = await platform.getState<Partial<SidebarState>>('sidebar');
 		if (sidebar) this.sidebar = { ...DEFAULT_SIDEBAR, ...sidebar };
+		const panes = this.sidebar.panes as Partial<PanePrefs> | undefined;
+		if (panes) {
+			this.sidebarOpen = panes.sidebarOpen ?? true;
+			this.listOpen = panes.listOpen ?? true;
+			for (const p of Object.keys(PANE_WIDTHS) as PaneName[]) {
+				const w = panes.widths?.[p];
+				if (typeof w === 'number') this.widths[p] = clampWidth(p, w);
+			}
+		}
 
 		this.workspace = await platform.getWorkspace();
 		await this.refresh();
@@ -220,7 +299,7 @@ class AppState {
 		// Git sync: reload from disk after a clean sync; surface conflicts.
 		platform.onSyncDone(() => {
 			this.conflictOpen = false;
-			void this.reloadFromDisk();
+			void this.reloadFromDisk().then(() => this.refreshChanges());
 		});
 		platform.onSyncConflict((files) => {
 			this.showSyncMessage(
@@ -237,6 +316,47 @@ class AppState {
 		// The stacked layout opens on the folders pane, whatever note was restored.
 		this.pane = 'nav';
 		this.booted = true;
+		void this.refreshChanges();
+	}
+
+	// --- changes (git status) -------------------------------------------------
+
+	/** Re-read git status now (Changes view, after a sync). */
+	async refreshChanges(): Promise<void> {
+		if (!platform.gitChanges || !this.workspace) {
+			this.changes = null;
+			return;
+		}
+		if (this.changesTimer) clearTimeout(this.changesTimer);
+		this.changesTimer = null;
+		this.changesLoading = true;
+		try {
+			await this.flush();
+			this.changes = await platform.gitChanges();
+		} catch (err) {
+			console.error('[changes]', err);
+		} finally {
+			this.changesLoading = false;
+		}
+	}
+
+	/** Coalesce status refreshes while typing / while files change. */
+	private scheduleChanges(): void {
+		if (!platform.gitChanges || this.changes === null) return;
+		if (this.changesTimer) clearTimeout(this.changesTimer);
+		this.changesTimer = setTimeout(() => void this.refreshChanges(), 1500);
+	}
+
+	/** Open the Changes view, optionally on one note's diff. */
+	showChanges(path: string | null = null): void {
+		this.changesFocus = path;
+		this.setView('changes');
+		void this.refreshChanges();
+	}
+
+	/** git status of one note, if it differs from the last commit. */
+	changeFor(id: string | null): GitChange | null {
+		return (id && this.changes?.find((c) => c.path === id)) || null;
 	}
 
 	async refresh(): Promise<void> {
@@ -261,6 +381,7 @@ class AppState {
 			this.activeId = null;
 			this.activeContent = '';
 		}
+		this.scheduleChanges();
 	}
 
 	async pickWorkspace(): Promise<void> {
@@ -277,6 +398,7 @@ class AppState {
 	}
 
 	async openNote(id: string): Promise<void> {
+		this.swipeOpen = null;
 		if (id === this.activeId) {
 			this.view = 'editor';
 			this.pane = 'editor';
@@ -292,6 +414,8 @@ class AppState {
 		this.pane = 'editor';
 		this.activeContent = content;
 		this.activeId = id;
+		this.baseline = { id, text: content.replace(/\r\n?/g, '\n') };
+		this.editing = this.defaultEditing();
 		this.editorSession++;
 		void platform.setState('lastOpenFile', id);
 	}
@@ -307,7 +431,27 @@ class AppState {
 		this.draft = true;
 		this.activeId = null;
 		this.activeContent = '# ';
+		this.baseline = { id: null, text: '' };
+		// A new note is for writing: always open it editable.
+		this.editing = true;
 		this.editorSession++;
+	}
+
+	// --- view / edit mode ------------------------------------------------------
+
+	/** Mode a note opens in, from the setting ('auto': view on touch, edit with a mouse). */
+	private defaultEditing(): boolean {
+		const o = this.settings.openIn;
+		return o === 'edit' || (o === 'auto' && !this.touch);
+	}
+
+	setEditing(on: boolean): void {
+		this.editing = on;
+		if (!on) void this.flush();
+	}
+
+	toggleEditing(): void {
+		this.setEditing(!this.editing);
 	}
 
 	/**
@@ -454,16 +598,33 @@ class AppState {
 
 	/** Does the top bar show a back button (phone layout only)? */
 	get canGoBack(): boolean {
-		return this.layout === 'phone' && (this.view === 'settings' || this.pane !== 'nav');
+		return this.layout === 'phone' && (this.view !== 'editor' || this.pane !== 'nav');
 	}
 
 	/**
-	 * One step back (top-bar button / Android back): leave settings, close the
-	 * drawer, or on phones editor → list → folders. False when there's nowhere
-	 * to go (the host may then exit).
+	 * One step back (top-bar button / Android back): close a dialog or the
+	 * revealed swipe actions, leave Settings / Changes, close the drawer, or on
+	 * phones editor → list → folders. False when there's nowhere to go (the
+	 * host may then exit).
 	 */
 	back(): boolean {
-		if (this.view === 'settings') {
+		if (this.confirmRequest) {
+			this.answerConfirm(false);
+			return true;
+		}
+		if (this.contextMenu) {
+			this.closeContextMenu();
+			return true;
+		}
+		if (this.swipeOpen) {
+			this.swipeOpen = null;
+			return true;
+		}
+		if (this.view === 'settings' && this.layout === 'phone' && this.settingsDrill) {
+			this.settingsDrill = false;
+			return true;
+		}
+		if (this.view !== 'editor') {
 			this.view = 'editor';
 			return true;
 		}
@@ -595,10 +756,62 @@ class AppState {
 	setView(view: View): void {
 		this.view = view;
 		this.drawerOpen = false;
+		this.swipeOpen = null;
 	}
 
 	toggleSettings(): void {
-		this.setView(this.view === 'settings' ? 'editor' : 'settings');
+		if (this.view === 'settings') this.setView('editor');
+		else this.openSettings();
+	}
+
+	/** Open Settings, optionally on one section (e.g. 'ai' from the harness). */
+	openSettings(section?: SettingsSection): void {
+		if (section) this.settingsSection = section;
+		this.settingsDrill = !!section;
+		this.setView('settings');
+	}
+
+	// --- confirmation dialog ---------------------------------------------------
+
+	/** Ask before something irreversible; resolves false on cancel / back / Escape. */
+	confirm(req: Omit<ConfirmRequest, 'resolve'>): Promise<boolean> {
+		this.confirmRequest?.resolve(false);
+		return new Promise((resolve) => (this.confirmRequest = { ...req, resolve }));
+	}
+
+	answerConfirm(ok: boolean): void {
+		const r = this.confirmRequest;
+		this.confirmRequest = null;
+		r?.resolve(ok);
+	}
+
+	// --- pane layout (persisted) ---------------------------------------------
+
+	toggleList(): void {
+		this.listOpen = !this.listOpen;
+		this.persistPanes();
+	}
+
+	setWidth(pane: PaneName, px: number): void {
+		this.widths[pane] = clampWidth(pane, px);
+		this.persistPanes();
+	}
+
+	resetWidth(pane: PaneName): void {
+		this.setWidth(pane, PANE_WIDTHS[pane].def);
+	}
+
+	private persistPanes(): void {
+		if (this.paneTimer) clearTimeout(this.paneTimer);
+		this.paneTimer = setTimeout(() => {
+			const panes: PanePrefs = {
+				sidebarOpen: this.sidebarOpen,
+				listOpen: this.listOpen,
+				widths: { ...this.widths }
+			};
+			this.sidebar.panes = panes;
+			this.persistSidebar();
+		}, 300);
 	}
 
 	toggleZen(): void {
@@ -779,6 +992,7 @@ class AppState {
 
 	toggleSidebar(): void {
 		this.sidebarOpen = !this.sidebarOpen;
+		this.persistPanes();
 	}
 }
 

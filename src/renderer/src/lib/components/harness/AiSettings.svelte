@@ -12,10 +12,12 @@
 		isBuiltinProvider,
 		KEY_URLS,
 		OPENCODE_ZEN,
+		SEARCH_KINDS,
 		ZEN_KEY_URL,
 		type ProviderProfile,
 		type SearchKind
 	} from '../../harness/types';
+	import Icon from '../Icon.svelte';
 
 	const app = getAppState();
 	const ai = getAiSettings();
@@ -59,6 +61,10 @@
 
 	type Draft = ProviderProfile & { apiKey: string; hasKey: boolean };
 	let draft = $state<Draft | null>(null);
+	/** The one provider row showing its key + model fields. */
+	let expanded = $state<string | null>(null);
+	/** Local-only folders list (long in big workspaces): collapsed by default. */
+	let foldersOpen = $state(false);
 	let testing = $state(false);
 	let message = $state<{ kind: 'ok' | 'error'; text: string } | null>(null);
 
@@ -231,92 +237,113 @@
 </script>
 
 <section class="group">
-	<h2>AI</h2>
-
-	{#each cfg.providers as p (p.id)}
-		{@const models = ai.models[p.id] ?? []}
-		<div class="row stack provider" class:is-default={cfg.defaultProvider === p.id}>
-			<div class="phead">
-				<label class="label radio">
-					<input
-						type="radio"
-						name="default-provider"
-						checked={cfg.defaultProvider === p.id}
-						onchange={() => ai.update({ defaultProvider: p.id })}
-					/>
-					<span class="name"
-						>{p.name}
-						{#if cfg.defaultProvider === p.id}<span class="badge">default</span>{/if}
-						{#if p.local}<span class="badge">local</span>{/if}
-						{#if !p.local && !hasKey[p.id]}<span class="badge warn">no key</span>{/if}</span
-					>
-					<span class="desc">{p.baseUrl}</span>
-				</label>
-				<div class="actions">
-					<button class="btn" onclick={() => edit(p)}>Edit</button>
-					{#if !isBuiltinProvider(p.id)}
-						<button class="btn" onclick={() => ai.removeProvider(p.id)}>Remove</button>
-					{/if}
-				</div>
-			</div>
-			<div class="pgrid">
-				<label class="field" for="key-{p.id}">
-					<span class="small">API key</span>
-					<div class="inline">
+	<h3>Providers</h3>
+	<p class="lead">The selected provider is the default; each AI tab can switch.</p>
+	<div class="providers" role="radiogroup" aria-label="Default provider">
+		{#each cfg.providers as p (p.id)}
+			{@const models = ai.models[p.id] ?? []}
+			{@const open = expanded === p.id}
+			<div class="provider" class:open class:is-default={cfg.defaultProvider === p.id}>
+				<div class="phead">
+					<label class="pick">
 						<input
-							id="key-{p.id}"
-							type="password"
-							autocomplete="off"
-							bind:value={keyInput[p.id]}
-							placeholder={hasKey[p.id] ? '•••••• saved' : p.local ? 'optional' : 'paste your key'}
+							type="radio"
+							name="default-provider"
+							checked={cfg.defaultProvider === p.id}
+							onchange={() => ai.update({ defaultProvider: p.id })}
 						/>
-						<button class="btn" disabled={!keyInput[p.id]?.trim()} onclick={() => saveKey(p.id)}
-							>Save</button
-						>
-					</div>
-					{#if KEY_URLS[p.id]}
-						<span class="desc"
-							>Get one at <a href={KEY_URLS[p.id]} target="_blank" rel="noreferrer"
-								>{KEY_URLS[p.id].replace(/^https:\/\//, '')}</a
-							></span
-						>
-					{/if}
-				</label>
-				<label class="field" for="model-{p.id}">
-					<span class="small">Model</span>
-					<div class="inline">
-						<select
-							id="model-{p.id}"
-							value={p.model}
-							onchange={(e) => ai.setModel(p.id, (e.currentTarget as HTMLSelectElement).value)}
-						>
-							{#if !models.includes(p.model)}<option value={p.model}>{p.model}</option>{/if}
-							{#each models as m (m)}<option value={m}>{m}</option>{/each}
-						</select>
-						<button
-							class="btn icon"
-							title="Reload the model list"
-							aria-label="Reload models for {p.name}"
-							disabled={loadingModels[p.id]}
-							onclick={() => refreshModels(p.id)}>{loadingModels[p.id] ? '…' : '↻'}</button
-						>
-					</div>
-					<span class="desc"
-						>{ai.modelErrors[p.id]
-							? `Couldn't list models: ${ai.modelErrors[p.id]}`
-							: models.length
-								? `${models.length} models`
-								: hasKey[p.id] || p.local || p.id === OPENCODE_ZEN.id
-									? 'Loading models…'
-									: 'Save a key to list models'}</span
+						<span class="pname">
+							<span class="name">{p.name}</span>
+							<span class="desc">{p.model || 'no model'}</span>
+						</span>
+					</label>
+					<span class="badges">
+						{#if p.local}<span class="badge">local</span>{/if}
+						{#if !p.local && !hasKey[p.id]}<span class="badge warn">no key</span>{/if}
+					</span>
+					<button
+						class="btn icon"
+						aria-expanded={open}
+						aria-label="{open ? 'Hide' : 'Show'} {p.name} details"
+						onclick={() => (expanded = open ? null : p.id)}
 					>
-				</label>
+						<span class="chev" class:open><Icon name="chevron" size={15} /></span>
+					</button>
+				</div>
+				{#if open}
+					<div class="pbody">
+						<label class="field" for="key-{p.id}">
+							<span class="small">API key</span>
+							<div class="inline">
+								<input
+									id="key-{p.id}"
+									type="password"
+									autocomplete="off"
+									bind:value={keyInput[p.id]}
+									placeholder={hasKey[p.id]
+										? '•••••• saved'
+										: p.local
+											? 'optional'
+											: 'paste your key'}
+								/>
+								<button class="btn" disabled={!keyInput[p.id]?.trim()} onclick={() => saveKey(p.id)}
+									>Save</button
+								>
+							</div>
+							{#if KEY_URLS[p.id]}
+								<span class="desc"
+									>Get one at <a href={KEY_URLS[p.id]} target="_blank" rel="noreferrer"
+										>{KEY_URLS[p.id].replace(/^https:\/\//, '')}</a
+									></span
+								>
+							{/if}
+						</label>
+						<label class="field" for="model-{p.id}">
+							<span class="small">Model</span>
+							<div class="inline">
+								<select
+									id="model-{p.id}"
+									value={p.model}
+									onchange={(e) => ai.setModel(p.id, (e.currentTarget as HTMLSelectElement).value)}
+								>
+									{#if !models.includes(p.model)}<option value={p.model}>{p.model}</option>{/if}
+									{#each models as m (m)}<option value={m}>{m}</option>{/each}
+								</select>
+								<button
+									class="btn icon"
+									title="Reload the model list"
+									aria-label="Reload models for {p.name}"
+									disabled={loadingModels[p.id]}
+									onclick={() => refreshModels(p.id)}
+									><span class:spin={loadingModels[p.id]}><Icon name="retry" size={15} /></span
+									></button
+								>
+							</div>
+							<span class="desc"
+								>{ai.modelErrors[p.id]
+									? `Couldn't list models: ${ai.modelErrors[p.id]}`
+									: models.length
+										? `${models.length} models`
+										: hasKey[p.id] || p.local || p.id === OPENCODE_ZEN.id
+											? 'Loading models…'
+											: 'Save a key to list models'}</span
+							>
+						</label>
+						<div class="actions">
+							<span class="desc url">{p.baseUrl}</span>
+							<button class="btn" onclick={() => edit(p)}>Edit…</button>
+							{#if !isBuiltinProvider(p.id)}
+								<button class="btn danger" onclick={() => ai.removeProvider(p.id)}>Remove</button>
+							{/if}
+						</div>
+					</div>
+				{/if}
 			</div>
-		</div>
-	{/each}
+		{/each}
+	</div>
 
 	{#if draft}
-		<div class="row stack form">
+		<div class="form">
 			<label class="field">
 				<span class="name">Start from</span>
 				<select onchange={preset}>
@@ -404,38 +431,46 @@
 			</div>
 		</div>
 	{:else}
-		<div class="row">
-			<div class="label">
-				<span class="name">Providers</span>
-				<span class="desc"
-					>{cfg.providers.length ? 'The selected one is the default.' : 'None yet.'}</span
-				>
-			</div>
-			<button class="btn" onclick={() => edit(null)}>Add provider…</button>
-		</div>
+		<button class="btn add" onclick={() => edit(null)}>
+			<Icon name="plus" size={15} /> Add provider…
+		</button>
 	{/if}
+</section>
 
-	<div class="row">
-		<div class="label">
-			<span class="name">Web search</span>
-			<span class="desc">For /sources and /fact-check. SearXNG can be self-hosted.</span>
-		</div>
-		<select
-			value={cfg.search?.kind ?? ''}
-			onchange={(e) =>
-				setSearchKind((e.currentTarget as HTMLSelectElement).value as SearchKind | '')}
+<section class="group" id="web-search">
+	<h3>Web search</h3>
+	<p class="lead">
+		Lets the AI look things up (<code>web_search</code> + <code>fetch_url</code>): ask it to search,
+		or run <code>/sources</code> or <code>/fact-check</code>. Only the search query and the pages it
+		reads leave the device.
+	</p>
+	<div class="search-kinds" role="radiogroup" aria-label="Web search provider">
+		<button
+			class="kind"
+			class:on={!cfg.search}
+			role="radio"
+			aria-checked={!cfg.search}
+			onclick={() => setSearchKind('')}
 		>
-			<option value="">Off</option>
-			<option value="searxng">SearXNG</option>
-			<option value="brave">Brave Search</option>
-			<option value="tavily">Tavily</option>
-		</select>
+			<span class="name">Off</span><span class="desc">No web access</span>
+		</button>
+		{#each SEARCH_KINDS as k (k.kind)}
+			<button
+				class="kind"
+				class:on={cfg.search?.kind === k.kind}
+				role="radio"
+				aria-checked={cfg.search?.kind === k.kind}
+				onclick={() => setSearchKind(k.kind)}
+			>
+				<span class="name">{k.label}</span><span class="desc">{k.hint}</span>
+			</button>
+		{/each}
 	</div>
 	{#if cfg.search}
-		<div class="row stack">
+		<div class="search-cfg">
 			{#if cfg.search.kind === 'searxng'}
 				<label class="field">
-					<span class="name">SearXNG URL</span>
+					<span class="small">SearXNG URL</span>
 					<input
 						type="url"
 						value={cfg.search.baseUrl}
@@ -452,41 +487,49 @@
 						>Needs <code>json</code> enabled in the instance's <code>search.formats</code>.</span
 					>
 				</label>
-			{:else}
+			{:else if cfg.search.kind !== 'duckduckgo'}
 				<label class="field">
-					<span class="name">API key</span>
-					<input
-						type="password"
-						autocomplete="off"
-						bind:value={searchKey}
-						placeholder={hasSearchKey ? '•••••• saved' : 'API key'}
-					/>
+					<span class="small">API key</span>
+					<div class="inline">
+						<input
+							type="password"
+							autocomplete="off"
+							bind:value={searchKey}
+							placeholder={hasSearchKey ? '•••••• saved' : 'API key'}
+						/>
+						<button class="btn" disabled={!searchKey.trim()} onclick={saveSearchKey}>Save</button>
+					</div>
 				</label>
 			{/if}
-			{#if searchMsg}<p class="msg" class:error={searchMsg.kind === 'error'}>
-					{searchMsg.text}
-				</p>{/if}
-			<div class="actions">
-				{#if cfg.search.kind !== 'searxng'}
-					<button class="btn" disabled={!searchKey.trim()} onclick={saveSearchKey}>Save key</button>
-				{/if}
-				<button class="btn" onclick={testSearch}>Test</button>
+			<div class="actions start">
+				<button class="btn" onclick={testSearch}>Test search</button>
+				{#if searchMsg}<p class="msg" class:error={searchMsg.kind === 'error'}>
+						{searchMsg.text}
+					</p>{/if}
 			</div>
 		</div>
 	{/if}
+</section>
 
-	<div class="row stack">
+<section class="group">
+	<h3>Privacy</h3>
+	<div class="row">
 		<div class="label">
 			<span class="name">Local-only folders</span>
 			<span class="desc"
-				>Notes here are only sent to local providers. A single note can opt in with <code
-					>&lt;!-- ai: local --&gt;</code
-				>.</span
+				>{cfg.localOnlyFolders.length ? cfg.localOnlyFolders.join(', ') : 'None'} — only local providers
+				may read these. A single note can opt in with
+				<code>&lt;!-- ai: local --&gt;</code>.</span
 			>
 		</div>
+		<button class="btn" aria-expanded={foldersOpen} onclick={() => (foldersOpen = !foldersOpen)}
+			>{foldersOpen ? 'Done' : 'Choose…'}</button
+		>
+	</div>
+	{#if foldersOpen}
 		<div class="folders">
 			{#each app.folders as f (f)}
-				<label class="folder" style:padding-inline-start="{(f.split('/').length - 1) * 14}px">
+				<label class="folder" style:padding-inline-start="{(f.split('/').length - 1) * 16}px">
 					<input
 						type="checkbox"
 						checked={cfg.localOnlyFolders.includes(f)}
@@ -498,47 +541,49 @@
 				<span class="desc">No folders.</span>
 			{/each}
 		</div>
-	</div>
+	{/if}
+</section>
 
-	<div class="row stack">
-		<div class="label">
-			<span class="name">Skills</span>
-			<span class="desc"
-				>Markdown prompts in <code>.fr5a/skills/</code> — edit or add your own. Packs from git
-				(incl. Claude-style <code>name/SKILL.md</code> folders) install into
-				<code>.fr5a/skills/&lt;repo&gt;</code>.</span
+<section class="group">
+	<h3>Skills</h3>
+	<p class="lead">
+		Markdown prompts in <code>.fr5a/skills/</code> — edit or add your own. Packs from git (incl.
+		Claude-style <code>name/SKILL.md</code> folders) install into
+		<code>.fr5a/skills/&lt;repo&gt;</code>.
+	</p>
+	<div class="skills">
+		{#each skills as sk (sk.name)}
+			<span class="skill" title={sk.source}>/{sk.name}</span>
+		{:else}
+			<span class="desc">No skills yet (built-ins appear the first time the AI pane opens).</span>
+		{/each}
+	</div>
+	{#if platform.syncAddRepo}
+		<div class="inline pack">
+			<input
+				type="url"
+				inputmode="url"
+				autocomplete="off"
+				bind:value={packUrl}
+				placeholder="https://github.com/someone/skills.git"
+			/>
+			<button class="btn" disabled={installing || !packUrl.trim()} onclick={installPack}
+				>{installing ? 'Installing…' : 'Install pack'}</button
 			>
 		</div>
-		<div class="skills">
-			{#each skills as sk (sk.name)}
-				<span class="skill" title={sk.source}>/{sk.name}</span>
-			{:else}
-				<span class="desc">No skills yet (built-ins appear the first time the AI pane opens).</span>
-			{/each}
-		</div>
-		{#if platform.syncAddRepo}
-			<div class="inline">
-				<input
-					type="url"
-					inputmode="url"
-					autocomplete="off"
-					bind:value={packUrl}
-					placeholder="https://github.com/someone/skills.git"
-				/>
-				<button class="btn" disabled={installing || !packUrl.trim()} onclick={installPack}
-					>{installing ? 'Installing…' : 'Install pack'}</button
-				>
-			</div>
-		{/if}
-		{#if packMsg}<p class="msg" class:error={packMsg.kind === 'error'}>{packMsg.text}</p>{/if}
-	</div>
+	{/if}
+	{#if packMsg}<p class="msg" class:error={packMsg.kind === 'error'}>{packMsg.text}</p>{/if}
+</section>
 
+<section class="group">
+	<h3>Advanced</h3>
 	<div class="row">
-		<div class="label">
+		<label class="label" for="max-steps">
 			<span class="name">Max steps per run</span>
 			<span class="desc">Each tool call costs a model round-trip.</span>
-		</div>
+		</label>
 		<input
+			id="max-steps"
 			class="num"
 			type="number"
 			min="1"
@@ -557,35 +602,28 @@
 
 <style>
 	.group {
-		margin-bottom: 30px;
+		margin-bottom: 28px;
 	}
-	.group h2 {
-		font-size: 12px;
+	.group h3 {
+		font-size: 11.5px;
 		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.06em;
 		color: var(--text-faint);
-		margin: 0 0 6px;
+		margin: 0 0 4px;
+	}
+	.lead {
+		margin: 0 0 10px;
+		font-size: 12.5px;
+		line-height: 1.5;
+		color: var(--text-muted);
 	}
 	.row {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		gap: 16px;
-		padding: 12px 2px;
-		box-shadow: inset 0 -1px 0 var(--bg-hover);
-	}
-	.row.stack {
-		flex-direction: column;
-		align-items: stretch;
-		gap: 12px;
-	}
-	.form {
-		padding: 14px;
-		margin: 8px 0;
-		border-radius: 10px;
-		background: var(--bg-list);
-		box-shadow: none;
+		padding: 10px 2px;
 	}
 	.label,
 	.field {
@@ -594,42 +632,173 @@
 		gap: 4px;
 		min-width: 0;
 	}
-	.label.radio {
-		display: grid;
-		grid-template-columns: auto 1fr;
-		column-gap: 10px;
-		align-items: center;
-	}
-	.label.radio input {
-		grid-row: span 2;
-		accent-color: var(--accent);
-	}
 	.name {
 		font-size: 14px;
+		font-weight: 500;
 		color: var(--text-strong);
 	}
 	.desc {
 		font-size: 12px;
+		line-height: 1.45;
 		color: var(--text-muted);
 		overflow-wrap: anywhere;
 	}
+	.small {
+		font-size: 12px;
+		font-weight: 500;
+		color: var(--text-muted);
+	}
+
+	/* --- providers --------------------------------------------------------- */
+	.providers {
+		display: flex;
+		flex-direction: column;
+		border-radius: 12px;
+		background: var(--bg-list);
+		overflow: hidden;
+	}
+	.provider + .provider {
+		box-shadow: inset 0 1px 0 var(--bg-hover);
+	}
+	.phead {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		min-height: 52px;
+		padding: 4px 6px 4px 12px;
+	}
+	.pick {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		cursor: pointer;
+	}
+	.pick input {
+		flex: 0 0 auto;
+		width: 18px;
+		height: 18px;
+		accent-color: var(--accent);
+	}
+	.pname {
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+	}
+	.pname .desc {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.badges {
+		display: flex;
+		gap: 4px;
+	}
 	.badge {
-		margin-inline-start: 4px;
-		padding: 1px 6px;
+		padding: 1px 7px;
 		border-radius: 999px;
 		background: var(--accent-soft);
 		font-size: 10.5px;
 		color: var(--text);
+		white-space: nowrap;
 	}
+	.badge.warn {
+		background: rgba(220, 120, 40, 0.16);
+	}
+	.chev {
+		display: grid;
+		transition: transform var(--dur-pane) var(--ease-out);
+	}
+	.chev.open {
+		transform: rotate(90deg);
+	}
+	.pbody {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+		gap: 12px;
+		padding: 4px 14px 14px 42px;
+	}
+	:global(.settings.phone) .pbody {
+		padding-left: 14px;
+	}
+	.pbody .actions {
+		grid-column: 1 / -1;
+	}
+	.url {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.add {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		margin-top: 10px;
+	}
+	.form {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+		margin-top: 10px;
+		padding: 14px;
+		border-radius: 12px;
+		background: var(--bg-list);
+	}
+
+	/* --- web search -------------------------------------------------------- */
+	.search-kinds {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+		gap: 6px;
+	}
+	.kind {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 1px;
+		min-height: 52px;
+		padding: 8px 12px;
+		border-radius: 10px;
+		background: var(--bg-list);
+		box-shadow: inset 0 0 0 1px var(--bg-hover);
+		text-align: start;
+		transition:
+			box-shadow var(--dur-fast) ease,
+			background var(--dur-fast) ease;
+	}
+	.kind:hover {
+		background: var(--bg-hover);
+	}
+	.kind.on {
+		background: var(--accent-soft);
+		box-shadow: inset 0 0 0 1.5px var(--accent);
+	}
+	.search-cfg {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		margin-top: 12px;
+	}
+
+	/* --- shared controls --------------------------------------------------- */
 	input:not([type='checkbox']):not([type='radio']),
 	select {
 		font: inherit;
 		font-size: 13.5px;
-		padding: 8px 10px;
+		min-height: 34px;
+		padding: 0 10px;
 		border-radius: 8px;
 		border: 1px solid var(--bg-hover);
 		background: var(--bg-secondary);
 		color: var(--text-main);
+	}
+	:global(html[data-touch]) input:not([type='checkbox']):not([type='radio']),
+	:global(html[data-touch]) select {
+		min-height: 44px;
+		font-size: 16px;
 	}
 	input:focus,
 	select:focus {
@@ -657,38 +826,81 @@
 	.folders {
 		display: flex;
 		flex-direction: column;
-		gap: 4px;
-		max-height: 200px;
+		gap: 2px;
+		max-height: 240px;
 		overflow-y: auto;
+		padding: 6px 10px;
+		border-radius: 10px;
+		background: var(--bg-list);
 	}
 	.folder {
 		display: flex;
+		align-items: center;
 		gap: 8px;
+		min-height: 30px;
 		font-size: 13px;
+	}
+	:global(html[data-touch]) .folder {
+		min-height: 44px;
+		font-size: 15px;
 	}
 	.actions {
 		display: flex;
+		align-items: center;
 		justify-content: flex-end;
 		gap: 8px;
 		flex-wrap: wrap;
 	}
+	.actions.start {
+		justify-content: flex-start;
+	}
 	.btn {
-		padding: 7px 14px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 32px;
+		padding: 0 14px;
 		border-radius: 8px;
 		background: var(--bg-hover);
 		color: var(--text-main);
 		font-size: 13px;
 		font-weight: 500;
+		transition:
+			background var(--dur-fast) ease,
+			transform var(--dur-fast) ease;
+	}
+	:global(html[data-touch]) .btn {
+		min-height: 44px;
+	}
+	:global(html[data-touch]) .btn.icon {
+		min-width: 44px;
 	}
 	.btn:hover {
 		background: var(--bg-active);
+	}
+	.btn:active:not(:disabled) {
+		transform: scale(0.97);
 	}
 	.btn.primary {
 		background: var(--accent);
 		color: #fff;
 	}
+	.btn.danger {
+		color: var(--danger);
+	}
 	.btn:disabled {
 		opacity: 0.5;
+	}
+	.btn.icon {
+		padding: 0 9px;
+		background: none;
+	}
+	.btn.icon:hover {
+		background: var(--bg-hover);
+	}
+	.spin {
+		display: grid;
+		animation: spin 800ms linear infinite;
 	}
 	.msg {
 		margin: 0;
@@ -697,7 +909,7 @@
 		overflow-wrap: anywhere;
 	}
 	.msg.error {
-		color: #c0392b;
+		color: var(--danger);
 	}
 	.skills {
 		display: flex;
@@ -705,42 +917,17 @@
 		gap: 5px;
 	}
 	.skill {
-		padding: 2px 8px;
+		padding: 2px 9px;
 		border-radius: 999px;
 		background: var(--accent-soft);
 		font-family: var(--font-mono);
 		font-size: 11.5px;
 	}
+	.pack {
+		margin-top: 10px;
+	}
 	a {
 		color: var(--accent);
-	}
-	.provider {
-		gap: 10px;
-		padding: 14px 2px;
-		box-shadow: inset 0 -1px 0 var(--bg-hover);
-	}
-	.phead {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
-	}
-	.pgrid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-		gap: 12px;
-		padding-inline-start: 26px;
-	}
-	.small {
-		font-size: 12px;
-		font-weight: 500;
-		color: var(--text-muted);
-	}
-	.badge.warn {
-		background: rgba(220, 120, 40, 0.16);
-	}
-	.btn.icon {
-		padding: 7px 10px;
 	}
 	.inline select {
 		flex: 1;
@@ -757,5 +944,10 @@
 	code {
 		font-family: var(--font-mono);
 		font-size: 11.5px;
+	}
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
 	}
 </style>

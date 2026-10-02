@@ -1,10 +1,13 @@
 import './bufferShim';
 import git, { Errors, type HttpClient, type PromiseFsClient } from 'isomorphic-git';
-import type {
-	ConflictFile,
-	ResolveChoice,
-	SyncErrorCode,
-	SyncResult
+import {
+	isTrackedNote,
+	type ChangeStatus,
+	type ConflictFile,
+	type GitChange,
+	type ResolveChoice,
+	type SyncErrorCode,
+	type SyncResult
 } from '../../../../../shared/types';
 
 /**
@@ -406,7 +409,34 @@ export function createIsoGitSync({ fs, http, dir, getToken }: IsoGitDeps) {
 		return (await readState()) !== null;
 	}
 
-	return { isRepo, connect, pull, push, resolve, abort, conflicts, remoteUrl, inMerge };
+	/**
+	 * Notes that differ from HEAD (read-only git status), with the committed
+	 * text for a diff. Null when the folder isn't a repo yet.
+	 */
+	async function changes(): Promise<GitChange[] | null> {
+		if (!(await isRepo())) return null;
+		const head = await resolveRef('HEAD');
+		const rows = await git.statusMatrix({ ...base, filter: (f) => isTrackedNote(f) });
+		const out: GitChange[] = [];
+		for (const [filepath, h, w] of rows) {
+			// [HEAD, WORKDIR, STAGE]: 1/1 = unchanged on disk; 0/0 = gone everywhere.
+			if ((h === 1 && w === 1) || (h === 0 && w === 0)) continue;
+			const status: ChangeStatus = h === 0 ? 'added' : w === 0 ? 'deleted' : 'modified';
+			out.push({
+				path: filepath,
+				status,
+				before: h === 1 && head ? await blobAt(head, filepath) : null,
+				after:
+					w === 0
+						? null
+						: ((await fs.promises.readFile(`${dir}/${filepath}`, 'utf8').catch(() => null)) as
+								string | null)
+			});
+		}
+		return out;
+	}
+
+	return { isRepo, connect, pull, push, resolve, abort, conflicts, remoteUrl, inMerge, changes };
 }
 
 export type IsoGitSync = ReturnType<typeof createIsoGitSync>;

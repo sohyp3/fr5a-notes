@@ -126,7 +126,7 @@ export const BUILTIN_SKILLS: Skill[] = [
 		prompt: `Help the user turn rough ideas in the attached note into a clear plan or spec.
 
 1. Read the note. Summarise in 2-3 lines what you think they want.
-2. Ask the most important open questions ONE AT A TIME with ask_user, offering 2-4 concrete options each (the user can always type their own). Prefer questions whose answer changes the result.
+2. Ask the most important open questions with ask_user — up to 4 related ones per call, each with 2-4 concrete options (the user can always type their own). Prefer questions whose answer changes the result.
 3. After at most ~5 questions, propose a structured spec: goal, features (must / later), open risks, next steps.
 4. Offer to write it with write_note (new note, or appended under a heading). Never write without being asked.`
 	},

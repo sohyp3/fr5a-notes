@@ -8,6 +8,7 @@ arch=('x86_64')
 url="https://github.com/sohyp3/fr5a-notes"
 license=('MIT')
 depends=('gtk3' 'nss' 'libxss' 'libnotify' 'libsecret' 'at-spi2-core')
+conflicts=('fr5a-notes')  # electron-builder's .pacman, same /opt/fr5a files
 makedepends=('imagemagick')
 options=('!strip')
 source=("${_appname}-${pkgver}.AppImage::${url}/releases/download/v${pkgver}/fr5a-${pkgver}.AppImage")

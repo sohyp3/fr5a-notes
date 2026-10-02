@@ -10,6 +10,8 @@ import { registerSyncHandlers } from './syncIpc';
 import { createHttp } from './http';
 import { createSecrets } from './secrets';
 import { deleteMeta, listMeta, readMeta, writeMeta } from './metaFiles';
+import { workspaceChanges } from './gitChanges';
+import { findNestedRepos } from './repos';
 import { Channels } from '../shared/types';
 import type { HttpRequest, NoteMeta, StateKey } from '../shared/types';
 // electron-vite copies the file into the build output and rewrites this to the
@@ -291,6 +293,11 @@ function registerIpc(): void {
 	);
 	ipcMain.handle(Channels.metaList, (_e, rel: string) => listMeta(root(), rel));
 	ipcMain.handle(Channels.metaDelete, (_e, rel: string) => deleteMeta(root(), rel));
+	// Read-only git status of the notes (root + nested repos), for the Changes view.
+	ipcMain.handle(Channels.gitChanges, async () => {
+		const r = fileService?.root;
+		return r ? workspaceChanges(r, await findNestedRepos(r)) : null;
+	});
 
 	// Git sync. The renderer never runs git itself; results/errors come back as data.
 	syncHandlers = registerSyncHandlers(ipcMain, {

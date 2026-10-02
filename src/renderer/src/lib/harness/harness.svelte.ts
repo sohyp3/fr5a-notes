@@ -5,7 +5,7 @@ import { getAiSettings } from './config.svelte';
 import { buildSystemPrompt, estimateTokens, today, type AttachedNote } from './context';
 import { compactDiff, diffLines } from './diff';
 import { runLoop } from './loop';
-import { AbortError, chatCompletion } from './openai';
+import { AbortError, ProviderError, chatCompletion } from './openai';
 import { blockedReason } from './privacy';
 import { prepareWrite, type PreparedWrite } from './apply';
 import {
@@ -29,6 +29,7 @@ import {
 import { createTools, type WriteProposal } from './tools';
 import { expandMentions, mentionKey, parseMentions } from './mentions';
 import { fetchPage, webSearch } from './web';
+import type { QuestionItem } from './questions';
 import { OPENCODE_ZEN, ZEN_KEY_URL, type ChatMessage, type ProviderProfile } from './types';
 
 /**
@@ -39,15 +40,24 @@ import { OPENCODE_ZEN, ZEN_KEY_URL, type ChatMessage, type ProviderProfile } fro
  */
 
 export type Entry =
-	| { kind: 'you'; text: string }
+	/** `mark`: history length before this message, so Retry can rewind to it. */
+	| { kind: 'you'; text: string; mark?: number }
 	| { kind: 'ai'; text: string; streaming: boolean }
-	| { kind: 'tool'; name: string; args: string; result: string | null }
-	| { kind: 'error'; text: string }
+	| {
+			kind: 'tool';
+			name: string;
+			args: string;
+			result: string | null;
+			/** write_note: the reviewed diff and whether it was applied. */
+			write?: Approval & { applied: boolean };
+	  }
+	/** `status`: the provider's HTTP status, when there was one. */
+	| { kind: 'error'; text: string; status?: number }
 	| { kind: 'info'; text: string };
 
+/** A pending ask_user call: one or more questions shown as one card. */
 export interface Question {
-	text: string;
-	options: string[];
+	items: QuestionItem[];
 }
 
 export interface Approval {
@@ -77,7 +87,7 @@ export class HarnessTab {
 	providerId = $state<string | null>(null);
 	skill = $state<string | null>(null);
 
-	private answer: ((a: string) => void) | null = null;
+	private answer: ((a: string[]) => void) | null = null;
 	private decide: ((ok: boolean) => void) | null = null;
 	private reject: ((e: Error) => void) | null = null;
 	ctl: AbortController | null = null;
@@ -102,8 +112,8 @@ export class HarnessTab {
 		return this.session.title;
 	}
 
-	/** Wait for the user to answer an ask_user question. */
-	ask(q: Question): Promise<string> {
+	/** Wait for the user to answer an ask_user call (one answer per question). */
+	ask(q: Question): Promise<string[]> {
 		this.question = q;
 		return new Promise((resolve, reject) => {
 			this.answer = resolve;
@@ -111,12 +121,12 @@ export class HarnessTab {
 		});
 	}
 
-	reply(text: string): void {
+	reply(answers: string[]): void {
 		const a = this.answer;
 		this.question = null;
 		this.answer = null;
 		this.reject = null;
-		a?.(text);
+		a?.(answers);
 	}
 
 	/** Wait for the user to accept / reject a write. */
@@ -213,6 +223,8 @@ class HarnessState {
 	skills = $state<Skill[]>([]);
 	/** Recent session files, newest first. */
 	sessionFiles = $state<string[]>([]);
+	sessionsLoading = $state(false);
+	sessionsError = $state<string | null>(null);
 	ready = $state(false);
 
 	get tab(): HarnessTab | undefined {
@@ -287,8 +299,21 @@ class HarnessState {
 	}
 
 	async refreshSessions(): Promise<void> {
-		const entries = await platform.listMeta(SESSIONS_DIR).catch(() => []);
-		this.sessionFiles = entries.filter((f) => f.endsWith('.md'));
+		this.sessionsLoading = true;
+		try {
+			const entries = await platform.listMeta(SESSIONS_DIR);
+			this.sessionFiles = entries.filter((f) => f.endsWith('.md'));
+			this.sessionsError = null;
+		} catch (err) {
+			// A missing folder just means no sessions yet.
+			const msg = err instanceof Error ? err.message : String(err);
+			if (/ENOENT|not exist|no such/i.test(msg)) {
+				this.sessionFiles = [];
+				this.sessionsError = null;
+			} else this.sessionsError = msg;
+		} finally {
+			this.sessionsLoading = false;
+		}
 	}
 
 	skill(name: string | null): Skill | null {
@@ -395,7 +420,7 @@ class HarnessState {
 			tab.session.file = sessionFileName(tab.session.title);
 		}
 
-		tab.entries.push({ kind: 'you', text: input.trim() });
+		tab.entries.push({ kind: 'you', text: input.trim(), mark: tab.history.length });
 		tab.running = true;
 		tab.ctl = new AbortController();
 		const signal = tab.ctl.signal;
@@ -447,7 +472,7 @@ class HarnessState {
 					config: ai.config,
 					notes: () => app.notes,
 					readNote: (id) => platform.readNote(id),
-					ask: (q, options) => tab.ask({ text: q, options }),
+					ask: (items) => tab.ask({ items }),
 					proposeWrite: (p) => this.reviewWrite(tab, p),
 					search: search ? (q) => webSearch(platform, search, searchKey, q) : undefined,
 					fetchPage: search ? (url) => fetchPage(platform, url) : undefined
@@ -510,7 +535,11 @@ class HarnessState {
 			}
 			if (err instanceof AbortError) tab.entries.push({ kind: 'info', text: 'Stopped.' });
 			else
-				tab.entries.push({ kind: 'error', text: err instanceof Error ? err.message : String(err) });
+				tab.entries.push({
+					kind: 'error',
+					text: err instanceof Error ? err.message : String(err),
+					...(err instanceof ProviderError && err.status ? { status: err.status } : {})
+				});
 		} finally {
 			for (const e of tab.entries)
 				if (e.kind === 'tool' && e.result === null) e.result = '(cancelled)';
@@ -519,6 +548,28 @@ class HarnessState {
 			await tab.save();
 			void this.refreshSessions();
 		}
+	}
+
+	/**
+	 * Run the last message again — after a network error, a stop, or for a
+	 * fresh answer. Rewinds the transcript and model history to just before it.
+	 */
+	async retry(tab = this.tab): Promise<void> {
+		if (!tab || tab.running) return;
+		let i = tab.entries.length - 1;
+		while (i >= 0 && tab.entries[i].kind !== 'you') i--;
+		if (i < 0) return;
+		const you = tab.entries[i] as Extract<Entry, { kind: 'you' }>;
+		let mark = you.mark;
+		if (mark === undefined) {
+			// Reopened sessions carry no marks: rewind to the last user message.
+			mark = tab.history.length;
+			while (mark > 0 && tab.history[mark - 1].role !== 'user') mark--;
+			mark = Math.max(0, mark - 1);
+		}
+		tab.entries.splice(i);
+		tab.history = tab.history.slice(0, mark);
+		await this.send(you.text);
 	}
 
 	/** write_note: show the diff card, apply on approval. */
@@ -530,17 +581,26 @@ class HarnessState {
 			return `Not written: ${err instanceof Error ? err.message : String(err)}`;
 		}
 		const lines = diffLines(prepared.before, prepared.after);
-		const ok = await tab.confirm({
+		const approval: Approval = {
 			label: prepared.label,
 			mode: p.mode,
 			diff: compactDiff(lines),
 			added: lines.filter((l) => l.op === 'add').length,
 			removed: lines.filter((l) => l.op === 'del').length
-		});
+		};
+		const ok = await tab.confirm(approval);
+		// Keep the reviewed diff on the tool row, so the transcript shows what changed.
+		let row: Extract<Entry, { kind: 'tool' }> | null = null;
+		for (let i = tab.entries.length - 1; i >= 0 && !row; i--) {
+			const e = tab.entries[i];
+			if (e.kind === 'tool' && e.name === 'write_note' && e.result === null) row = e;
+		}
+		if (row) row.write = { ...approval, applied: ok };
 		if (!ok) return 'The user rejected this change. Ask what they want instead.';
 		try {
 			return await prepared.apply();
 		} catch (err) {
+			if (row?.write) row.write.applied = false;
 			return `Not written: ${err instanceof Error ? err.message : String(err)}`;
 		}
 	}

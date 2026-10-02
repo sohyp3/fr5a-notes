@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatResults, htmlToText, parseSearch } from './web';
+import { formatResults, htmlToText, parseDuckDuckGo, parseSearch } from './web';
 import { compactDiff, diffLines } from './diff';
 
 describe('htmlToText', () => {
@@ -16,6 +16,26 @@ describe('htmlToText', () => {
 		expect(htmlToText(`<p>${'a'.repeat(100)}</p>`, 10).text).toMatch(
 			/^a{10}\n\n\[… page truncated\]$/
 		);
+	});
+});
+
+describe('parseDuckDuckGo', () => {
+	it('unwraps redirect links, pairs snippets, drops ads', () => {
+		const html = `
+			<div class="result results_links result--ad">
+				<a rel="nofollow" class="result__a" href="https://duckduckgo.com/y.js?ad_domain=x">Ad</a>
+				<a class="result__snippet" href="#">buy now</a>
+			</div>
+			<div class="result results_links">
+				<a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fa%3Fb%3D1&amp;rut=z">Example <b>Domain</b></a>
+				<a class="result__snippet" href="//duckduckgo.com/l/?uddg=x">An <b>example</b> &amp; more</a>
+			</div>
+			<div class="result"><a class="result__a" href="https://plain.org/">Plain</a></div>`;
+		expect(parseDuckDuckGo(html)).toEqual([
+			{ title: 'Example Domain', url: 'https://example.com/a?b=1', snippet: 'An example & more' },
+			{ title: 'Plain', url: 'https://plain.org/', snippet: '' }
+		]);
+		expect(parseSearch('duckduckgo', html)).toHaveLength(2);
 	});
 });
 

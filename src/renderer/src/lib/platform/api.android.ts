@@ -612,6 +612,24 @@ export function createAndroidPlatform(): PlatformApi {
 		},
 		syncConflicts: async () => pending ?? [],
 
+		async gitChanges() {
+			await ready;
+			const nested = await nestedRepos();
+			const all = [
+				await git.changes(),
+				...(await Promise.all(
+					nested.map(async (path) =>
+						((await repoGit(path).changes()) ?? null)?.map((c) => ({
+							...c,
+							path: `${path}/${c.path}`
+						}))
+					)
+				))
+			];
+			if (all.every((c) => c == null)) return null;
+			return all.flatMap((c) => c ?? []).sort((a, b) => a.path.localeCompare(b.path));
+		},
+
 		async syncSetup(url, token) {
 			if (!/^https:\/\/\S+$/i.test(url.trim()))
 				return { ok: false, error: { code: 'no-remote', message: 'Use an HTTPS clone URL.' } };

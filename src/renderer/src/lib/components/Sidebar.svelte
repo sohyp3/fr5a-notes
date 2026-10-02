@@ -187,11 +187,31 @@
 			<span>Trash</span>
 			{#if app.trashNotes.length}<span class="count">{app.trashNotes.length}</span>{/if}
 		</button>
+		{#if app.changes !== null}
+			<button
+				class="settings-btn"
+				class:selected={app.view === 'changes'}
+				title="Notes changed since the last sync (git status)"
+				onclick={() => app.showChanges()}
+			>
+				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+					<path
+						d="M8 4v10M3 9h10M13 19h8M6 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM18 4v8"
+						stroke="currentColor"
+						stroke-width="1.7"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					/>
+				</svg>
+				<span>Changes</span>
+				{#if app.changes.length}<span class="count">{app.changes.length}</span>{/if}
+			</button>
+		{/if}
 		<button
 			class="settings-btn"
 			class:selected={app.view === 'settings'}
 			title="Settings"
-			onclick={() => app.setView('settings')}
+			onclick={() => app.openSettings()}
 		>
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none">
 				<circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7" />
@@ -208,7 +228,7 @@
 
 <style>
 	.sidebar {
-		width: 250px;
+		width: var(--sidebar-w, 250px);
 		height: 100%;
 		display: flex;
 		flex-direction: column;
@@ -371,6 +391,10 @@
 	.settings-btn:hover {
 		background: var(--bg-hover);
 		color: var(--text);
+	}
+	.settings-btn:active,
+	.all-notes:active {
+		background: var(--bg-active);
 	}
 	.settings-btn.selected {
 		background: var(--accent-soft);

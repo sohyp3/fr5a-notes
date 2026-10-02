@@ -8,9 +8,11 @@ export function installFakeApi(): void {
 		'hello.md': '# Hello\n\nworld'
 	};
 	const writes: { id: string; content: string }[] = [];
+	// "Last commit": git status compares the files against this snapshot.
+	const committed: Record<string, string> = { ...files };
 	(window as unknown as { __writes: typeof writes }).__writes = writes;
 	const meta = (id: string) => {
-		const raw = files[id];
+		const raw = files[id] ?? trash[id];
 		const title = raw.split('\n')[0].replace(/^#+\s*/, '');
 		return {
 			id,
@@ -63,17 +65,55 @@ export function installFakeApi(): void {
 	const fakeModel = (body: string): string => {
 		const { messages } = JSON.parse(body) as { messages: { role: string; content: string }[] };
 		const last = messages[messages.length - 1];
+		const say = (content: string) => sse({ choices: [{ delta: { content } }] });
 		// "context?" → report which notes the system prompt carried.
 		if (last.role === 'user' && last.content.includes('context?')) {
 			const ids = [...messages[0].content.matchAll(/<note id="([^"]+)">/g)].map((m) => m[1]);
-			return sse({ choices: [{ delta: { content: `ctx: ${ids.join(' | ')}` } }] });
+			return say(`ctx: ${ids.join(' | ')}`);
 		}
+		// "md?" → a Markdown reply, with raw HTML that must stay text.
+		if (last.role === 'user' && last.content.includes('md?'))
+			return say(
+				'# Title\n\n- **bold** item\n- [link](https://example.com)\n\n```json\n{"a": 1}\n```\n\n<img src=x onerror="window.__xss=1">'
+			);
+		// "long?" → a reply long enough to scroll.
+		if (last.role === 'user' && last.content.includes('long?'))
+			return say(Array.from({ length: 80 }, (_, i) => `line ${i + 1}`).join('\n\n'));
+		// "multi?" → several questions in one ask_user call.
+		if (last.role === 'user' && last.content.includes('multi?'))
+			return call('ask_user', {
+				questions: [
+					{
+						question: 'Who is it for?',
+						header: 'Audience',
+						options: [{ label: 'Team', description: 'internal readers' }, { label: 'Public' }]
+					},
+					{
+						question: 'Which sections?',
+						header: 'Sections',
+						options: ['Intro', 'Body'],
+						multiSelect: true
+					}
+				]
+			});
 		if (last.role === 'user')
 			return call('ask_user', { question: 'Which tone?', options: ['Formal', 'Casual'] });
+		if (last.content.startsWith('User answered:\n')) return say(`Done: ${last.content}`);
 		if (last.content.startsWith('User answered'))
 			return call('write_note', { target: 'current', mode: 'append', content: 'AI line' });
-		return sse({ choices: [{ delta: { content: `Done: ${last.content}` } }] });
+		return say(`Done: ${last.content}`);
 	};
+	/** "flaky?" fails the first request like a dropped connection. */
+	let flaky = 0;
+	const maybeFail = (body: string) => {
+		if (body.includes('flaky?') && flaky++ === 0) throw new Error('net::ERR_INTERNET_DISCONNECTED');
+	};
+	const trash: Record<string, string> = { '.fr5a_trash/old.md': '# Old\n\ngone soon' };
+	const deleted: string[] = [];
+	(window as unknown as { __deleted: string[] }).__deleted = deleted;
+	/** Notes moved to the trash (deleteNote). */
+	const trashed: string[] = [];
+	(window as unknown as { __trashed: string[] }).__trashed = trashed;
 	const ok = async () => ({ ok: true, result: { status: 'ok' } });
 	(window as unknown as { api: unknown }).api = {
 		platform: 'linux',
@@ -82,17 +122,27 @@ export function installFakeApi(): void {
 		listNotes: async () => Object.keys(files).map(meta),
 		listTags: async () => [],
 		listFolders: async () => ['Work'],
-		listTrash: async () => [],
+		listTrash: async () => Object.keys(trash).map(meta),
 		readNote: async (id: string) => files[id],
 		writeNote: async (id: string, content: string) => {
 			files[id] = content;
 			writes.push({ id, content });
 		},
 		createNote: async () => meta('hello.md'),
-		deleteNote: async () => {},
+		deleteNote: async (id: string) => {
+			trashed.push(id);
+		},
 		createFolder: async (name: string) => name,
-		restoreNote: async (id: string) => id,
-		permanentDelete: async () => {},
+		restoreNote: async (id: string) => {
+			const to = id.replace('.fr5a_trash/', '');
+			files[to] = trash[id];
+			delete trash[id];
+			return to;
+		},
+		permanentDelete: async (id: string) => {
+			deleted.push(id);
+			delete trash[id];
+		},
 		getState: async (key: string) => state[key] ?? null,
 		setState: async (key: string, value: unknown) => {
 			state[key] = value;
@@ -105,6 +155,7 @@ export function installFakeApi(): void {
 				: fakeModel(req.body ?? '{}')
 		}),
 		httpStream: async (_id: string, req: { body?: string }, onChunk: (t: string) => void) => {
+			maybeFail(req.body ?? '');
 			const text = fakeModel(req.body ?? '{}');
 			for (let i = 0; i < text.length; i += 16) onChunk(text.slice(i, i + 16));
 			return { status: 200, headers: {}, body: '' };
@@ -131,6 +182,16 @@ export function installFakeApi(): void {
 		syncResolve: ok,
 		syncAbort: ok,
 		syncConflicts: async () => [],
+		gitChanges: async () =>
+			[...new Set([...Object.keys(files), ...Object.keys(committed)])]
+				.filter((p) => files[p] !== committed[p])
+				.sort()
+				.map((p) => ({
+					path: p,
+					status: !(p in committed) ? 'added' : !(p in files) ? 'deleted' : 'modified',
+					before: committed[p] ?? null,
+					after: files[p] ?? null
+				})),
 		onSyncConflict: noop,
 		onSyncDone: noop,
 		onNotesChanged: noop

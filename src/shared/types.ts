@@ -42,6 +42,8 @@ export interface SidebarState {
 	tagsOpen: boolean;
 	folderExpanded: Record<string, boolean>;
 	tagExpanded: Record<string, boolean>;
+	/** Pane visibility + widths (renderer-owned shape). */
+	panes?: { sidebarOpen?: boolean; listOpen?: boolean; widths?: Record<string, number> };
 }
 
 /** Keys the renderer may read/write in the persistent store. */
@@ -86,6 +88,25 @@ export interface HttpResponse {
 	body: string;
 }
 
+export type ChangeStatus = 'added' | 'modified' | 'deleted';
+
+/**
+ * A note that differs from the last commit (git status). `before` is the
+ * committed text (null when new), `after` the file on disk (null when deleted).
+ */
+export interface GitChange {
+	/** Workspace-relative path (nested repos prefixed with their folder). */
+	path: string;
+	status: ChangeStatus;
+	before: string | null;
+	after: string | null;
+}
+
+/** Note files git status looks at: Markdown / text outside dot-folders. */
+export function isTrackedNote(path: string): boolean {
+	return /\.(md|markdown|txt)$/i.test(path) && !path.split('/').some((s) => s.startsWith('.'));
+}
+
 /** One git repo in the workspace: '' is the root, others are nested folders. */
 export interface SyncRepo {
 	path: string;
@@ -126,6 +147,8 @@ export const Channels = {
 	/** Workspace repos (root + nested) and their remotes. */
 	syncRepos: 'sync:repos',
 	syncAddRepo: 'sync:addRepo',
+	/** Notes changed since the last commit (git status + committed text). */
+	gitChanges: 'git:changes',
 	// Outbound HTTP for the AI harness (the renderer's CSP blocks fetch).
 	httpFetch: 'http:fetch',
 	httpStream: 'http:stream',

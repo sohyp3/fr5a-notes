@@ -1,6 +1,12 @@
 import type { NoteMeta } from '../../../../shared/types';
 import { blockedReason } from './privacy';
 import { formatResults, type SearchResult } from './web';
+import {
+	ASK_USER_PARAMETERS,
+	formatAnswers,
+	normalizeQuestions,
+	type QuestionItem
+} from './questions';
 import type { AiConfig, ProviderProfile, ToolDef } from './types';
 
 /**
@@ -25,7 +31,8 @@ export interface ToolDeps {
 	config: AiConfig;
 	notes(): NoteMeta[];
 	readNote(id: string): Promise<string>;
-	ask(question: string, options: string[]): Promise<string>;
+	/** One answer per question (several picks joined with ", "). */
+	ask(questions: QuestionItem[]): Promise<string[]>;
 	/** Resolves with what happened, e.g. "Applied to x.md" or "Rejected by the user". */
 	proposeWrite(p: WriteProposal): Promise<string>;
 	/** Absent when no search provider is configured. */
@@ -119,22 +126,13 @@ export function createTools(d: ToolDeps): Tool[] {
 			def: {
 				name: 'ask_user',
 				description:
-					'Ask the user a question and wait for the answer. Offer 2-4 short, concrete options; the user may also type a free answer.',
-				parameters: {
-					type: 'object',
-					properties: {
-						question: { type: 'string' },
-						options: { type: 'array', items: { type: 'string' } }
-					},
-					required: ['question']
-				}
+					'Ask the user and wait for the answers. Group related questions in one call (up to 4), each with 2-4 short, concrete options (label + optional description); the user can always type their own answer. Set multiSelect when several options may apply.',
+				parameters: ASK_USER_PARAMETERS
 			},
 			async run(a) {
-				const options = Array.isArray(a.options)
-					? a.options.map(s).filter(Boolean).slice(0, 6)
-					: [];
-				const answer = await d.ask(s(a.question), options);
-				return `User answered: ${answer}`;
+				const items = normalizeQuestions(a);
+				if (!items.length) return 'No question given. Pass questions: [{question, options}].';
+				return formatAnswers(items, await d.ask(items));
 			}
 		},
 		{

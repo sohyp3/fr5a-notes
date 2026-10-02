@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { flip } from 'svelte/animate';
+	import { fade } from 'svelte/transition';
+	import { reducedMotion } from '../portal';
 	import { getAppState } from '../stores/app.svelte';
 	import NoteCard from './NoteCard.svelte';
 	import EmptyState from './EmptyState.svelte';
@@ -7,6 +9,7 @@
 	import mascotSearch from '$lib/assets/fr5a-search.png';
 
 	const app = getAppState();
+	const dur = reducedMotion() ? 0 : 1;
 
 	// Breadcrumb crumbs for the active filter, so it's always clear what's showing.
 	// Each ancestor is a jump target; the final crumb is the current scope.
@@ -91,8 +94,8 @@
 		class="scope"
 		class:trash={app.trashOpen}
 		title={app.trashOpen
-			? 'Swipe right to restore · left to delete forever'
-			: 'Swipe a card right to pin · left to delete'}
+			? 'Swipe right to restore · left to delete forever (or right-click / long-press)'
+			: 'Swipe a card right to pin · left to trash (or right-click / long-press)'}
 	>
 		{#each crumbs as crumb, i (i)}
 			{#if i > 0}<span class="sep">›</span>{/if}
@@ -125,7 +128,7 @@
 			{/if}
 		{:else}
 			{#each app.filtered as note (note.id)}
-				<div animate:flip={{ duration: 260 }}>
+				<div animate:flip={{ duration: 220 * dur }} in:fade={{ duration: 180 * dur }}>
 					<NoteCard {note} trash={app.trashOpen} />
 				</div>
 			{/each}
@@ -135,8 +138,8 @@
 
 <style>
 	.notelist {
-		width: 300px;
-		flex: 0 0 300px;
+		width: var(--list-w, 300px);
+		flex: 0 0 var(--list-w, 300px);
 		height: 100%;
 		display: flex;
 		flex-direction: column;
@@ -181,9 +184,20 @@
 			background 120ms ease,
 			color 120ms ease;
 	}
-	.new:hover {
+	.new:hover,
+	.new:active {
 		background: var(--accent-soft);
 		color: var(--accent);
+	}
+	:global(html[data-touch]) .new {
+		width: 44px;
+		height: 44px;
+	}
+	:global(html[data-touch]) .search {
+		height: 44px;
+	}
+	:global(html[data-touch]) .search input {
+		font-size: 16px;
 	}
 	.scope {
 		display: flex;

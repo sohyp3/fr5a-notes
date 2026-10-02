@@ -298,4 +298,29 @@ describe('isomorphic-git sync', () => {
 		expect(await a.sync.pull()).toEqual({ status: 'ok' });
 		expect(read(a.dir, 'local.md')).toBe('# Written before sync was set up\n');
 	});
+
+	it('reports changed notes since the last commit', async () => {
+		expect(await client('none').sync.changes()).toBeNull();
+		const { a } = await twoClones();
+		expect(await a.sync.changes()).toEqual([]);
+		// (A different size: within the same second as the checkout, git's stat
+		// cache can't see a same-size rewrite — the "racy git" case.)
+		write(a.dir, 'shared.md', '# Shared\n\nONE!\ntwo\nthree\n');
+		write(a.dir, 'fresh.md', '# Fresh\n');
+		write(a.dir, '.fr5a/sessions/s.md', 'hidden');
+		fs.rmSync(path.join(a.dir, 'a-only.md'));
+		expect(await a.sync.changes()).toEqual([
+			{ path: 'a-only.md', status: 'deleted', before: '# A\n', after: null },
+			{ path: 'fresh.md', status: 'added', before: null, after: '# Fresh\n' },
+			{
+				path: 'shared.md',
+				status: 'modified',
+				before: '# Shared\n\none\ntwo\nthree\n',
+				after: '# Shared\n\nONE!\ntwo\nthree\n'
+			}
+		]);
+		// Read-only: nothing got staged or committed.
+		expect(await a.sync.changes()).toHaveLength(3);
+		expect(remoteLog()).toHaveLength(1);
+	});
 });

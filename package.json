@@ -107,6 +107,20 @@
 				}
 			}
 		},
+		"pacman": {
+			"depends": [
+				"gtk3",
+				"nss",
+				"libxss",
+				"libnotify",
+				"libsecret",
+				"at-spi2-core"
+			],
+			"fpm": [
+				"--conflicts",
+				"fr5a-bin"
+			]
+		},
 		"win": {
 			"target": [
 				"nsis",
