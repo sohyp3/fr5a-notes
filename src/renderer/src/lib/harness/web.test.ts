@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { formatResults, htmlToText, parseDuckDuckGo, parseSearch } from './web';
+import {
+	formatResults,
+	htmlToText,
+	parseDuckDuckGo,
+	parseSearch,
+	searchError,
+	webSearch
+} from './web';
+import type { HttpRequest, HttpResponse } from '../../../../shared/types';
 import { compactDiff, diffLines } from './diff';
 
 describe('htmlToText', () => {
@@ -49,6 +57,62 @@ describe('parseSearch', () => {
 			web: { results: [{ title: 'B', url: 'https://b', description: 'y' }] }
 		});
 		expect(formatResults(parseSearch('brave', brave))).toBe('1. B\n   https://b\n   y');
+	});
+});
+
+describe('webSearch', () => {
+	const brave = { kind: 'brave' as const, baseUrl: '' };
+	function fakeHttp(res: HttpResponse) {
+		const sent: HttpRequest[] = [];
+		return { sent, http: { httpFetch: async (r: HttpRequest) => (sent.push(r), res) } };
+	}
+
+	it('asks for a key before calling Brave without one', async () => {
+		const { sent, http } = fakeHttp({ status: 200, headers: {}, body: '{}' });
+		await expect(webSearch(http, brave, null, 'x')).rejects.toThrow(
+			/Brave Search needs an API key/
+		);
+		await expect(webSearch(http, brave, '  ', 'x')).rejects.toThrow(/needs an API key/);
+		expect(sent).toHaveLength(0);
+	});
+
+	it('sends the trimmed key and a query Brave accepts', async () => {
+		const body = JSON.stringify({ web: { results: [{ title: 'T', url: 'https://t' }] } });
+		const { sent, http } = fakeHttp({ status: 200, headers: {}, body });
+		const long = Array.from({ length: 80 }, (_, i) => `w${i}`).join(' ');
+		expect(await webSearch(http, brave, ' key \n', long, 30)).toHaveLength(1);
+		const url = new URL(sent[0].url);
+		expect(sent[0].headers?.['X-Subscription-Token']).toBe('key');
+		expect(url.searchParams.get('q')!.split(' ')).toHaveLength(50);
+		expect(url.searchParams.get('count')).toBe('20');
+	});
+
+	it("shows Brave's error detail", async () => {
+		const body = JSON.stringify({
+			error: {
+				code: 'SUBSCRIPTION_TOKEN_INVALID',
+				detail: 'The provided subscription token is invalid.',
+				status: 422
+			},
+			type: 'ErrorResponse'
+		});
+		const { http } = fakeHttp({ status: 422, headers: {}, body });
+		await expect(webSearch(http, brave, 'bad', 'x')).rejects.toThrow(
+			'Search failed (422): The provided subscription token is invalid. Check the key in Settings → AI → Web search.'
+		);
+		expect(
+			searchError(
+				JSON.stringify({
+					error: {
+						code: 'VALIDATION',
+						detail: 'Unable to validate request parameter(s)',
+						meta: { errors: [{ loc: ['query', 'q'], msg: 'too long' }] }
+					}
+				})
+			)
+		).toBe('Unable to validate request parameter(s) (query q: too long)');
+		expect(searchError(JSON.stringify({ detail: { error: 'Unauthorized' } }))).toBe('Unauthorized');
+		expect(searchError('<html>bad gateway</html>')).toBe('<html>bad gateway</html>');
 	});
 });
 

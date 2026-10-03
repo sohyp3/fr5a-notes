@@ -100,7 +100,10 @@ export const DEFAULT_AI_CONFIG: AiConfig = {
 
 /** Secret names for API keys. */
 export const providerKeyName = (id: string) => `provider:${id}`;
-export const SEARCH_KEY_NAME = 'search';
+/** One key per search provider, so switching Brave ↔ Tavily never sends the other's key. */
+export const searchKeyName = (kind: SearchKind) => `search:${kind}`;
+/** The single search key older versions kept (read as a fallback). */
+export const LEGACY_SEARCH_KEY_NAME = 'search';
 
 export interface ToolCall {
 	id: string;

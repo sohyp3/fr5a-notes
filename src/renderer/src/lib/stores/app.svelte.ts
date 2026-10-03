@@ -1,5 +1,12 @@
 import { platform } from '../platform';
-import type { GitChange, NoteMeta, TagNode, SidebarState } from '../../../../shared/types';
+import type {
+	GitChange,
+	GitOpResponse,
+	GitStash,
+	NoteMeta,
+	TagNode,
+	SidebarState
+} from '../../../../shared/types';
 import { uiStack, editorStack } from '../fonts';
 import { accentById, applyPalette, DEFAULT_ACCENT } from '../accents';
 import { setPinned, setLocked, titleFromContent } from '../editor/markdown';
@@ -158,6 +165,10 @@ class AppState {
 	/** Path the Changes view selects first. */
 	changesFocus = $state<string | null>(null);
 	private changesTimer: ReturnType<typeof setTimeout> | null = null;
+	/** Stashes of every repo, newest first (loaded while Changes is open). */
+	stashes = $state<GitStash[]>([]);
+	/** A stash / revert is running. */
+	gitBusy = $state(false);
 
 	/** Note card whose swipe actions are revealed (one at a time). */
 	swipeOpen = $state<string | null>(null);
@@ -352,6 +363,66 @@ class AppState {
 		this.changesFocus = path;
 		this.setView('changes');
 		void this.refreshChanges();
+		void this.refreshStashes();
+	}
+
+	async refreshStashes(): Promise<void> {
+		if (!platform.gitStashes || !this.workspace) {
+			this.stashes = [];
+			return;
+		}
+		try {
+			this.stashes = await platform.gitStashes();
+		} catch (err) {
+			console.error('[stashes]', err);
+		}
+	}
+
+	/**
+	 * Run a stash / revert: pending edits reach disk first, and afterwards the
+	 * open note is re-read (the op may have rewritten it). Returns the error or
+	 * conflict text to show, or null when it went through cleanly.
+	 */
+	private async gitOp(op: () => Promise<GitOpResponse>): Promise<string | null> {
+		this.gitBusy = true;
+		let outcome: string | null;
+		try {
+			await this.flush();
+			const res = await op();
+			outcome = !res.ok
+				? res.error
+				: res.conflicts?.length
+					? `Applied, but ${res.conflicts.join(', ')} had changed too: look for the <<<<<<< conflict markers. The stash was kept.`
+					: null;
+		} catch (err) {
+			outcome = err instanceof Error ? err.message : String(err);
+		}
+		try {
+			await this.reloadFromDisk();
+			await Promise.all([this.refreshChanges(), this.refreshStashes()]);
+		} finally {
+			this.gitBusy = false;
+		}
+		return outcome;
+	}
+
+	/** Set these changed notes aside (one stash per repo) and revert them. */
+	stashChanges(paths: string[], message: string): Promise<string | null> {
+		return this.gitOp(() => platform.gitStash!(paths, message));
+	}
+
+	/** Bring a stash back; `drop` removes it once it applied cleanly. */
+	applyStash(s: GitStash, drop: boolean): Promise<string | null> {
+		return this.gitOp(() => platform.gitStashApply!(s.repo, s.id, drop));
+	}
+
+	dropStash(s: GitStash): Promise<string | null> {
+		return this.gitOp(() => platform.gitStashDrop!(s.repo, s.id));
+	}
+
+	/** Put notes back to the last commit; new notes go to the trash. */
+	revertChanges(paths: string[]): Promise<string | null> {
+		return this.gitOp(() => platform.gitRevert!(paths));
 	}
 
 	/** git status of one note, if it differs from the last commit. */

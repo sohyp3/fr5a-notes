@@ -3,10 +3,12 @@ import { listModels } from './openai';
 import {
 	BUILTIN_PROVIDERS,
 	DEFAULT_AI_CONFIG,
+	LEGACY_SEARCH_KEY_NAME,
 	providerKeyName,
-	SEARCH_KEY_NAME,
+	searchKeyName,
 	type AiConfig,
-	type ProviderProfile
+	type ProviderProfile,
+	type SearchKind
 } from './types';
 
 /**
@@ -104,12 +106,19 @@ class AiSettings {
 		return platform.setSecret(providerKeyName(providerId), key);
 	}
 
-	searchKey(): Promise<string | null> {
-		return platform.getSecret(SEARCH_KEY_NAME);
+	/** The key for a search provider (DuckDuckGo / SearXNG need none). */
+	async searchKey(kind: SearchKind | undefined): Promise<string | null> {
+		if (kind !== 'brave' && kind !== 'tavily') return null;
+		return (
+			(await platform.getSecret(searchKeyName(kind))) ??
+			(await platform.getSecret(LEGACY_SEARCH_KEY_NAME))
+		);
 	}
 
-	setSearchKey(key: string | null): Promise<void> {
-		return platform.setSecret(SEARCH_KEY_NAME, key);
+	async setSearchKey(kind: SearchKind, key: string | null): Promise<void> {
+		await platform.setSecret(searchKeyName(kind), key);
+		// The old shared key would otherwise come back as the fallback.
+		if (!key) await platform.setSecret(LEGACY_SEARCH_KEY_NAME, null);
 	}
 }
 

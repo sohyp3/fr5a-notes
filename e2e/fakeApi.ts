@@ -115,6 +115,25 @@ export function installFakeApi(): void {
 	const trashed: string[] = [];
 	(window as unknown as { __trashed: string[] }).__trashed = trashed;
 	const ok = async () => ({ ok: true, result: { status: 'ok' } });
+	/** git status: notes that differ from the last commit. */
+	const changesNow = () =>
+		[...new Set([...Object.keys(files), ...Object.keys(committed)])]
+			.filter((p) => files[p] !== committed[p])
+			.sort()
+			.map((p) => ({
+				path: p,
+				status: !(p in committed) ? 'added' : !(p in files) ? 'deleted' : 'modified',
+				before: committed[p] ?? null,
+				after: files[p] ?? null
+			}));
+	type Change = ReturnType<typeof changesNow>[number];
+	const stashes: { repo: string; id: string; message: string; date: number; files: Change[] }[] =
+		[];
+	/** Put a note back to its committed text (or remove it when the commit lacks it). */
+	const restore = (p: string) => {
+		if (p in committed) files[p] = committed[p];
+		else delete files[p];
+	};
 	(window as unknown as { api: unknown }).api = {
 		platform: 'linux',
 		getWorkspace: async () => '/notes',
@@ -182,16 +201,43 @@ export function installFakeApi(): void {
 		syncResolve: ok,
 		syncAbort: ok,
 		syncConflicts: async () => [],
-		gitChanges: async () =>
-			[...new Set([...Object.keys(files), ...Object.keys(committed)])]
-				.filter((p) => files[p] !== committed[p])
-				.sort()
-				.map((p) => ({
-					path: p,
-					status: !(p in committed) ? 'added' : !(p in files) ? 'deleted' : 'modified',
-					before: committed[p] ?? null,
-					after: files[p] ?? null
-				})),
+		gitChanges: async () => changesNow(),
+		gitStash: async (paths: string[], message: string) => {
+			const held = changesNow().filter((c) => paths.includes(c.path));
+			stashes.unshift({
+				repo: '',
+				id: `s${stashes.length + 1}`,
+				message,
+				date: Date.now(),
+				files: held
+			});
+			for (const c of held) restore(c.path);
+			return { ok: true };
+		},
+		gitStashes: async () => stashes.map((s) => ({ ...s })),
+		gitStashApply: async (_repo: string, id: string, drop: boolean) => {
+			const s = stashes.find((x) => x.id === id);
+			if (!s) return { ok: false, error: 'That stash no longer exists.' };
+			for (const c of s.files)
+				if (c.after === null) delete files[c.path];
+				else files[c.path] = c.after;
+			if (drop) stashes.splice(stashes.indexOf(s), 1);
+			return { ok: true };
+		},
+		gitStashDrop: async (_repo: string, id: string) => {
+			stashes.splice(
+				stashes.findIndex((x) => x.id === id),
+				1
+			);
+			return { ok: true };
+		},
+		gitRevert: async (paths: string[]) => {
+			for (const p of paths) {
+				if (!(p in committed)) trashed.push(p);
+				restore(p);
+			}
+			return { ok: true };
+		},
 		onSyncConflict: noop,
 		onSyncDone: noop,
 		onNotesChanged: noop

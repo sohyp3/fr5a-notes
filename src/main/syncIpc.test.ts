@@ -47,7 +47,8 @@ function setup(root: string | null) {
 			getRoot: () => root,
 			emit: (channel, ...args) => events.push({ channel, args }),
 			openConflicts: (files) => windows.opened.push(files),
-			closeConflicts: () => windows.closed++
+			closeConflicts: () => windows.closed++,
+			trash: async (id) => fs.rmSync(path.join(root!, id), { force: true })
 		}
 	);
 	const invoke = <T = SyncResponse>(channel: string, ...args: unknown[]) =>

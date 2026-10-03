@@ -6,6 +6,8 @@ import { SecureStorage } from '@aparajita/capacitor-secure-storage';
 import { buildTagTree, parseTags } from '../../../../main/tags';
 import type {
 	ConflictFile,
+	GitOpResponse,
+	GitStash,
 	HttpRequest,
 	HttpResponse,
 	NoteMeta,
@@ -18,9 +20,11 @@ import { createCapFs } from './git/capFs';
 import { createCapHttp } from './git/capHttp';
 import { classify, createIsoGitSync, GitSyncError } from './git/isoGit';
 import {
+	byRepo,
 	createMultiSync,
 	isReadOnlyRepo,
 	nestedIgnores,
+	repoOf,
 	syncOrder,
 	withNestedIgnored
 } from '../../../../shared/multiSync';
@@ -240,6 +244,26 @@ export function createAndroidPlatform(): PlatformApi {
 		await Promise.all(found.map(([id, mtime]) => reindexFile(id, mtime)));
 	}
 
+	/** Soft delete: move a note into the trash folder (locked notes refuse). */
+	async function trash(id: string): Promise<void> {
+		let raw: string | null = null;
+		try {
+			raw = await readRaw(id);
+		} catch {
+			// Missing file: nothing to protect.
+		}
+		if (raw !== null && LOCKED_RE.test(raw)) throw new Error(`Note is locked: ${id}`);
+		const dest = await uniqueId(join(TRASH_DIR, id));
+		try {
+			await ensureDir(dirname(dest));
+			await Filesystem.rename({ from: rel(id), to: rel(dest), directory: DIR, toDirectory: DIR });
+		} catch {
+			await Filesystem.deleteFile({ path: rel(id), directory: DIR }).catch(() => {});
+		}
+		index.delete(id);
+		emitChange();
+	}
+
 	async function uniqueId(id: string): Promise<string> {
 		if (!(await exists(id))) return id;
 		const dir = dirname(id);
@@ -359,6 +383,25 @@ export function createAndroidPlatform(): PlatformApi {
 		}
 	}
 
+	/** Stash / revert: shares the sync lock; the index is rebuilt afterwards. */
+	async function gitOp(op: (nested: string[]) => Promise<void>): Promise<GitOpResponse> {
+		await ready;
+		if (busy) return { ok: false, error: 'A sync is running — try again in a moment.' };
+		busy = true;
+		try {
+			await op(await nestedRepos());
+			return { ok: true };
+		} catch (err) {
+			return { ok: false, error: err instanceof Error ? err.message : String(err) };
+		} finally {
+			busy = false;
+			await rebuild();
+			emitChange();
+		}
+	}
+
+	const repoSync = (repo: string) => (repo ? repoGit(repo) : git);
+
 	void App.addListener('resume', () => {
 		void ready.then(rebuild).then(() => {
 			for (const cb of changeListeners) cb();
@@ -414,22 +457,7 @@ export function createAndroidPlatform(): PlatformApi {
 		},
 		async deleteNote(id) {
 			await ready;
-			let raw: string | null = null;
-			try {
-				raw = await readRaw(id);
-			} catch {
-				// Missing file: nothing to protect.
-			}
-			if (raw !== null && LOCKED_RE.test(raw)) throw new Error(`Note is locked: ${id}`);
-			const dest = await uniqueId(join(TRASH_DIR, id));
-			try {
-				await ensureDir(dirname(dest));
-				await Filesystem.rename({ from: rel(id), to: rel(dest), directory: DIR, toDirectory: DIR });
-			} catch {
-				await Filesystem.deleteFile({ path: rel(id), directory: DIR }).catch(() => {});
-			}
-			index.delete(id);
-			emitChange();
+			await trash(id);
 		},
 
 		async listFolders() {
@@ -594,9 +622,12 @@ export function createAndroidPlatform(): PlatformApi {
 			if (token.trim()) await SecureStorage.setItem(repoTokenKey(path), token.trim());
 			return guarded(async () => {
 				await ensureDir(path);
-				// Ignore first, so the root never commits the folder's notes.
+				// Ignore first, so the root never commits the folder's notes, and
+				// stop tracking what the parent repo already had there.
+				const parent = repoOf(path, await nestedRepos());
 				await setNestedRepos([...(await nestedRepos()), path]);
 				await ignoreNested(await nestedRepos());
+				await repoSync(parent.repo).untrack(parent.rel);
 				const repo = repoGit(path);
 				await repo.connect(url.trim());
 				const r = await repo.pull();
@@ -629,6 +660,40 @@ export function createAndroidPlatform(): PlatformApi {
 			if (all.every((c) => c == null)) return null;
 			return all.flatMap((c) => c ?? []).sort((a, b) => a.path.localeCompare(b.path));
 		},
+
+		async gitStashes(): Promise<GitStash[]> {
+			await ready;
+			const all = await Promise.all(
+				['', ...(await nestedRepos())].map(async (repo) =>
+					(await repoSync(repo).stashes()).map((s) => ({
+						...s,
+						repo,
+						files: s.files.map((f) => ({ ...f, path: repo ? `${repo}/${f.path}` : f.path }))
+					}))
+				)
+			);
+			return all.flat().sort((a, b) => b.date - a.date);
+		},
+		gitStash: (paths, message) =>
+			gitOp(async (nested) => {
+				for (const [repo, rels] of byRepo(paths, nested))
+					await repoSync(repo).stashPush(rels, message);
+			}),
+		gitStashApply: (repo, id, drop) =>
+			gitOp(async (nested) => {
+				if (repo && !nested.includes(repo)) throw new Error(`No repository at ${repo}.`);
+				await repoSync(repo).stashApply(id, drop);
+			}),
+		gitStashDrop: (repo, id) =>
+			gitOp(async (nested) => {
+				if (repo && !nested.includes(repo)) throw new Error(`No repository at ${repo}.`);
+				await repoSync(repo).stashDrop(id);
+			}),
+		gitRevert: (paths) =>
+			gitOp(async (nested) => {
+				for (const [repo, rels] of byRepo(paths, nested))
+					for (const p of await repoSync(repo).revert(rels)) await trash(repo ? `${repo}/${p}` : p);
+			}),
 
 		async syncSetup(url, token) {
 			if (!/^https:\/\/\S+$/i.test(url.trim()))

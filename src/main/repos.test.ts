@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'nod
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { findNestedRepos, listRepos, workspaceSync } from './repos';
+import { addRepo, findNestedRepos, listRepos, workspaceSync } from './repos';
 
 /**
  * Root repo → "public" remote, nested `private/` repo → "server" remote. The
@@ -91,5 +91,72 @@ describe('workspace multi-repo sync', () => {
 		).resolve([{ path: 'private/diary.md', pick: 'mine' }]);
 		expect(done).toEqual({ status: 'ok' });
 		expect(readFileSync(path.join(work, 'private', 'diary.md'), 'utf8')).toBe('# Diary\nmine\n');
+	});
+});
+
+describe('addRepo', () => {
+	/** A root repo whose notes include a `secret/` folder it already tracks and pushed. */
+	function trackedFolder(): string {
+		const root = path.join(tmp, 'notes');
+		setupRepo(root, path.join(tmp, 'notes.git'));
+		git(root, 'config', 'credential.helper', 'store');
+		mkdirSync(path.join(root, 'secret'));
+		writeFileSync(path.join(root, 'secret', 'plan.md'), '# Plan\n');
+		writeFileSync(path.join(root, 'open.md'), '# Open\n');
+		git(root, 'add', '-A');
+		git(root, 'commit', '--quiet', '-m', 'init');
+		return root;
+	}
+
+	it('turns a folder that has notes into its own repo, out of the root', async () => {
+		const root = trackedFolder();
+		git(tmp, 'init', '--quiet', '--bare', '-b', 'main', path.join(tmp, 'secret.git'));
+		const res = await addRepo(root, 'secret/', `file://${path.join(tmp, 'secret.git')}`);
+		expect(res).toEqual({ status: 'ok' });
+
+		expect(await findNestedRepos(root)).toEqual(['secret']);
+		// The notes repo's credential helper came along, so a private remote authenticates too.
+		expect(git(path.join(root, 'secret'), 'config', '--local', 'credential.helper').trim()).toBe(
+			'store'
+		);
+		expect(readFileSync(path.join(root, '.gitignore'), 'utf8')).toContain('/secret/\n');
+		// Root: the folder is staged for removal (the files stay on disk).
+		expect(git(root, 'status', '--porcelain')).toContain('D  secret/plan.md');
+
+		expect(await (await workspaceSync(root)).push()).toEqual({ status: 'ok' });
+		expect(files('notes.git')).toEqual(['.gitignore', 'open.md']);
+		expect(files('secret.git')).toEqual(['plan.md']);
+	});
+
+	it('merges what the remote already has into an existing folder', async () => {
+		const root = trackedFolder();
+		const seed = path.join(tmp, 'seed');
+		setupRepo(seed, path.join(tmp, 'secret.git'));
+		writeFileSync(path.join(seed, 'old.md'), '# Old\n');
+		git(seed, 'add', '-A');
+		git(seed, 'commit', '--quiet', '-m', 'old');
+		git(seed, 'push', '--quiet', 'origin', 'HEAD:main');
+
+		expect(await addRepo(root, 'secret', `file://${path.join(tmp, 'secret.git')}`)).toEqual({
+			status: 'ok'
+		});
+		expect(readFileSync(path.join(root, 'secret', 'old.md'), 'utf8')).toBe('# Old\n');
+		expect(readFileSync(path.join(root, 'secret', 'plan.md'), 'utf8')).toBe('# Plan\n');
+	});
+
+	it('clones into a new folder, and refuses bad input before touching disk', async () => {
+		const root = trackedFolder();
+		const url = `file://${path.join(tmp, 'public.git')}`;
+		const sync = await workspaceSync(work);
+		await sync.push();
+		expect(await addRepo(root, 'mirror', url)).toEqual({ status: 'ok' });
+		expect(readFileSync(path.join(root, 'mirror', 'blog.md'), 'utf8')).toBe('# Blog\n');
+
+		await expect(addRepo(root, '../out', url)).rejects.toThrow(/inside your notes/);
+		await expect(addRepo(root, 'x', 'ftp://nope')).rejects.toThrow(/clone URL/);
+		await expect(
+			addRepo(root, 'gone', `file://${path.join(tmp, 'missing.git')}`)
+		).rejects.toThrow();
+		expect(await findNestedRepos(root)).toEqual(['mirror']);
 	});
 });

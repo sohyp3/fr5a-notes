@@ -5,8 +5,9 @@
 	import { syncErrorMessage } from '../sync';
 	import type { SyncRepo } from '../../../../shared/types';
 
-	// Root + nested repos, each syncing to its own remote. Desktop discovers
-	// nested repos on disk; Android can add them here (clone into a folder).
+	// Root + nested repos, each syncing to its own remote. Desktop also finds
+	// nested repos on disk; both can add one here (clone into a new folder, or
+	// turn a folder that already has notes into its own repo).
 	const app = getAppState();
 	const android = platform.platform === 'android';
 	let repos = $state<SyncRepo[]>([]);
@@ -26,18 +27,28 @@
 		if (!platform.syncAddRepo) return;
 		working = true;
 		message = null;
-		const res = await platform.syncAddRepo(folder, url, token);
+		const name = folder.trim().replace(/^\/+|\/+$/g, '');
+		const res = await platform.syncAddRepo(name, url, token);
 		token = '';
 		working = false;
 		if (!res.ok) message = { kind: 'error', text: syncErrorMessage(res.error) };
 		else {
-			message = { kind: 'ok', text: `Connected ${folder}.` };
+			message = {
+				kind: 'ok',
+				text:
+					res.result.status === 'conflict'
+						? `Connected ${name}. Its notes and the remote's overlap: resolve the conflicts to finish.`
+						: `Connected ${name}. Push to upload its notes; the root stops syncing them from its next commit.`
+			};
 			adding = false;
 			folder = url = '';
 			await app.refresh();
 		}
 		await load();
 	}
+
+	/** Folders that could get their own repo (not already one). */
+	const candidates = $derived(app.folders.filter((f) => !repos.some((r) => r.path === f)));
 
 	async function remove(path: string): Promise<void> {
 		await platform.syncRemoveRepo?.(path);
@@ -61,16 +72,28 @@
 	<p class="hint">
 		A folder with its own git repo syncs to its own remote and is kept out of the root repo (added
 		to <code>.gitignore</code>). Use it to send <code>private/</code> or <code>.fr5a/</code>
-		(AI sessions) only to your server.
-		{#if !android}Clones use your system git credentials (SSH keys / credential helper); a
-			<code>git clone</code> inside the notes folder works too.{/if}
+		(AI sessions) only to your server. A new folder is cloned into; a folder that already has notes becomes
+		its own repo, and the root stops tracking it — what the root already pushed stays in its history.
+		{#if !android}Uses your system git credentials (SSH keys, or the credential helper your notes
+			repo uses).{/if}
 	</p>
+	{#if message && !adding}<p class="msg after" class:error={message.kind === 'error'}>
+			{message.text}
+		</p>{/if}
 	{#if platform.syncAddRepo}
 		{#if adding}
 			<div class="row stack">
 				<label class="field">
 					<span class="name">Folder</span>
-					<input bind:value={folder} placeholder="private  or  .fr5a" autocomplete="off" />
+					<input
+						bind:value={folder}
+						placeholder="private  or  .fr5a"
+						autocomplete="off"
+						list="repo-folders"
+					/>
+					<datalist id="repo-folders">
+						{#each candidates as f (f)}<option value={f}></option>{/each}
+					</datalist>
 				</label>
 				<label class="field">
 					<span class="name">{android ? 'HTTPS clone URL' : 'Clone URL (https or SSH)'}</span>
@@ -192,6 +215,10 @@
 		margin: 0;
 		font-size: 13px;
 		color: var(--text-muted);
+	}
+	.msg.after {
+		margin: 0 2px 10px;
+		line-height: 1.5;
 	}
 	.msg.error {
 		color: #c0392b;

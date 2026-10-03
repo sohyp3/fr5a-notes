@@ -56,6 +56,26 @@ export function nestedIgnores(rels: string[]): { repo: string; entries: string[]
 	return [...plan].map(([repo, entries]) => ({ repo, entries }));
 }
 
+/**
+ * The repo a workspace path belongs to (the deepest nested repo containing
+ * it, else the root '') and the path relative to that repo.
+ */
+export function repoOf(path: string, rels: string[]): { repo: string; rel: string } {
+	const repo =
+		rels.filter((r) => r && path.startsWith(`${r}/`)).sort((a, b) => b.length - a.length)[0] ?? '';
+	return { repo, rel: repo ? path.slice(repo.length + 1) : path };
+}
+
+/** Workspace paths grouped by repo, each relative to its repo. */
+export function byRepo(paths: string[], rels: string[]): Map<string, string[]> {
+	const out = new Map<string, string[]>();
+	for (const p of paths) {
+		const { repo, rel } = repoOf(p, rels);
+		out.set(repo, [...(out.get(repo) ?? []), rel]);
+	}
+	return out;
+}
+
 type ErrorFactory = (code: SyncErrorCode, message: string) => Error;
 
 /** Repos that can't sync (no remote / not set up) are skipped while another one works. */

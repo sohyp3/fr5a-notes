@@ -125,7 +125,7 @@
 
 	onMount(async () => {
 		await ai.load();
-		hasSearchKey = !!(await ai.searchKey());
+		await refreshSearchKey();
 		// Fetch model lists for providers that can answer (key saved, local, or Zen's public list).
 		await Promise.all(
 			cfg.providers.map(async (p) => {
@@ -208,21 +208,40 @@
 		}
 	}
 
-	function setSearchKind(kind: SearchKind | ''): void {
-		ai.update({ search: kind ? { kind, baseUrl: cfg.search?.baseUrl ?? '' } : null });
+	async function refreshSearchKey(): Promise<void> {
+		hasSearchKey = !!(await ai.searchKey(cfg.search?.kind));
 	}
 
-	async function saveSearchKey(): Promise<void> {
-		await ai.setSearchKey(searchKey.trim() || null);
-		hasSearchKey = !!searchKey.trim();
+	function setSearchKind(kind: SearchKind | ''): void {
+		ai.update({ search: kind ? { kind, baseUrl: cfg.search?.baseUrl ?? '' } : null });
 		searchKey = '';
+		searchMsg = null;
+		void refreshSearchKey();
+	}
+
+	/** Saved on Enter, on leaving the field, and before a test — not only via the button. */
+	async function saveSearchKey(): Promise<void> {
+		const kind = cfg.search?.kind;
+		const key = searchKey.trim();
+		if (!kind || !key) return;
+		searchKey = '';
+		await ai.setSearchKey(kind, key);
+		hasSearchKey = true;
+		searchMsg = { kind: 'ok', text: 'Key saved.' };
 	}
 
 	async function testSearch(): Promise<void> {
 		if (!cfg.search) return;
+		await saveSearchKey();
 		searchMsg = null;
 		try {
-			const r = await webSearch(platform, cfg.search, await ai.searchKey(), 'fr5a markdown', 3);
+			const r = await webSearch(
+				platform,
+				cfg.search,
+				await ai.searchKey(cfg.search.kind),
+				'fr5a markdown',
+				3
+			);
 			searchMsg = { kind: 'ok', text: `${r.length} results — ${r[0]?.title ?? ''}` };
 		} catch (err) {
 			searchMsg = { kind: 'error', text: err instanceof Error ? err.message : String(err) };
@@ -496,6 +515,8 @@
 							autocomplete="off"
 							bind:value={searchKey}
 							placeholder={hasSearchKey ? '•••••• saved' : 'API key'}
+							onchange={saveSearchKey}
+							onkeydown={(e) => e.key === 'Enter' && saveSearchKey()}
 						/>
 						<button class="btn" disabled={!searchKey.trim()} onclick={saveSearchKey}>Save</button>
 					</div>

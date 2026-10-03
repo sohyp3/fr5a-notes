@@ -443,7 +443,7 @@ class HarnessState {
 			const [notes, apiKey, searchKey] = await Promise.all([
 				this.gatherNotes(tab, profile),
 				ai.apiKey(profile.id),
-				ai.searchKey()
+				ai.searchKey(ai.config.search?.kind)
 			]);
 			if (!apiKey && !profile.local)
 				throw new Error(

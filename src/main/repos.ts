@@ -1,14 +1,16 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
-import { createGitSync, GitSyncError } from './gitSync';
+import { classify, createGitSync, GitSyncError } from './gitSync';
 import {
 	createMultiSync,
 	isReadOnlyRepo,
 	nestedIgnores,
+	repoOf,
 	syncOrder,
 	withNestedIgnored
 } from '../shared/multiSync';
+import type { SyncResult } from '../shared/types';
 
 /**
  * Workspace repos for desktop sync: the root (if it is a repo) plus nested
@@ -97,38 +99,123 @@ function safeRel(folder: string): string | null {
 	return rel && rel !== '.fr5a_trash' && !rel.startsWith('.fr5a_trash/') ? rel : null;
 }
 
-/**
- * Clone `url` into a new workspace folder (system git and its credentials —
- * SSH keys or a credential helper). Then the folder is a nested repo.
- */
-export async function addRepo(root: string, folder: string, url: string): Promise<string> {
-	const rel = safeRel(folder);
-	if (!rel) throw new GitSyncError('git', 'Pick a folder inside your notes.');
-	if (!/^(https?:\/\/|ssh:\/\/|git@)\S+$/i.test(url.trim()))
-		throw new GitSyncError('no-remote', 'Use an https:// or SSH clone URL.');
-	const dest = path.join(root, rel);
-	const existing = await fs.readdir(dest).catch(() => null);
-	if (existing && existing.length)
-		throw new GitSyncError('git', `${rel} already has files; pick a new folder.`);
-	await fs.mkdir(path.dirname(dest), { recursive: true });
-	await new Promise<void>((resolve, reject) =>
+/** Run git for repo setup; failures throw a classified GitSyncError. */
+function setupGit(cwd: string, args: string[]): Promise<string> {
+	return new Promise((resolve, reject) =>
 		execFile(
 			'git',
-			['clone', '--quiet', url.trim(), dest],
+			args,
 			{
-				env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes' }
+				cwd,
+				env: {
+					...process.env,
+					GIT_TERMINAL_PROMPT: '0',
+					GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? 'ssh -o BatchMode=yes',
+					LC_ALL: 'C'
+				}
 			},
-			(err, _out, stderr) =>
-				err
-					? reject(
-							new GitSyncError(
-								/denied|auth|403|401/i.test(stderr) ? 'auth' : 'git',
-								stderr.trim() || err.message
-							)
-						)
-					: resolve()
+			(err, stdout, stderr) => {
+				if (!err) return resolve(stdout);
+				if ((err as NodeJS.ErrnoException).code === 'ENOENT')
+					return reject(new GitSyncError('no-git', 'git was not found on PATH.'));
+				const msg = (stderr || err.message).trim();
+				reject(new GitSyncError(classify(msg), msg));
+			}
 		)
 	);
+}
+
+/**
+ * The notes repo's own `credential.*` / `user.*` settings (e.g. `credential.helper
+ * store`). A new repo doesn't see another repo's local config, so it gets a copy
+ * — otherwise a private remote would fail with "terminal prompts disabled".
+ */
+async function localConfig(root: string): Promise<[string, string][]> {
+	if (!(await isRepoDir(root))) return [];
+	const out = await setupGit(root, [
+		'config',
+		'--local',
+		'--get-regexp',
+		'^(credential|user)\\.'
+	]).catch(() => '');
+	return out
+		.split('\n')
+		.filter(Boolean)
+		.map((line) => {
+			const i = line.indexOf(' ');
+			return (i === -1 ? [line, ''] : [line.slice(0, i), line.slice(i + 1)]) as [string, string];
+		});
+}
+
+/** Remote URLs the app can sync with (system git: https, SSH, or a local file:// repo). */
+const URL_RE = /^(https?:\/\/|ssh:\/\/|git@|file:\/\/)\S+$/i;
+
+/**
+ * Give a workspace folder its own repo syncing to `url` — e.g. `private/` →
+ * your own server. Uses system git and its credentials (SSH keys, or whatever
+ * credential helper the notes repo uses). A new or empty folder is cloned
+ * into; a folder that already holds notes becomes a repo in place, and its
+ * first sync merges in whatever the remote already has. The parent repo
+ * ignores the folder and stops tracking it from its next commit (its history
+ * keeps what was already pushed).
+ */
+export async function addRepo(root: string, folder: string, url: string): Promise<SyncResult> {
+	const rel = safeRel(folder);
+	if (!rel) throw new GitSyncError('git', 'Pick a folder inside your notes.');
+	const remote = url.trim();
+	if (!URL_RE.test(remote))
+		throw new GitSyncError('no-remote', 'Use an https:// or SSH clone URL.');
+	const dest = path.join(root, rel);
+	const nestedBefore = await findNestedRepos(root);
+	const config = await localConfig(root);
+	const withConfig = config.flatMap(([k, v]) => ['-c', `${k}=${v}`]);
+
+	// Check the URL and credentials before touching disk; learn the default branch.
+	const head = await setupGit(root, [...withConfig, 'ls-remote', '--symref', remote, 'HEAD']);
+	const branch = /^ref: refs\/heads\/(\S+)\s+HEAD$/m.exec(head)?.[1] ?? 'main';
+
+	const entries = ((await fs.readdir(dest).catch(() => [])) as string[]).filter(
+		(n) => n !== '.DS_Store'
+	);
+	if (await isRepoDir(dest)) {
+		// Already its own repo: point it at the new remote.
+		const remotes = (await setupGit(dest, ['remote'])).split('\n');
+		await setupGit(dest, [
+			'remote',
+			remotes.includes('origin') ? 'set-url' : 'add',
+			'origin',
+			remote
+		]);
+	} else {
+		if (entries.length === 0) {
+			await fs.mkdir(dest, { recursive: true });
+			await setupGit(root, [...withConfig, 'clone', '--quiet', remote, dest]);
+		} else {
+			await setupGit(dest, ['init', '--quiet']);
+			await setupGit(dest, ['symbolic-ref', 'HEAD', `refs/heads/${branch}`]);
+			await setupGit(dest, ['remote', 'add', 'origin', remote]);
+		}
+		for (const [k, v] of config) await setupGit(dest, ['config', '--add', k, v]);
+	}
+
+	// The parent repo ignores the folder, and stops tracking what it already had.
 	await ignoreNested(root, await findNestedRepos(root));
-	return rel;
+	const parent = repoOf(rel, nestedBefore);
+	const parentDir = parent.repo ? path.join(root, parent.repo) : root;
+	if (await isRepoDir(parentDir))
+		await setupGit(parentDir, [
+			'--literal-pathspecs',
+			'rm',
+			'-r',
+			'--quiet',
+			'--cached',
+			'--ignore-unmatch',
+			'--',
+			parent.rel
+		]);
+
+	const res = await createGitSync(dest).pull({ allowUnrelated: true });
+	return res.status === 'conflict'
+		? { status: 'conflict', files: res.files.map((f) => ({ ...f, path: `${rel}/${f.path}` })) }
+		: res;
 }

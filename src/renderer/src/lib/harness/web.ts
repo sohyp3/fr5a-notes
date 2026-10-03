@@ -1,4 +1,4 @@
-import type { Http, SearchProfile } from './types';
+import { SEARCH_KINDS, type Http, type SearchProfile } from './types';
 
 /** Web search + page reading for sources / fact-checking. */
 
@@ -18,6 +18,9 @@ export async function webSearch(
 	max = 6
 ): Promise<SearchResult[]> {
 	const q = encodeURIComponent(query);
+	const kind = SEARCH_KINDS.find((k) => k.kind === profile.kind);
+	if (kind?.needsKey && !apiKey?.trim())
+		throw new Error(`${kind.label} needs an API key: paste it in Settings → AI → Web search.`);
 	let res;
 	if (profile.kind === 'duckduckgo') {
 		// The no-JavaScript results page: no key, no account.
@@ -45,23 +48,50 @@ export async function webSearch(
 			timeoutMs: 30_000
 		});
 	} else if (profile.kind === 'brave') {
+		// Brave rejects (422) queries over 400 characters / 50 words, and count > 20.
+		const short = encodeURIComponent(query.split(/\s+/).slice(0, 50).join(' ').slice(0, 400));
 		res = await http.httpFetch({
-			url: `https://api.search.brave.com/res/v1/web/search?q=${q}&count=${max}`,
-			headers: { Accept: 'application/json', 'X-Subscription-Token': apiKey ?? '' },
+			url: `https://api.search.brave.com/res/v1/web/search?q=${short}&count=${Math.min(max, 20)}`,
+			headers: { Accept: 'application/json', 'X-Subscription-Token': apiKey!.trim() },
 			timeoutMs: 30_000
 		});
 	} else {
 		res = await http.httpFetch({
 			url: 'https://api.tavily.com/search',
 			method: 'POST',
-			headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey ?? ''}` },
+			headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey!.trim()}` },
 			body: JSON.stringify({ query, max_results: max }),
 			timeoutMs: 30_000
 		});
 	}
 	if (res.status < 200 || res.status >= 300)
-		throw new Error(`Search failed (${res.status}): ${res.body.slice(0, 200)}`);
+		throw new Error(`Search failed (${res.status}): ${searchError(res.body)}`);
 	return parseSearch(profile.kind, res.body).slice(0, max);
+}
+
+/**
+ * The readable part of a search API error: Brave's `error.detail` (plus which
+ * field failed validation), Tavily's `detail.error`, else the start of the body.
+ */
+export function searchError(body: string): string {
+	try {
+		const j = JSON.parse(body);
+		const e = j?.error;
+		if (e && typeof e === 'object') {
+			const field = e.meta?.errors?.[0];
+			const where = field?.loc ? ` (${field.loc.join(' ')}: ${field.msg})` : '';
+			if (e.code === 'SUBSCRIPTION_TOKEN_INVALID')
+				return `${e.detail} Check the key in Settings → AI → Web search.`;
+			if (e.detail) return `${e.detail}${where}`;
+		}
+		const d = j?.detail;
+		if (typeof d === 'string') return d;
+		if (d?.error) return String(d.error);
+		if (typeof e === 'string') return e;
+	} catch {
+		// Not JSON.
+	}
+	return body.slice(0, 200);
 }
 
 /**

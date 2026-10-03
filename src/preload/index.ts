@@ -3,6 +3,8 @@ import { Channels } from '../shared/types';
 import type {
 	ConflictFile,
 	GitChange,
+	GitOpResponse,
+	GitStash,
 	HttpRequest,
 	HttpResponse,
 	NoteMeta,
@@ -65,11 +67,23 @@ const api = {
 	syncConflicts: (): Promise<ConflictFile[]> => ipcRenderer.invoke(Channels.syncConflicts),
 	/** Root + nested repos and their remotes. */
 	syncRepos: (): Promise<SyncRepo[]> => ipcRenderer.invoke(Channels.syncRepos),
-	/** Clone `url` into workspace folder `path` with system git (token unused on desktop). */
+	/**
+	 * Give workspace folder `path` its own repo syncing to `url` (system git and
+	 * its credentials; the token is unused on desktop).
+	 */
 	syncAddRepo: (path: string, url: string): Promise<SyncResponse> =>
 		ipcRenderer.invoke(Channels.syncAddRepo, path, url),
 	/** Notes changed since the last commit; null when the folder isn't under git. */
 	gitChanges: (): Promise<GitChange[] | null> => ipcRenderer.invoke(Channels.gitChanges),
+	gitStash: (paths: string[], message: string): Promise<GitOpResponse> =>
+		ipcRenderer.invoke(Channels.gitStash, paths, message),
+	gitStashes: (): Promise<GitStash[]> => ipcRenderer.invoke(Channels.gitStashes),
+	gitStashApply: (repo: string, id: string, drop: boolean): Promise<GitOpResponse> =>
+		ipcRenderer.invoke(Channels.gitStashApply, repo, id, drop),
+	gitStashDrop: (repo: string, id: string): Promise<GitOpResponse> =>
+		ipcRenderer.invoke(Channels.gitStashDrop, repo, id),
+	gitRevert: (paths: string[]): Promise<GitOpResponse> =>
+		ipcRenderer.invoke(Channels.gitRevert, paths),
 
 	// AI harness. HTTP runs in main (the renderer's CSP blocks fetch).
 	httpFetch: (req: HttpRequest): Promise<HttpResponse> =>

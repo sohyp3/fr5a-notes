@@ -513,7 +513,8 @@ test('trash: deleting forever asks first', async ({ page }) => {
 
 // --- changes (git status) ------------------------------------------------------------
 
-test('changes: an edited note shows up with its diff', async ({ page }) => {
+/** Edit Plan (so it differs from the last commit) and open the Changes view on it. */
+async function changePlan(page: Page) {
 	await openPlan(page);
 	await edit(page);
 	await page.locator('.ProseMirror p').last().tap();
@@ -526,17 +527,61 @@ test('changes: an edited note shows up with its diff', async ({ page }) => {
 	if ((await layoutOf(page)) === 'phone') {
 		await page.getByRole('button', { name: 'More', exact: true }).tap();
 		await page.getByRole('menuitem', { name: /^Changes/ }).tap();
-		await page.locator('.file').filter({ hasText: 'plan.md' }).tap();
 	} else {
 		await page.locator('.titlebar').getByRole('button', { name: 'Changes' }).tap();
-		await expect(page.locator('.file').filter({ hasText: 'plan.md' })).toBeVisible();
 	}
 	await expect(page.getByRole('heading', { name: 'Changes' })).toBeVisible();
+}
+
+const changedFile = (page: Page, name: string) =>
+	page.getByRole('list', { name: 'Changed notes' }).locator('.file').filter({ hasText: name });
+
+test('changes: an edited note shows up with its diff', async ({ page }) => {
+	await changePlan(page);
+	await changedFile(page, 'plan.md').tap();
 	await expect(page.locator('.dl.add').filter({ hasText: 'first line extra' })).toBeVisible();
 	await expect(page.locator('.dl.del').filter({ hasText: /^.*first line$/ })).toBeVisible();
 	// Closing the view leaves the same editor (never unmounted underneath).
 	await page.getByRole('button', { name: 'Close changes' }).tap();
 	await expect(page.locator('.ProseMirror')).toContainText('first line extra');
+});
+
+test('changes: stash a note, see it, restore it, then revert', async ({ page }) => {
+	await changePlan(page);
+	await page.getByRole('button', { name: 'Stash all' }).tap();
+	await page.getByLabel('Stash plan.md as').fill('try this');
+	await page.locator('form.bar').getByRole('button', { name: 'Stash' }).tap();
+	await expect(page.getByRole('status')).toContainText('Stashed plan.md as “try this”');
+	await expect(page.getByRole('list', { name: 'Changed notes' })).toHaveCount(0);
+
+	// The stash lists its notes with their diff.
+	await page.getByRole('list', { name: 'Stashes' }).getByText('try this').tap();
+	await expect(page.locator('.dl.add').filter({ hasText: 'first line extra' })).toBeVisible();
+	await page.getByRole('button', { name: 'Restore' }).tap();
+	await expect(page.getByRole('list', { name: 'Stashes' })).toHaveCount(0);
+	await expect(changedFile(page, 'plan.md')).toBeVisible();
+
+	// Revert asks first, then the note (and the open editor) is back to the commit.
+	await changedFile(page, 'plan.md').tap();
+	await page.getByRole('button', { name: 'Revert', exact: true }).tap();
+	await page.getByRole('alertdialog').getByRole('button', { name: 'Revert' }).tap();
+	await expect(page.getByText('No note differs from the last commit.')).toBeVisible();
+	await page.getByRole('button', { name: 'Close changes' }).tap();
+	await expect(page.locator('.ProseMirror')).toContainText('first line');
+	await expect(page.locator('.ProseMirror')).not.toContainText('extra');
+});
+
+test('changes: a stash can be dropped after confirming', async ({ page }) => {
+	await changePlan(page);
+	await page.getByRole('button', { name: 'Stash all' }).tap();
+	await page.locator('form.bar').getByRole('button', { name: 'Stash' }).tap();
+	const stashList = page.getByRole('list', { name: 'Stashes' });
+	// No message typed: the stash is named after its notes.
+	await stashList.getByText('plan', { exact: true }).tap();
+	await page.getByRole('button', { name: 'Drop' }).tap();
+	await page.getByRole('alertdialog').getByRole('button', { name: 'Drop' }).tap();
+	await expect(stashList).toHaveCount(0);
+	await expect(page.getByText('No note differs from the last commit.')).toBeVisible();
 });
 
 // --- layout ----------------------------------------------------------------------------

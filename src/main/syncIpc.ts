@@ -1,7 +1,20 @@
 import { GitSyncError } from './gitSync';
-import { addRepo, listRepos, workspaceSync } from './repos';
+import {
+	workspaceRevert,
+	workspaceStash,
+	workspaceStashApply,
+	workspaceStashDrop,
+	workspaceStashes
+} from './gitStash';
+import { addRepo, findNestedRepos, listRepos, workspaceSync } from './repos';
 import { Channels } from '../shared/types';
-import type { ConflictFile, ResolveChoice, SyncResponse, SyncResult } from '../shared/types';
+import type {
+	ConflictFile,
+	GitOpResponse,
+	ResolveChoice,
+	SyncResponse,
+	SyncResult
+} from '../shared/types';
 
 /**
  * IPC surface for git sync. Kept free of `electron` imports so tests can drive
@@ -23,6 +36,8 @@ export interface SyncIpcDeps {
 	openConflicts(files: ConflictFile[]): void;
 	/** The merge was resolved or aborted — close the conflict window. */
 	closeConflicts(): void;
+	/** Move a note to the trash (reverting a note the last commit doesn't have). */
+	trash(id: string): Promise<void>;
 }
 
 export function registerSyncHandlers(ipc: IpcLike, deps: SyncIpcDeps) {
@@ -75,12 +90,47 @@ export function registerSyncHandlers(ipc: IpcLike, deps: SyncIpcDeps) {
 	ipc.handle(Channels.syncResolve, (_e, choices: ResolveChoice[]) => resolve(choices));
 	ipc.handle(Channels.syncAbort, abort);
 	ipc.handle(Channels.syncConflicts, () => pending ?? []);
-	// Clone a repo into a new folder (nested repo, e.g. a skill pack).
+	// Give a folder its own repo (clone into it, or init in place) and sync it once.
 	ipc.handle(Channels.syncAddRepo, (_e, folder: string, url: string) =>
-		guarded(async () => {
-			await addRepo(deps.getRoot()!, folder, url);
+		guarded(() => addRepo(deps.getRoot()!, folder, url))
+	);
+	// Stash / revert (Changes view): one git op at a time, sharing the sync lock.
+	async function exclusive(
+		op: (root: string, nested: string[]) => Promise<string[] | void>
+	): Promise<GitOpResponse> {
+		const root = deps.getRoot();
+		if (!root) return { ok: false, error: 'No notes folder is open.' };
+		if (busy) return { ok: false, error: 'A sync is running — try again in a moment.' };
+		busy = true;
+		try {
+			const conflicts = await op(root, await findNestedRepos(root));
+			return conflicts?.length ? { ok: true, conflicts } : { ok: true };
+		} catch (err) {
+			return { ok: false, error: err instanceof Error ? err.message : String(err) };
+		} finally {
+			busy = false;
+		}
+	}
+
+	ipc.handle(Channels.gitStashes, async () => {
+		const root = deps.getRoot();
+		return root ? workspaceStashes(root, await findNestedRepos(root)) : [];
+	});
+	ipc.handle(Channels.gitStash, (_e, paths: string[], message: string) =>
+		exclusive((root, nested) => workspaceStash(root, nested, paths, message))
+	);
+	ipc.handle(Channels.gitStashApply, (_e, repo: string, id: string, drop: boolean) =>
+		exclusive((root, nested) => workspaceStashApply(root, nested, repo, id, drop))
+	);
+	ipc.handle(Channels.gitStashDrop, (_e, repo: string, id: string) =>
+		exclusive((root, nested) => workspaceStashDrop(root, nested, repo, id))
+	);
+	ipc.handle(Channels.gitRevert, (_e, paths: string[]) =>
+		exclusive(async (root, nested) => {
+			for (const id of await workspaceRevert(root, nested, paths)) await deps.trash(id);
 		})
 	);
+
 	ipc.handle(Channels.syncRepos, () => {
 		const root = deps.getRoot();
 		return root ? listRepos(root) : [];

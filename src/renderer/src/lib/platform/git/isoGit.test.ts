@@ -323,4 +323,82 @@ describe('isomorphic-git sync', () => {
 		expect(await a.sync.changes()).toHaveLength(3);
 		expect(remoteLog()).toHaveLength(1);
 	});
+
+	it('stashes notes as a snapshot and brings them back', async () => {
+		const { a } = await twoClones();
+		write(a.dir, 'shared.md', '# Shared\n\nstashed edit\n');
+		write(a.dir, 'fresh.md', '# Fresh\n');
+		write(a.dir, 'kept.md', '# Not stashed\n');
+		fs.rmSync(path.join(a.dir, 'a-only.md'));
+		await a.sync.stashPush(['shared.md', 'fresh.md', 'a-only.md'], 'wip');
+		expect(read(a.dir, 'shared.md')).toBe('# Shared\n\none\ntwo\nthree\n');
+		expect(has(a.dir, 'fresh.md')).toBe(false);
+		expect(read(a.dir, 'a-only.md')).toBe('# A\n');
+		expect(read(a.dir, 'kept.md')).toBe('# Not stashed\n');
+		expect((await a.sync.changes())?.map((c) => c.path)).toEqual(['kept.md']);
+
+		const [s, ...rest] = await a.sync.stashes();
+		expect(rest).toEqual([]);
+		expect(s.message).toBe('wip');
+		expect(s.files.map((f) => [f.path, f.status])).toEqual([
+			['a-only.md', 'deleted'],
+			['fresh.md', 'added'],
+			['shared.md', 'modified']
+		]);
+		// Kept under .git/, so a sync never commits it.
+		expect(await a.sync.push()).toEqual({ status: 'ok' });
+		expect(await a.sync.stashes()).toHaveLength(1);
+
+		await a.sync.stashApply(s.id, true);
+		expect(read(a.dir, 'shared.md')).toBe('# Shared\n\nstashed edit\n');
+		expect(read(a.dir, 'fresh.md')).toBe('# Fresh\n');
+		expect(has(a.dir, 'a-only.md')).toBe(false);
+		expect(await a.sync.stashes()).toEqual([]);
+	});
+
+	it('refuses to apply a stash over edits made since, and drops by id', async () => {
+		const { a } = await twoClones();
+		write(a.dir, 'shared.md', '# Shared\n\nstashed edit\n');
+		await a.sync.stashPush(['shared.md'], 'one');
+		write(a.dir, 'shared.md', '# Shared\n\ntyped after the stash\n');
+		const [s] = await a.sync.stashes();
+		await expect(a.sync.stashApply(s.id, true)).rejects.toThrow(/edits to shared\.md/);
+		expect(read(a.dir, 'shared.md')).toBe('# Shared\n\ntyped after the stash\n');
+		await a.sync.stashDrop(s.id);
+		expect(await a.sync.stashes()).toEqual([]);
+		await expect(a.sync.stashDrop(s.id)).rejects.toThrow(/no longer exists/);
+		await expect(a.sync.stashPush(['nothing.md'], 'x')).rejects.toThrow(/No changes/);
+	});
+
+	it('reverts notes to the last commit and hands back new ones', async () => {
+		const { a } = await twoClones();
+		write(a.dir, 'shared.md', '# Shared\n\nedited!\n');
+		fs.rmSync(path.join(a.dir, 'a-only.md'));
+		write(a.dir, 'fresh.md', '# Fresh\n');
+		expect(await a.sync.revert(['shared.md', 'a-only.md', 'fresh.md'])).toEqual(['fresh.md']);
+		expect(read(a.dir, 'shared.md')).toBe('# Shared\n\none\ntwo\nthree\n');
+		expect(read(a.dir, 'a-only.md')).toBe('# A\n');
+		expect((await a.sync.changes())?.map((c) => c.path)).toEqual(['fresh.md']);
+		await expect(a.sync.revert(['../x.md'])).rejects.toThrow(/outside/);
+	});
+
+	it('untracks a folder that became its own repo', async () => {
+		const { a } = await twoClones();
+		write(a.dir, 'private/diary.md', '# Diary\n');
+		await a.sync.push();
+		write(a.dir, '.gitignore', '/private/\n');
+		await a.sync.untrack('private');
+		expect(await a.sync.push()).toEqual({ status: 'ok' });
+		const tree = execFileSync(
+			'git',
+			['--git-dir', path.join(tmp, 'remote.git'), 'ls-tree', '-r', '--name-only', 'main'],
+			{ encoding: 'utf8' }
+		);
+		expect(tree.split('\n').filter(Boolean).sort()).toEqual([
+			'.gitignore',
+			'a-only.md',
+			'shared.md'
+		]);
+		expect(read(a.dir, 'private/diary.md')).toBe('# Diary\n');
+	});
 });

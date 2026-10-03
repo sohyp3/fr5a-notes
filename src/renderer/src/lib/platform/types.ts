@@ -1,6 +1,8 @@
 import type {
 	ConflictFile,
 	GitChange,
+	GitOpResponse,
+	GitStash,
 	HttpRequest,
 	HttpResponse,
 	NoteMeta,
@@ -60,8 +62,9 @@ export interface PlatformApi {
 	/** The workspace's repos: root + nested folders with their own remotes. */
 	syncRepos?(): Promise<SyncRepo[]>;
 	/**
-	 * Android: add a nested repo — clone `url` into workspace folder `path`
-	 * (or connect an existing folder), with its own token. The root's
+	 * Add a nested repo: clone `url` into workspace folder `path`, or turn an
+	 * existing folder into its own repo pointing at `url`. Android keeps a
+	 * per-repo token; desktop uses system git credentials. The parent repo's
 	 * `.gitignore` gets the folder so its notes never reach the root remote.
 	 */
 	syncAddRepo?(path: string, url: string, token: string): Promise<SyncResponse>;
@@ -72,6 +75,15 @@ export interface PlatformApi {
 	 * committed text for diffing. Null when the workspace isn't under git.
 	 */
 	gitChanges?(): Promise<GitChange[] | null>;
+	/** Stash these changed notes (workspace paths; one stash per repo) and revert them. */
+	gitStash?(paths: string[], message: string): Promise<GitOpResponse>;
+	/** Stashes of every repo, newest first. */
+	gitStashes?(): Promise<GitStash[]>;
+	/** Bring a stash back; `drop` removes it once applied cleanly. */
+	gitStashApply?(repo: string, id: string, drop: boolean): Promise<GitOpResponse>;
+	gitStashDrop?(repo: string, id: string): Promise<GitOpResponse>;
+	/** Revert notes to the last commit; notes it doesn't have go to the trash. */
+	gitRevert?(paths: string[]): Promise<GitOpResponse>;
 
 	/**
 	 * Hosts that own the working copy (Android): first-run connect/clone to an

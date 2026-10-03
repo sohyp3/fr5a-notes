@@ -11,21 +11,25 @@ import { isTrackedNote, type ChangeStatus, type GitChange } from '../shared/type
  */
 
 /** Bigger files are listed without their text. */
-const MAX_BYTES = 512 * 1024;
+export const MAX_BYTES = 512 * 1024;
 
-function git(cwd: string, args: string[]): Promise<{ code: number; stdout: string }> {
+/** Run git in `cwd`; never throws (a failure is a non-zero `code`). */
+export function git(
+	cwd: string,
+	args: string[]
+): Promise<{ code: number; stdout: string; stderr: string }> {
 	return new Promise((resolve) => {
 		execFile(
 			'git',
 			args,
 			{
 				cwd,
-				env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' },
+				env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', LC_ALL: 'C' },
 				maxBuffer: 64 * 1024 * 1024
 			},
-			(err, stdout) => {
+			(err, stdout, stderr) => {
 				const e = err as (NodeJS.ErrnoException & { code?: string | number }) | null;
-				resolve({ code: e ? (typeof e.code === 'number' ? e.code : 1) : 0, stdout });
+				resolve({ code: e ? (typeof e.code === 'number' ? e.code : 1) : 0, stdout, stderr });
 			}
 		);
 	});

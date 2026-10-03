@@ -304,7 +304,10 @@ function registerIpc(): void {
 		getRoot: () => fileService?.root ?? null,
 		emit: (channel, ...args) => mainWindow?.webContents.send(channel, ...args),
 		openConflicts: () => openConflictWindow(),
-		closeConflicts: closeConflictWindow
+		closeConflicts: closeConflictWindow,
+		trash: async (id) => {
+			await fileService?.delete(id);
+		}
 	});
 
 	// Frameless window controls.

@@ -436,7 +436,152 @@ export function createIsoGitSync({ fs, http, dir, getToken }: IsoGitDeps) {
 		return out;
 	}
 
-	return { isRepo, connect, pull, push, resolve, abort, conflicts, remoteUrl, inMerge, changes };
+	/** Stop tracking everything under `folder` (it became its own repo); files stay on disk. */
+	async function untrack(folder: string): Promise<void> {
+		if (!(await isRepo())) return;
+		const prefix = `${safePath(folder)}/`;
+		for (const filepath of await git.listFiles({ ...base }))
+			if (filepath.startsWith(prefix)) await git.remove({ ...base, filepath });
+	}
+
+	// --- stash: snapshots under .git/ (never synced). isomorphic-git's own
+	// stash leaves new files out, and would sweep up every tracked change.
+
+	const stashDir = `${gitdir}/fr5a-stash`;
+
+	async function readText(filepath: string): Promise<string | null> {
+		return (await fs.promises.readFile(`${dir}/${filepath}`, 'utf8').catch(() => null)) as
+			string | null;
+	}
+
+	/** Put each note back to HEAD; returns the ones HEAD doesn't have (left on disk, unstaged). */
+	async function revert(paths: string[]): Promise<string[]> {
+		await ensureRepo();
+		const head = await resolveRef('HEAD');
+		const fresh: string[] = [];
+		for (const p of paths) {
+			const filepath = safePath(p);
+			let blob: Uint8Array | null = null;
+			if (head)
+				blob = await git.readBlob({ ...base, oid: head, filepath }).then(
+					(r) => r.blob,
+					() => null
+				);
+			if (!blob) {
+				await git.remove({ ...base, filepath }).catch(() => {});
+				fresh.push(filepath);
+				continue;
+			}
+			const abs = `${dir}/${filepath}`;
+			await mkdirp(abs.slice(0, abs.lastIndexOf('/')));
+			await fs.promises.writeFile(abs, blob);
+			await git.resetIndex({ ...base, filepath }).catch(() => {});
+		}
+		return fresh;
+	}
+
+	/** Stashes, newest first (paths relative to this repo). */
+	async function stashes(): Promise<StashSnapshot[]> {
+		const names = (await fs.promises.readdir(stashDir).catch(() => [])) as string[];
+		const out: StashSnapshot[] = [];
+		for (const name of names.filter((n) => n.endsWith('.json'))) {
+			try {
+				out.push(JSON.parse((await fs.promises.readFile(`${stashDir}/${name}`, 'utf8')) as string));
+			} catch {
+				// A torn write: skip it.
+			}
+		}
+		return out.sort((a, b) => b.date - a.date);
+	}
+
+	/** Snapshot these notes' changes, then put them back to HEAD (new ones are removed). */
+	async function stashPush(paths: string[], message: string): Promise<void> {
+		await ensureRepo();
+		if (await readState()) throw new GitSyncError('git', 'Finish the pending merge first.');
+		const want = new Set(paths.map(safePath));
+		const files = ((await changes()) ?? []).filter((c) => want.has(c.path));
+		if (!files.length) throw new GitSyncError('git', 'No changes to stash.');
+		const date = Date.now();
+		const id = `${date.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+		await mkdirp(stashDir);
+		const snap: StashSnapshot = { id, message, date, files };
+		await fs.promises.writeFile(`${stashDir}/${id}.json`, JSON.stringify(snap), 'utf8');
+		for (const p of await revert(files.map((f) => f.path)))
+			await fs.promises.unlink(`${dir}/${p}`).catch(() => {});
+	}
+
+	async function stashOf(id: string): Promise<StashSnapshot> {
+		const snap = (await stashes()).find((s) => s.id === id);
+		if (!snap) throw new GitSyncError('git', 'That stash no longer exists.');
+		return snap;
+	}
+
+	/**
+	 * Write the stashed notes back (and drop the stash when `drop`). Refuses
+	 * when a note no longer reads as it did when stashed — edits typed since,
+	 * or a sync that changed it — so nothing is overwritten.
+	 */
+	async function stashApply(id: string, drop: boolean): Promise<void> {
+		await ensureRepo();
+		const snap = await stashOf(id);
+		const dirty = new Set(((await changes()) ?? []).map((c) => c.path));
+		const blocked: string[] = [];
+		for (const f of snap.files) {
+			const now = await readText(safePath(f.path));
+			if (now !== f.before && now !== f.after) blocked.push(f.path);
+		}
+		if (blocked.length) {
+			const names = `${blocked.slice(0, 3).join(', ')}${blocked.length > 3 ? '…' : ''}`;
+			throw new GitSyncError(
+				'git',
+				blocked.some((p) => dirty.has(p))
+					? `Your edits to ${names} would be overwritten — stash or revert them first.`
+					: `${names} changed in a sync since this stash was made; applying it would undo that.`
+			);
+		}
+		for (const f of snap.files) {
+			const abs = `${dir}/${safePath(f.path)}`;
+			if (f.after === null) {
+				await fs.promises.unlink(abs).catch(() => {});
+			} else {
+				await mkdirp(abs.slice(0, abs.lastIndexOf('/')));
+				await fs.promises.writeFile(abs, f.after, 'utf8');
+			}
+		}
+		if (drop) await stashDrop(id);
+	}
+
+	async function stashDrop(id: string): Promise<void> {
+		await stashOf(id);
+		await fs.promises.unlink(`${stashDir}/${id}.json`);
+	}
+
+	return {
+		isRepo,
+		connect,
+		pull,
+		push,
+		resolve,
+		abort,
+		conflicts,
+		remoteUrl,
+		inMerge,
+		changes,
+		untrack,
+		revert,
+		stashes,
+		stashPush,
+		stashApply,
+		stashDrop
+	};
+}
+
+/** A stash kept as a snapshot under `.git/fr5a-stash/` (paths relative to the repo). */
+export interface StashSnapshot {
+	id: string;
+	message: string;
+	date: number;
+	files: GitChange[];
 }
 
 export type IsoGitSync = ReturnType<typeof createIsoGitSync>;

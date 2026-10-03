@@ -1,13 +1,16 @@
 <script lang="ts">
 	import { fade } from 'svelte/transition';
 	import { getAppState } from '../stores/app.svelte';
+	import { platform } from '../platform';
 	import { compactDiff, diffLines } from '../harness/diff';
 	import { docToText } from '../editor/markdown';
 	import DiffView from './DiffView.svelte';
 	import Icon from './Icon.svelte';
-	import type { GitChange } from '../../../../shared/types';
+	import type { GitChange, GitStash } from '../../../../shared/types';
 
 	const app = getAppState();
+	const canStash = !!platform.gitStash;
+	const canRevert = !!platform.gitRevert;
 
 	type Row = GitChange & { added: number; removed: number; lines: ReturnType<typeof compactDiff> };
 
@@ -22,7 +25,10 @@
 	}
 
 	const rows = $derived((app.changes ?? []).map(rowOf));
+	const stashKey = (s: GitStash) => `${s.repo}\0${s.id}`;
 	let selected = $state<string | null>(null);
+	/** A stash shown in the detail pane instead of a changed note. */
+	let selectedStash = $state<string | null>(null);
 	// On a phone the list and the diff take turns on screen.
 	let showDiff = $state(false);
 
@@ -31,13 +37,20 @@
 		const focus = app.changesFocus;
 		if (focus && rows.some((r) => r.path === focus)) {
 			selected = focus;
+			selectedStash = null;
 			showDiff = true;
 		} else if (!selected || !rows.some((r) => r.path === selected)) {
 			selected = rows[0]?.path ?? null;
 		}
+		if (selectedStash && !app.stashes.some((s) => stashKey(s) === selectedStash))
+			selectedStash = null;
+		// Nothing changed: show the newest stash.
+		if (!selected && !selectedStash && app.stashes.length) selectedStash = stashKey(app.stashes[0]);
 	});
 
-	const current = $derived(rows.find((r) => r.path === selected) ?? null);
+	const current = $derived(selectedStash ? null : (rows.find((r) => r.path === selected) ?? null));
+	const currentStash = $derived(app.stashes.find((s) => stashKey(s) === selectedStash) ?? null);
+	const stashRows = $derived(currentStash ? currentStash.files.map(rowOf) : []);
 
 	// Without git: what changed in the open note since it was opened.
 	const sinceOpened = $derived.by(() => {
@@ -61,11 +74,105 @@
 
 	const STATUS = { added: 'A', modified: 'M', deleted: 'D' } as const;
 	const exists = (p: string) => app.notes.some((n) => n.id === p);
+	const plural = (n: number) => `${n} ${n === 1 ? 'note' : 'notes'}`;
+	/** "plan.md" for one note, "3 notes" for more. */
+	const count = (paths: string[]) =>
+		paths.length === 1 ? split(paths[0]).name : plural(paths.length);
+
+	function when(ms: number): string {
+		const d = new Date(ms);
+		const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+		if (d.toDateString() === new Date().toDateString()) return `today ${time}`;
+		return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${time}`;
+	}
 
 	function pick(path: string): void {
 		selected = path;
+		selectedStash = null;
 		showDiff = true;
 		app.changesFocus = null;
+	}
+
+	function pickStash(s: GitStash): void {
+		selectedStash = stashKey(s);
+		showDiff = true;
+		app.changesFocus = null;
+	}
+
+	// --- stash / revert ----------------------------------------------------
+
+	/** What the last stash / revert reported; successes fade after a few seconds. */
+	let notice = $state<{ kind: 'ok' | 'error'; text: string } | null>(null);
+	let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function say(err: string | null, ok: string): void {
+		if (noticeTimer) clearTimeout(noticeTimer);
+		notice = err ? { kind: 'error', text: err } : { kind: 'ok', text: ok };
+		noticeTimer = err ? null : setTimeout(() => (notice = null), 4000);
+	}
+
+	/** Notes the stash form is about to set aside (null = form closed). */
+	let stashing = $state<string[] | null>(null);
+	let stashMessage = $state('');
+
+	/** Default stash message: the notes' names. */
+	function names(paths: string[]): string {
+		const n = paths.map((p) => split(p).name.replace(/\.(md|markdown|txt)$/i, ''));
+		return n.length <= 2 ? n.join(', ') : `${n.slice(0, 2).join(', ')} +${n.length - 2} more`;
+	}
+
+	function startStash(paths: string[]): void {
+		stashing = paths;
+		stashMessage = '';
+		notice = null;
+	}
+
+	async function stash(): Promise<void> {
+		if (!stashing) return;
+		const paths = stashing;
+		const message = stashMessage.trim() || names(paths);
+		stashing = null;
+		const err = await app.stashChanges(paths, message);
+		say(err, `Stashed ${count(paths)} as “${message}”.`);
+		if (!err && app.stashes[0]) {
+			selectedStash = stashKey(app.stashes[0]);
+			showDiff = false;
+		}
+	}
+
+	async function revert(paths: string[]): Promise<void> {
+		const fresh = rows.filter((r) => paths.includes(r.path) && r.status === 'added').length;
+		const ok = await app.confirm({
+			title: `Revert ${count(paths)}?`,
+			body: `Back to the last commit — the changes since are lost.${fresh ? ` New ${fresh === 1 ? 'note moves' : 'notes move'} to the trash.` : ''}`,
+			confirm: 'Revert',
+			danger: true
+		});
+		if (!ok) return;
+		say(await app.revertChanges(paths), `Reverted ${count(paths)}.`);
+		showDiff = false;
+	}
+
+	async function apply(s: GitStash, drop: boolean): Promise<void> {
+		const err = await app.applyStash(s, drop);
+		say(err, drop ? `Restored “${s.message}”.` : `Applied “${s.message}”; the stash is kept.`);
+		if (!err && drop) showDiff = false;
+	}
+
+	async function drop(s: GitStash): Promise<void> {
+		const ok = await app.confirm({
+			title: 'Drop this stash?',
+			body: `“${s.message}” (${plural(s.files.length)}) is deleted for good.`,
+			confirm: 'Drop',
+			danger: true
+		});
+		if (!ok) return;
+		say(await app.dropStash(s), `Dropped “${s.message}”.`);
+		showDiff = false;
+	}
+
+	function focusOnMount(node: HTMLElement): void {
+		node.focus();
 	}
 </script>
 
@@ -77,18 +184,24 @@
 				{#if app.changes === null}
 					Not a git repository
 				{:else if rows.length}
-					{rows.length} {rows.length === 1 ? 'note' : 'notes'} changed since the last sync
+					{plural(rows.length)} changed since the last sync
 				{:else}
 					Everything is committed
+				{/if}
+				{#if app.changes !== null && app.stashes.length}
+					· {app.stashes.length} {app.stashes.length === 1 ? 'stash' : 'stashes'}
 				{/if}
 			</p>
 		</div>
 		<button
 			class="icon-btn"
-			class:spin={app.changesLoading}
+			class:spin={app.changesLoading || app.gitBusy}
 			title="Refresh"
 			aria-label="Refresh changes"
-			onclick={() => app.refreshChanges()}
+			onclick={() => {
+				void app.refreshChanges();
+				void app.refreshStashes();
+			}}
 		>
 			<Icon name="retry" size={16} />
 		</button>
@@ -101,6 +214,47 @@
 			<Icon name="close" size={17} />
 		</button>
 	</header>
+
+	{#if stashing}
+		<form
+			class="bar"
+			onsubmit={(e) => {
+				e.preventDefault();
+				void stash();
+			}}
+		>
+			<label for="stash-message">Stash {count(stashing)} as</label>
+			<input
+				id="stash-message"
+				bind:value={stashMessage}
+				placeholder={names(stashing)}
+				autocomplete="off"
+				use:focusOnMount
+				onkeydown={(e) => {
+					if (e.key === 'Escape') {
+						e.stopPropagation();
+						stashing = null;
+					}
+				}}
+			/>
+			<div class="bar-acts">
+				<button class="btn" type="button" onclick={() => (stashing = null)}>Cancel</button>
+				<button class="btn primary" type="submit" disabled={app.gitBusy}>Stash</button>
+			</div>
+		</form>
+	{:else if notice}
+		<div
+			class="bar notice"
+			class:error={notice.kind === 'error'}
+			role={notice.kind === 'error' ? 'alert' : 'status'}
+			transition:fade={{ duration: 120 }}
+		>
+			<p>{notice.text}</p>
+			<button class="icon-btn" aria-label="Dismiss" onclick={() => (notice = null)}>
+				<Icon name="close" size={14} />
+			</button>
+		</div>
+	{/if}
 
 	{#if app.changes === null}
 		<div class="cbody single">
@@ -123,7 +277,7 @@
 				{/if}
 			</div>
 		</div>
-	{:else if !rows.length}
+	{:else if !rows.length && !app.stashes.length}
 		<div class="cbody single">
 			<p class="explain muted">
 				No note differs from the last commit. Edits show up here until the next push or pull.
@@ -131,26 +285,137 @@
 		</div>
 	{:else}
 		<div class="cbody">
-			<ul class="files" aria-label="Changed notes">
-				{#each rows as r (r.path)}
-					{@const p = split(r.path)}
-					<li>
-						<button class="file" class:on={r.path === selected} onclick={() => pick(r.path)}>
-							<span class="badge {r.status}" title={r.status}>{STATUS[r.status]}</span>
-							<span class="fname">
-								<span class="name">{p.name}</span>
-								{#if p.dir}<span class="dir">{p.dir}</span>{/if}
-							</span>
-							<span class="counts">
-								{#if r.added}<span class="add">+{r.added}</span>{/if}
-								{#if r.removed}<span class="del">−{r.removed}</span>{/if}
-							</span>
-						</button>
-					</li>
-				{/each}
-			</ul>
+			<div class="side">
+				{#if rows.length}
+					<div class="side-head">
+						<h2>Changed</h2>
+						{#if canStash}
+							<button
+								class="mini"
+								disabled={app.gitBusy}
+								onclick={() => startStash(rows.map((r) => r.path))}>Stash all</button
+							>
+						{/if}
+						{#if canRevert}
+							<button
+								class="mini danger"
+								disabled={app.gitBusy}
+								onclick={() => revert(rows.map((r) => r.path))}>Revert all</button
+							>
+						{/if}
+					</div>
+					<ul class="files" aria-label="Changed notes">
+						{#each rows as r (r.path)}
+							{@const p = split(r.path)}
+							<li>
+								<button
+									class="file"
+									class:on={!selectedStash && r.path === selected}
+									onclick={() => pick(r.path)}
+								>
+									<span class="badge {r.status}" title={r.status}>{STATUS[r.status]}</span>
+									<span class="fname">
+										<span class="name">{p.name}</span>
+										{#if p.dir}<span class="dir">{p.dir}</span>{/if}
+									</span>
+									<span class="counts">
+										{#if r.added}<span class="add">+{r.added}</span>{/if}
+										{#if r.removed}<span class="del">−{r.removed}</span>{/if}
+									</span>
+								</button>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+				{#if app.stashes.length}
+					<div class="side-head">
+						<h2>Stashes</h2>
+					</div>
+					<ul class="files" aria-label="Stashes">
+						{#each app.stashes as s (stashKey(s))}
+							<li>
+								<button
+									class="file"
+									class:on={stashKey(s) === selectedStash}
+									onclick={() => pickStash(s)}
+								>
+									<span class="badge stash" title="stash"><Icon name="history" size={13} /></span>
+									<span class="fname">
+										<span class="name">{s.message}</span>
+										<span class="dir"
+											>{when(s.date)} · {plural(s.files.length)}{s.repo
+												? ` · ${s.repo}/`
+												: ''}</span
+										>
+									</span>
+								</button>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</div>
 			<section class="detail" aria-label="Diff">
-				{#if current}
+				{#if currentStash}
+					{#key selectedStash}
+						<div class="detail-head" in:fade={{ duration: 120 }}>
+							{#if app.layout === 'phone'}
+								<button
+									class="icon-btn"
+									aria-label="All changes"
+									onclick={() => (showDiff = false)}
+								>
+									<Icon name="back" size={17} />
+								</button>
+							{/if}
+							<div class="dtitle">
+								<strong>{currentStash.message}</strong>
+								<span
+									>Stashed {when(currentStash.date)}{currentStash.repo
+										? ` · ${currentStash.repo}/`
+										: ''}</span
+								>
+							</div>
+							<div class="acts">
+								<button class="btn danger" disabled={app.gitBusy} onclick={() => drop(currentStash)}
+									>Drop</button
+								>
+								<button
+									class="btn"
+									title="Apply the changes and keep the stash"
+									disabled={app.gitBusy}
+									onclick={() => apply(currentStash, false)}>Apply</button
+								>
+								<button
+									class="btn primary"
+									title="Apply the changes and remove the stash"
+									disabled={app.gitBusy}
+									onclick={() => apply(currentStash, true)}>Restore</button
+								>
+							</div>
+						</div>
+						<div class="diff-scroll" in:fade={{ duration: 120 }}>
+							{#each stashRows as f (f.path)}
+								{@const p = split(f.path)}
+								<h3 class="fhead">
+									<span class="badge {f.status}" title={f.status}>{STATUS[f.status]}</span>
+									<span class="fname">
+										<span class="name">{p.name}</span>
+										{#if p.dir}<span class="dir">{p.dir}</span>{/if}
+									</span>
+									<span class="counts">
+										{#if f.added}<span class="add">+{f.added}</span>{/if}
+										{#if f.removed}<span class="del">−{f.removed}</span>{/if}
+									</span>
+								</h3>
+								<DiffView lines={f.lines} />
+							{:else}
+								<p class="muted">
+									No notes in this stash — it holds other files only (a <code>git stash</code> made elsewhere).
+								</p>
+							{/each}
+						</div>
+					{/key}
+				{:else if current}
 					{#key current.path}
 						<div class="detail-head" in:fade={{ duration: 120 }}>
 							{#if app.layout === 'phone'}
@@ -170,9 +435,25 @@
 										: ''}</span
 								>
 							</div>
-							{#if exists(current.path)}
-								<button class="btn" onclick={() => app.openNote(current.path)}>Open note</button>
-							{/if}
+							<div class="acts">
+								{#if canRevert}
+									<button
+										class="btn danger"
+										disabled={app.gitBusy}
+										onclick={() => revert([current.path])}>Revert</button
+									>
+								{/if}
+								{#if canStash}
+									<button
+										class="btn"
+										disabled={app.gitBusy}
+										onclick={() => startStash([current.path])}>Stash</button
+									>
+								{/if}
+								{#if exists(current.path)}
+									<button class="btn" onclick={() => app.openNote(current.path)}>Open note</button>
+								{/if}
+							</div>
 						</div>
 						<div class="diff-scroll" in:fade={{ duration: 120 }}>
 							<DiffView lines={current.lines} />
@@ -260,15 +541,66 @@
 		grid-template-columns: 1fr;
 	}
 	.phone:not(.show-diff) .detail,
-	.phone.show-diff .files {
+	.phone.show-diff .side {
 		display: none;
+	}
+	.side {
+		min-height: 0;
+		overflow-y: auto;
+		padding: 4px 8px 12px;
+		box-shadow: inset -1px 0 0 var(--bg-hover);
+	}
+	.phone .side {
+		box-shadow: none;
+	}
+	.side-head {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		padding: 10px 4px 4px 10px;
+	}
+	.side-head h2 {
+		flex: 1;
+		margin: 0;
+		font-size: 11px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--text-faint);
+	}
+	.mini {
+		min-height: 26px;
+		padding: 0 9px;
+		border-radius: 7px;
+		font-size: 12px;
+		font-weight: 600;
+		color: var(--text-muted);
+		transition:
+			background var(--dur-fast) ease,
+			color var(--dur-fast) ease;
+	}
+	:global(html[data-touch]) .mini {
+		min-height: 44px;
+		padding: 0 12px;
+	}
+	.mini:hover,
+	.mini:active {
+		background: var(--bg-hover);
+		color: var(--text);
+	}
+	.mini.danger:hover,
+	.mini.danger:active {
+		color: var(--danger);
+	}
+	.mini:disabled,
+	.btn:disabled {
+		opacity: 0.5;
+		pointer-events: none;
 	}
 	.files {
 		margin: 0;
-		padding: 8px;
+		padding: 0;
 		list-style: none;
-		overflow-y: auto;
-		box-shadow: inset -1px 0 0 var(--bg-hover);
 	}
 	.file {
 		display: flex;
@@ -310,6 +642,10 @@
 	}
 	.badge.deleted {
 		background: var(--danger);
+	}
+	.badge.stash {
+		background: var(--bg-active);
+		color: var(--text-muted);
 	}
 	.fname {
 		flex: 1;
@@ -376,6 +712,91 @@
 		font-size: 11.5px;
 		color: var(--text-muted);
 	}
+	.acts {
+		flex: 0 0 auto;
+		display: flex;
+		gap: 8px;
+	}
+	/* Phone: title on one line, the actions under it. */
+	.phone .detail-head {
+		flex-wrap: wrap;
+	}
+	.phone .detail-head .acts {
+		flex: 1 0 100%;
+		justify-content: flex-end;
+	}
+	.fhead {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin: 18px 0 8px;
+	}
+	.fhead:first-child {
+		margin-top: 4px;
+	}
+	.bar {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 8px 10px;
+		padding: 10px 18px 10px 24px;
+		background: var(--bg-list);
+		box-shadow: inset 0 -1px 0 var(--bg-hover);
+	}
+	.notice {
+		background: var(--accent-soft);
+	}
+	.notice.error {
+		background: var(--danger-soft);
+	}
+	.phone .bar {
+		padding: 10px 12px 10px 16px;
+	}
+	.bar label {
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--text-strong);
+	}
+	.bar input {
+		flex: 1 1 200px;
+		min-width: 0;
+		min-height: 32px;
+		padding: 0 10px;
+		border-radius: 8px;
+		border: 1px solid var(--bg-hover);
+		background: var(--bg-editor);
+		color: var(--text-main);
+		font: inherit;
+		font-size: 13.5px;
+	}
+	:global(html[data-touch]) .bar input {
+		min-height: 44px;
+	}
+	.bar input:focus {
+		outline: 2px solid var(--accent);
+		outline-offset: -1px;
+	}
+	.bar-acts {
+		display: flex;
+		gap: 8px;
+		margin-inline-start: auto;
+	}
+	.notice p {
+		flex: 1;
+		min-width: 0;
+		margin: 0;
+		font-size: 13px;
+		line-height: 1.45;
+		color: var(--text);
+		overflow-wrap: anywhere;
+	}
+	.notice.error p {
+		color: var(--danger);
+	}
+	.notice .icon-btn {
+		width: 28px;
+		height: 28px;
+	}
 	.diff-scroll {
 		flex: 1;
 		min-height: 0;
@@ -401,6 +822,17 @@
 	.btn:hover,
 	.btn:active {
 		background: var(--bg-active);
+	}
+	.btn.primary {
+		background: var(--accent);
+		color: #fff;
+	}
+	.btn.primary:hover,
+	.btn.primary:active {
+		filter: brightness(1.08);
+	}
+	.btn.danger {
+		color: var(--danger);
 	}
 	.explain {
 		max-width: 720px;

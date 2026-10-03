@@ -37,7 +37,7 @@ const GIT_ENV = {
 	LC_ALL: 'C'
 };
 
-function classify(stderr: string): SyncErrorCode {
+export function classify(stderr: string): SyncErrorCode {
 	if (
 		/Authentication failed|could not read (Username|Password)|terminal prompts disabled|Permission denied \(publickey|Host key verification failed|returned error: 40[13]|access denied|invalid credentials/i.test(
 			stderr
@@ -165,8 +165,10 @@ export function createGitSync(root: string) {
 	/**
 	 * Commit local edits, fetch, and merge the upstream branch (never rebase).
 	 * A merge that stops on conflicts is left in progress for `resolve`/`abort`.
+	 * `allowUnrelated`: first sync of a folder that became a repo in place, whose
+	 * history starts apart from the remote's.
 	 */
-	async function pull(): Promise<SyncResult> {
+	async function pull({ allowUnrelated = false } = {}): Promise<SyncResult> {
 		await ensureRepo();
 		if (await mergeInProgress()) {
 			const files = await conflicts();
@@ -179,7 +181,14 @@ export function createGitSync(root: string) {
 		const theirs = `refs/remotes/${remote}/${branch}`;
 		if ((await revParse(theirs)) === null) return { status: 'ok' }; // remote branch not created yet
 		const merge = await run(
-			[...(await identityArgs()), 'merge', '--no-edit', '--no-verify', theirs],
+			[
+				...(await identityArgs()),
+				'merge',
+				'--no-edit',
+				'--no-verify',
+				...(allowUnrelated ? ['--allow-unrelated-histories'] : []),
+				theirs
+			],
 			true
 		);
 		if (merge.code === 0) return { status: 'ok' };

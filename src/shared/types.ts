@@ -107,6 +107,26 @@ export function isTrackedNote(path: string): boolean {
 	return /\.(md|markdown|txt)$/i.test(path) && !path.split('/').some((s) => s.startsWith('.'));
 }
 
+/**
+ * Notes set aside and reverted to the last commit, to bring back later.
+ * Desktop: `git stash` entries (ones made in a terminal show up too);
+ * Android: snapshots kept under the repo's `.git/`, never synced.
+ */
+export interface GitStash {
+	/** Repo folder ('' = root). */
+	repo: string;
+	/** Stable id: the stash commit (desktop) or the snapshot id (Android). */
+	id: string;
+	message: string;
+	/** ms epoch. */
+	date: number;
+	/** Stashed notes (workspace paths): `before` = the commit it was made on, `after` = stashed text. */
+	files: GitChange[];
+}
+
+/** Result of a stash / revert. `conflicts`: notes an apply left with conflict markers. */
+export type GitOpResponse = { ok: true; conflicts?: string[] } | { ok: false; error: string };
+
 /** One git repo in the workspace: '' is the root, others are nested folders. */
 export interface SyncRepo {
 	path: string;
@@ -149,6 +169,12 @@ export const Channels = {
 	syncAddRepo: 'sync:addRepo',
 	/** Notes changed since the last commit (git status + committed text). */
 	gitChanges: 'git:changes',
+	// Stash changed notes, list / apply / drop stashes, revert notes to the last commit.
+	gitStash: 'git:stash',
+	gitStashes: 'git:stashes',
+	gitStashApply: 'git:stashApply',
+	gitStashDrop: 'git:stashDrop',
+	gitRevert: 'git:revert',
 	// Outbound HTTP for the AI harness (the renderer's CSP blocks fetch).
 	httpFetch: 'http:fetch',
 	httpStream: 'http:stream',
