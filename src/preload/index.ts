@@ -39,6 +39,7 @@ const api = {
 		ipcRenderer.invoke(Channels.noteMove, id, to),
 	moveFolder: (path: string, to: string): Promise<string> =>
 		ipcRenderer.invoke(Channels.folderMove, path, to),
+	deleteFolder: (path: string): Promise<void> => ipcRenderer.invoke(Channels.folderDelete, path),
 
 	// Folders: list every sub-directory (incl. empty), create a new one.
 	listFolders: (): Promise<string[]> => ipcRenderer.invoke(Channels.foldersList),

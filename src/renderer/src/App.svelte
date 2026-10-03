@@ -174,6 +174,12 @@
 			if (app.editing) app.editor?.commands.focus();
 			return;
 		}
+		// Mod+Shift+K locks encrypted notes.
+		if (mod && e.shiftKey && (e.key === 'k' || e.key === 'K') && app.vault?.unlocked) {
+			e.preventDefault();
+			app.lockVault();
+			return;
+		}
 		// Mod+\ toggles Zen mode.
 		if (mod && e.key === '\\') {
 			e.preventDefault();
@@ -567,8 +573,11 @@
 	}
 
 	/* --- phone: one pane on screen; the others wait off to the side -------- */
+	/* `clip` as on `.body`: the off-screen panes must never become a scroll offset
+	   (focusing a Settings field used to shift the whole UI sideways). */
 	.layout-phone {
 		overflow: hidden;
+		overflow: clip;
 	}
 	.layout-phone .content {
 		display: contents;

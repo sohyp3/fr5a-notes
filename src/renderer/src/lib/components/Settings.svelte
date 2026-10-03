@@ -8,7 +8,7 @@
 	import type { IconName } from '../icons';
 	import { UI_FONTS, EN_FONTS, AR_FONTS } from '../fonts';
 	import { ACCENTS } from '../accents';
-	import { SHORTCUTS as shortcuts, VIM_SHORTCUTS as vimShortcuts } from '../shortcuts';
+	import { SHORTCUTS, VIM_SHORTCUTS as vimShortcuts } from '../shortcuts';
 	import { reducedMotion } from '../portal';
 
 	const app = getAppState();
@@ -22,8 +22,11 @@
 		{ id: 'editor', label: 'Editor', icon: 'edit', desc: 'Ghost syntax, Vim' },
 		{ id: 'sync', label: 'Sync', icon: 'pull', desc: 'Git remotes, changes' },
 		{ id: 'ai', label: 'AI assistant', icon: 'web', desc: 'Providers, web search, skills' },
+		{ id: 'encryption', label: 'Encryption', icon: 'key', desc: 'Encrypt notes with your key' },
 		{ id: 'shortcuts', label: 'Shortcuts', icon: 'list', desc: 'Keyboard shortcuts' }
 	];
+
+	const shortcuts = $derived(SHORTCUTS.filter((sc) => !sc.feature || s[sc.feature]));
 
 	const section = $derived(SECTIONS.find((x) => x.id === app.settingsSection) ?? SECTIONS[0]);
 	// Phones: a list of sections first, then one section at a time.
@@ -290,6 +293,27 @@
 						</section>
 						{#if s.ai}
 							{#await import('./harness/AiSettings.svelte') then m}
+								<m.default />
+							{/await}
+						{/if}
+					{:else if section.id === 'encryption'}
+						<!-- Off = no crypto code or key loaded (EncryptionSettings + OpenPGP are lazy chunks). -->
+						<section class="group">
+							<div class="row">
+								<div class="label">
+									<span class="name">Encrypt notes</span>
+									<span class="desc"
+										>Keep chosen notes encrypted with your PGP key: only devices that have the key
+										can read them, and git syncs the encrypted text.</span
+									>
+								</div>
+								{@render toggle(s.encryption, 'Encrypt notes', () =>
+									app.updateSettings({ encryption: !s.encryption })
+								)}
+							</div>
+						</section>
+						{#if s.encryption}
+							{#await import('./EncryptionSettings.svelte') then m}
 								<m.default />
 							{/await}
 						{/if}

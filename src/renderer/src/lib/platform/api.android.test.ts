@@ -178,6 +178,18 @@ describe('pure helpers', () => {
 		});
 		expect(buildMeta('empty.md', '', '\n', 0).title).toBe('empty');
 	});
+
+	it('buildMeta shows only the file name of an encrypted note', () => {
+		const raw =
+			'<!-- locked: true -->\n-----BEGIN PGP MESSAGE-----\n\nwV4D #x\n-----END PGP MESSAGE-----\n';
+		expect(buildMeta('dir/secret.md', '', raw, 0)).toMatchObject({
+			title: 'secret',
+			snippet: '',
+			tags: [],
+			locked: true,
+			encrypted: true
+		});
+	});
 });
 
 describe('android platform', () => {

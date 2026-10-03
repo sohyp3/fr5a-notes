@@ -2,6 +2,7 @@
 	import { platform } from '../platform';
 	import { onMount } from 'svelte';
 	import type { ConflictFile } from '../../../../shared/types';
+	import { isEncryptedNote } from '../../../../shared/encrypted';
 	import { accentById, applyPalette } from '../accents';
 	import {
 		applyConflicts,
@@ -56,7 +57,11 @@
 		if (!res.ok) error = syncErrorMessage(res.error);
 	}
 
-	const show = (text: string | null) => text ?? '(deleted)';
+	const show = (text: string | null) =>
+		text === null ? '(deleted)' : isEncryptedNote(text) ? '(encrypted)' : text;
+	/** Ciphertext on a side (encrypted note, key locked): pick a side, no hand merge. */
+	const sealed = (f: ConflictFile) =>
+		[f.mine, f.theirs].some((t) => t !== null && isEncryptedNote(t));
 </script>
 
 <main class="conflicts">
@@ -92,12 +97,14 @@
 							class:on={d.pick === 'theirs'}
 							onclick={() => setPick(file.path, 'theirs')}>Keep theirs</button
 						>
-						<button
-							role="radio"
-							aria-checked={d.pick === 'manual'}
-							class:on={d.pick === 'manual'}
-							onclick={() => setPick(file.path, 'manual')}>Edit manually</button
-						>
+						{#if !sealed(file)}
+							<button
+								role="radio"
+								aria-checked={d.pick === 'manual'}
+								class:on={d.pick === 'manual'}
+								onclick={() => setPick(file.path, 'manual')}>Edit manually</button
+							>
+						{/if}
 					</div>
 				</div>
 

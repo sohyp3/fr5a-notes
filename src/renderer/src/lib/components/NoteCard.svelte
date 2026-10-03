@@ -366,6 +366,12 @@
 			<span class="title">
 				{#if note.pinned && !trash}<span class="pindot" title="Pinned">📌</span>{/if}
 				{#if note.locked && !trash}<span class="pindot" title="Locked">🔒</span>{/if}
+				{#if note.encrypted}<span
+						class="shield"
+						role="img"
+						title="Encrypted — only devices with your key can read it"
+						aria-label="Encrypted"><Icon name="key" size={11} stroke={2} /></span
+					>{/if}
 				{#if hidden}<span
 						class="shield"
 						role="img"
@@ -376,7 +382,10 @@
 			</span>
 			<span class="time">{relTime(note.mtime)}</span>
 		</div>
-		<div class="snippet">{note.snippet || 'No additional text'}</div>
+		<div class="snippet">
+			{note.snippet ||
+				(note.encrypted && !app.vault?.unlocked ? 'Encrypted' : 'No additional text')}
+		</div>
 		{#if note.tags.length}
 			<div class="tags">
 				{#each note.tags.slice(0, 4) as t (t)}

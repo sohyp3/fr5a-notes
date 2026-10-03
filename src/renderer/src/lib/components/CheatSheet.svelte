@@ -4,6 +4,7 @@
 	import { SHORTCUTS, VIM_SHORTCUTS } from '../shortcuts';
 
 	const app = getAppState();
+	const shortcuts = $derived(SHORTCUTS.filter((sc) => !sc.feature || app.settings[sc.feature]));
 </script>
 
 <!-- Global cheat-sheet overlay, toggled from anywhere with Mod+/. -->
@@ -38,7 +39,7 @@
 		</header>
 
 		<div class="grid">
-			{#each SHORTCUTS as sc (sc.desc)}
+			{#each shortcuts as sc (sc.desc)}
 				<div class="sc-row">
 					<span class="sc-desc">{sc.desc}</span>
 					<span class="keys">

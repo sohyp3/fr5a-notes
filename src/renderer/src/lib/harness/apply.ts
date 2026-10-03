@@ -54,6 +54,8 @@ export async function prepareWrite(p: WriteProposal): Promise<PreparedWrite> {
 
 	if (isCurrent) {
 		if (!app.activeId && !app.draft) throw new Error('No note is open.');
+		if (app.activeEncrypted)
+			throw new Error('The open note is encrypted; the assistant can’t change it.');
 		const ed = app.editor;
 		const before = ed ? docToText(ed) : app.activeContent;
 		if (detectLocked(before)) throw new Error('The open note is locked.');

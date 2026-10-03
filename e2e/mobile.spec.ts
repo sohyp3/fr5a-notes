@@ -1008,3 +1008,102 @@ test('desktop: a narrow window keeps room for the editor beside the AI pane', as
 	await expect.poll(() => width(sidebar(page))).toBeGreaterThan(150);
 	await ctx.close();
 });
+
+test('desktop: encryption — off by default, then a key, an encrypted note, lock and unlock', async ({
+	browser
+}) => {
+	const { ctx, page } = await desktopPage(browser);
+	await sidebar(page)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	// Off: no lock button, no Encrypt item.
+	await expect(page.getByRole('button', { name: /encrypted notes/ })).toHaveCount(0);
+	await list(page).getByRole('button', { name: /Hello/ }).click({ button: 'right' });
+	await expect(page.getByRole('menuitem', { name: 'Encrypt' })).toHaveCount(0);
+	await page.keyboard.press('Escape');
+
+	// Switch it on and make a key.
+	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
+	await page.getByRole('button', { name: 'Encryption' }).click();
+	await page.getByRole('switch', { name: 'Encrypt notes' }).click();
+	await page.getByLabel('Passphrase', { exact: true }).fill('correct horse');
+	await page.getByLabel('Repeat passphrase').fill('correct horse');
+	await page.getByRole('button', { name: 'Create key' }).click();
+	await expect(page.getByText('Unlocked', { exact: true })).toBeVisible();
+	await page.getByRole('button', { name: 'Close settings' }).click();
+
+	// Encrypt Hello: the file becomes ciphertext, the list and editor still read it.
+	await list(page).getByRole('button', { name: /Hello/ }).click({ button: 'right' });
+	await page.getByRole('menuitem', { name: 'Encrypt' }).click();
+	await page.getByRole('alertdialog').getByRole('button', { name: 'Encrypt' }).click();
+	await expect.poll(() => readFake(page, 'hello.md')).toContain('-----BEGIN PGP MESSAGE-----');
+	expect(await readFake(page, 'hello.md')).not.toContain('world');
+	await list(page).getByText('Hello', { exact: true }).click();
+	await expect(page.locator('.ProseMirror')).toContainText('world');
+
+	// Lock: the note closes and the card shows only the file name.
+	await page.getByRole('button', { name: 'Lock encrypted notes' }).click();
+	await expect(page.locator('.ProseMirror')).toHaveCount(0);
+	await expect(list(page).getByText('hello', { exact: true })).toBeVisible();
+
+	// Opening it asks for the passphrase; a wrong one is refused.
+	await list(page).getByText('hello', { exact: true }).click();
+	const dialog = page.getByRole('dialog', { name: 'Unlock encrypted notes' });
+	await dialog.getByLabel('Key passphrase').fill('wrong');
+	await dialog.getByRole('button', { name: 'Unlock' }).click();
+	await expect(dialog.getByText('Wrong passphrase.')).toBeVisible();
+	await dialog.getByLabel('Key passphrase').fill('correct horse');
+	await dialog.getByRole('button', { name: 'Unlock' }).click();
+	await expect(page.locator('.ProseMirror')).toContainText('world');
+
+	// The AI never sees it: not offered as a mention.
+	await page.getByRole('button', { name: 'Toggle AI harness' }).click();
+	const input = page.getByRole('region', { name: 'AI harness' }).getByRole('textbox');
+	await input.fill('@');
+	await expect(page.getByRole('option', { name: /Plan/ })).toBeVisible();
+	await expect(page.getByRole('option', { name: /Hello/ })).toHaveCount(0);
+	await input.fill('');
+	await page.getByRole('button', { name: 'Toggle AI harness' }).click();
+
+	// Switching it off locks, closes the note and takes the controls away.
+	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
+	await page.getByRole('button', { name: 'Encryption' }).click();
+	await page.getByRole('switch', { name: 'Encrypt notes' }).click();
+	await expect(page.getByRole('button', { name: 'Create key' })).toHaveCount(0);
+	await page.getByRole('button', { name: 'Close settings' }).click();
+	await expect(page.locator('.ProseMirror')).toHaveCount(0);
+	await expect(page.getByRole('button', { name: /encrypted notes/ })).toHaveCount(0);
+	await list(page).getByText('hello', { exact: true }).click();
+	await expect(page.getByText(/Turn on encryption in Settings/)).toBeVisible();
+	await ctx.close();
+});
+
+test('encryption on touch: a note encrypted while locked opens after the passphrase', async ({
+	page
+}) => {
+	await openSettings(page);
+	await page.getByRole('button', { name: /^Encryption/ }).tap();
+	await page.getByRole('switch', { name: 'Encrypt notes' }).tap();
+	await page.getByLabel('Passphrase', { exact: true }).fill('correct horse');
+	await page.getByLabel('Repeat passphrase').fill('correct horse');
+	await page.getByRole('button', { name: 'Create key' }).tap();
+	await page.getByRole('button', { name: 'Lock now' }).tap();
+	await expect(page.getByText('Locked', { exact: true })).toBeVisible();
+	await page.getByRole('button', { name: 'Close settings' }).tap();
+
+	// Encrypting needs only the public key: it works while locked.
+	await openFolder(page, /^All Notes/);
+	await longPress(page, list(page).getByRole('button', { name: /Hello/ }));
+	await page.getByRole('menuitem', { name: 'Encrypt' }).tap();
+	await page.getByRole('alertdialog').getByRole('button', { name: 'Encrypt' }).tap();
+	await expect.poll(() => readFake(page, 'hello.md')).toContain('-----BEGIN PGP MESSAGE-----');
+	const card = list(page).getByRole('button', { name: /hello/ });
+	await expect(card).toContainText('Encrypted');
+
+	await card.tap();
+	const dialog = page.getByRole('dialog', { name: 'Unlock encrypted notes' });
+	await dialog.getByLabel('Key passphrase').fill('correct horse');
+	await dialog.getByRole('button', { name: 'Unlock' }).tap();
+	await expect(page.locator('.ProseMirror')).toContainText('world');
+	await expect(list(page).getByText('Hello', { exact: true })).toBeAttached();
+});

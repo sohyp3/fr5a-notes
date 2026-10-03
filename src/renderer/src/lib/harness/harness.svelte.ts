@@ -441,8 +441,9 @@ class HarnessState {
 	/** Notes that will be inlined on the next send (open note first, folders/tags expanded). */
 	context(tab: HarnessTab) {
 		const app = getAppState();
-		const first = tab.useCurrent && app.activeId ? [app.activeId] : [];
-		return expandMentions(tab.attached, app.notes, first, MAX_INLINE_NOTES);
+		// Encrypted notes never reach a model, local or not (chats are saved as plain text).
+		const first = tab.useCurrent && app.aiActiveId ? [app.aiActiveId] : [];
+		return expandMentions(tab.attached, app.aiNotes, first, MAX_INLINE_NOTES);
 	}
 
 	private async gatherNotes(tab: HarnessTab, profile: ProviderProfile): Promise<AttachedNote[]> {
@@ -452,7 +453,10 @@ class HarnessState {
 		if (ctx.missing.length) throw new Error(`Nothing matches ${ctx.missing.join(', ')}.`);
 		const notes: AttachedNote[] = [];
 		const skipped: string[] = [];
-		const explicit = [...tab.attached, ...(tab.useCurrent && app.activeId ? [app.activeId] : [])];
+		const explicit = [
+			...tab.attached,
+			...(tab.useCurrent && app.aiActiveId ? [app.aiActiveId] : [])
+		];
 		for (const id of ctx.ids) {
 			const content =
 				id === app.activeId && app.editor ? docToText(app.editor) : await platform.readNote(id);
@@ -486,7 +490,7 @@ class HarnessState {
 					.join(' ')
 			});
 		// An unsaved draft is still "the open note".
-		if (tab.useCurrent && !app.activeId && app.draft && app.editor)
+		if (tab.useCurrent && !app.activeId && app.draft && !app.draftEncrypted && app.editor)
 			notes.unshift({ id: '(unsaved draft)', content: docToText(app.editor) });
 		return notes;
 	}
@@ -497,7 +501,7 @@ class HarnessState {
 		let n = estimateTokens(
 			tab.history.map((m) => ('content' in m ? (m.content ?? '') : '')).join('\n')
 		);
-		if (tab.useCurrent) n += estimateTokens(app.activeContent);
+		if (tab.useCurrent && !app.activeEncrypted) n += estimateTokens(app.activeContent);
 		return n;
 	}
 
@@ -528,7 +532,7 @@ class HarnessState {
 
 		if (!tab.history.length && tab.session.title === 'New session') {
 			const base = skill
-				? `${skill.name} ${app.notes.find((n) => n.id === app.activeId)?.title ?? ''}`
+				? `${skill.name} ${app.aiNotes.find((n) => n.id === app.aiActiveId)?.title ?? ''}`
 				: userText;
 			tab.session.title = base.trim().split('\n')[0].slice(0, 60) || 'Session';
 			tab.session.file = sessionFileName(tab.session.title);
@@ -566,7 +570,7 @@ class HarnessState {
 						: `${profile.name} has no API key. Add it in Settings → AI → Edit, or mark the provider as local.`
 				);
 			tab.session.notes = [
-				...(app.activeId && tab.useCurrent ? [app.activeId] : []),
+				...(app.aiActiveId && tab.useCurrent ? [app.aiActiveId] : []),
 				...tab.attached
 			];
 			const system = buildSystemPrompt({
@@ -584,7 +588,7 @@ class HarnessState {
 				createTools({
 					profile,
 					config: ai.config,
-					notes: () => app.notes,
+					notes: () => app.aiNotes,
 					readNote: (id) => platform.readNote(id),
 					ask: (items) => tab.ask({ items }),
 					proposeWrite: (p) => this.reviewWrite(tab, p),

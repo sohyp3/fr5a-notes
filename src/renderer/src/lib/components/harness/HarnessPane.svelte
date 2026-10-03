@@ -127,10 +127,10 @@
 				.slice(0, 4)
 				.map((f) => ({
 					label: `${f}/`,
-					hint: `folder · ${app.notes.filter((n) => n.id.startsWith(`${f}/`)).length} notes`,
+					hint: `folder · ${app.aiNotes.filter((n) => n.id.startsWith(`${f}/`)).length} notes`,
 					insert: insert({ kind: 'dir', value: f })
 				}));
-			const notes = app.notes
+			const notes = app.aiNotes
 				.filter((n) => n.id.toLowerCase().includes(q) || n.title.toLowerCase().includes(q))
 				.slice(0, 8 - folders.length)
 				.map((n) => ({
@@ -254,7 +254,7 @@
 	const primary = $derived<'insert' | 'new' | 'copy'>(
 		skill?.output === 'insert' ? 'insert' : skill?.output === 'new-note' ? 'new' : 'copy'
 	);
-	const hasNote = $derived(!!app.activeId || app.draft);
+	const hasNote = $derived((!!app.activeId || app.draft) && !app.activeEncrypted);
 	const ACT_LABEL = { insert: 'Insert', append: 'Append', new: 'New note', copy: 'Copy' } as const;
 
 	const lastAi = $derived.by(() => {
@@ -540,12 +540,16 @@
 						<div class="chips">
 							<button
 								class="chip"
-								class:off={!tab.useCurrent}
+								class:off={!tab.useCurrent || app.activeEncrypted}
 								aria-pressed={tab.useCurrent}
-								title="Attach the open note"
+								title={app.activeEncrypted
+									? 'The open note is encrypted: the assistant never reads it'
+									: 'Attach the open note'}
 								onclick={() => (tab.useCurrent = !tab.useCurrent)}
 							>
-								{tab.useCurrent ? '◉' : '○'} open note
+								{tab.useCurrent && !app.activeEncrypted ? '◉' : '○'} open note{app.activeEncrypted
+									? ' (encrypted)'
+									: ''}
 							</button>
 							{#each tab.attached as id (id)}
 								{@const m = fromKey(id)}

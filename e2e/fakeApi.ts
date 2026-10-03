@@ -13,17 +13,21 @@ export function installFakeApi(): void {
 	(window as unknown as { __writes: typeof writes }).__writes = writes;
 	const meta = (id: string) => {
 		const raw = files[id] ?? trash[id];
-		const title = raw.split('\n')[0].replace(/^#+\s*/, '');
+		const encrypted = raw.includes('-----BEGIN PGP MESSAGE-----');
+		const title = encrypted
+			? id.replace(/^.*\//, '').replace(/\.md$/, '')
+			: raw.split('\n')[0].replace(/^#+\s*/, '');
 		return {
 			id,
 			absPath: `/notes/${id}`,
 			title,
-			snippet: raw.split('\n').slice(1).join(' ').trim(),
+			snippet: encrypted ? '' : raw.split('\n').slice(1).join(' ').trim(),
 			mtime: 1,
 			tags: [],
 			pinned: false,
 			locked: false,
-			aiLocal: /^<!-- ai: local -->$/m.test(raw)
+			aiLocal: /^<!-- ai: local -->$/m.test(raw),
+			encrypted
 		};
 	};
 	const folders = new Set(['Work']);
@@ -50,6 +54,7 @@ export function installFakeApi(): void {
 		}
 	};
 	const metaFiles: Record<string, string> = {};
+	const secrets: Record<string, string> = {};
 	(window as unknown as { __meta: typeof metaFiles }).__meta = metaFiles;
 	const sse = (obj: unknown) => `data: ${JSON.stringify(obj)}\n\ndata: [DONE]\n\n`;
 	const call = (name: string, args: unknown) =>
@@ -224,8 +229,11 @@ export function installFakeApi(): void {
 			return { status: 200, headers: {}, body: '' };
 		},
 		httpAbort: async () => {},
-		getSecret: async () => null,
-		setSecret: async () => {},
+		getSecret: async (name: string) => secrets[name] ?? null,
+		setSecret: async (name: string, value: string | null) => {
+			if (value) secrets[name] = value;
+			else delete secrets[name];
+		},
 		readMeta: async (rel: string) => metaFiles[rel] ?? null,
 		writeMeta: async (rel: string, content: string) => {
 			metaFiles[rel] = content;

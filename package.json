@@ -54,7 +54,8 @@
 		"buffer": "^6.0.3",
 		"chokidar": "^5.0.0",
 		"electron-store": "^11.0.2",
-		"isomorphic-git": "^1.42.3"
+		"isomorphic-git": "^1.42.3",
+		"openpgp": "^6.3.2"
 	},
 	"devDependencies": {
 		"@capacitor/cli": "^8.5.2",

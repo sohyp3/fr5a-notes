@@ -73,6 +73,13 @@ export function folderMoveError(from: string, to: string): string | null {
 	return null;
 }
 
+/** Why folder `path` (cleaned) can't be deleted, or null when it can. */
+export function folderDeleteError(path: string): string | null {
+	if (!path) return 'The workspace root can’t be deleted.';
+	if (isHiddenPath(path)) return 'Hidden folders can’t be deleted.';
+	return null;
+}
+
 /** Why a note can't move to `to`, or null when it can. */
 export function noteMoveError(id: string, to: string): string | null {
 	if (!id || !to || !baseOf(to)) return 'The note needs a name.';

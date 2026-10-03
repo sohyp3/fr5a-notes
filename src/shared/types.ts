@@ -19,6 +19,11 @@ export interface NoteMeta {
 	locked: boolean;
 	/** Carries `<!-- ai: local -->`: only local AI providers may read it. */
 	aiLocal: boolean;
+	/**
+	 * The body is an OpenPGP message (see `shared/encrypted.ts`). The index
+	 * only sees ciphertext: title = file name, no snippet or tags.
+	 */
+	encrypted: boolean;
 }
 
 export interface TagNode {
@@ -149,6 +154,7 @@ export const Channels = {
 	/** Move / rename a note or a folder inside the workspace. */
 	noteMove: 'note:move',
 	folderMove: 'folder:move',
+	folderDelete: 'folder:delete',
 	tagsList: 'tags:list',
 	// Folders: the workspace's sub-directories (incl. empty ones), and creation.
 	foldersList: 'folders:list',

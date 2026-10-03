@@ -53,6 +53,21 @@ describe('FileService move / rename', () => {
 		expect(notes.get('c.md')?.aiLocal).toBe(false);
 	});
 
+	it('indexes an encrypted note by its file name only', async () => {
+		await svc.write(
+			'secret.md',
+			'<!-- pinned: true -->\n-----BEGIN PGP MESSAGE-----\n\nwV4D #tag\n-----END PGP MESSAGE-----\n'
+		);
+		expect(notes.get('secret.md')).toMatchObject({
+			title: 'secret',
+			snippet: '',
+			tags: [],
+			pinned: true,
+			encrypted: true
+		});
+		expect(notes.get('c.md')?.encrypted).toBe(false);
+	});
+
 	it('renames and moves notes, keeping the extension and deduping names', async () => {
 		expect(await svc.move('c.md', 'Renamed')).toBe('Renamed.md');
 		expect(await readFile(path.join(root, 'Renamed.md'), 'utf8')).toBe('# C\n');

@@ -1,4 +1,4 @@
-import { platform } from '../platform';
+import { hostPlatform, platform } from '../platform';
 import type {
 	GitChange,
 	GitOpResponse,
@@ -24,6 +24,7 @@ import {
 } from '../../../../shared/paths';
 import type { Layout } from '../layout';
 import type { Editor } from '@tiptap/core';
+import type { Vault } from '../vault/vault.svelte';
 
 const SAVE_DEBOUNCE = 500;
 const THEME_KEY = 'fr5a-theme';
@@ -40,7 +41,8 @@ const DEFAULT_SIDEBAR: SidebarState = {
 
 export type View = 'editor' | 'settings' | 'changes';
 export type Pane = 'nav' | 'list' | 'editor' | 'harness';
-export type SettingsSection = 'general' | 'appearance' | 'editor' | 'sync' | 'ai' | 'shortcuts';
+export type SettingsSection =
+	'general' | 'appearance' | 'editor' | 'sync' | 'ai' | 'encryption' | 'shortcuts';
 /** How a note opens: 'auto' = view on touch devices (no keyboard pop-up), edit with a mouse. */
 export type OpenIn = 'auto' | 'view' | 'edit';
 
@@ -75,6 +77,10 @@ export interface PromptRequest {
 	confirm: string;
 	/** Why `value` can't be used (shown under the field), or null when it's fine. */
 	check?(value: string): string | null;
+	/** A password field (not shown, not selected, cleared afterwards). */
+	secret?: boolean;
+	/** Runs on submit; an error message keeps the dialog open (e.g. a wrong passphrase). */
+	submit?(value: string): Promise<string | null>;
 	resolve(value: string | null): void;
 }
 
@@ -99,6 +105,10 @@ export interface Settings {
 	ai: boolean;
 	/** Open notes in view or edit mode. */
 	openIn: OpenIn;
+	/** Encrypted notes. Off: no crypto code loaded, no key in memory, no buttons. */
+	encryption: boolean;
+	/** Lock encrypted notes after this many idle / background minutes (0 = never). */
+	autoLockMinutes: number;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -109,7 +119,9 @@ const DEFAULT_SETTINGS: Settings = {
 	ghost: true,
 	accent: DEFAULT_ACCENT,
 	ai: true,
-	openIn: 'auto'
+	openIn: 'auto',
+	encryption: false,
+	autoLockMinutes: 15
 };
 
 const clampWidth = (pane: PaneName, px: number) =>
@@ -141,6 +153,10 @@ class AppState {
 	draft = $state(false);
 	/** Folder (workspace-relative, '' = root) a materialising draft lands in. */
 	private draftFolder = '';
+	/** The draft is saved encrypted (so it never reaches the disk in plain text). */
+	draftEncrypted = $state(false);
+	/** Encryption (key, lock, note I/O wrapper) while switched on; null when off. */
+	vault = $state.raw<Vault | null>(null);
 	/**
 	 * Keys the editor component. Bumped when a *different* buffer should mount
 	 * (open/create) — deliberately NOT when a draft materialises into a file, so
@@ -271,6 +287,19 @@ class AppState {
 	/** Close functions of open menus (ActionMenu), newest last: Android back closes them first. */
 	private dismissers: (() => void)[] = [];
 
+	/** The open note (or draft) is encrypted. */
+	activeEncrypted = $derived.by(() => {
+		// Encryption off: an encrypted note can't be open (switching off closes it).
+		if (!this.vault) return false;
+		return this.draft
+			? this.draftEncrypted
+			: !!this.activeId && !!this.noteMeta(this.activeId)?.encrypted;
+	});
+	/** Notes the AI harness may see: never encrypted ones, whatever the provider. */
+	aiNotes = $derived(this.notes.filter((n) => !n.encrypted));
+	/** The open note, unless it's encrypted (the AI never reads those). */
+	aiActiveId = $derived(this.activeEncrypted ? null : this.activeId);
+
 	/** Notes filtered by the selected folder, tag and search box. */
 	filtered = $derived.by(() => {
 		const q = this.search.trim().toLowerCase();
@@ -320,6 +349,7 @@ class AppState {
 		this.applyFonts();
 		this.applyGhost();
 		this.applyAccent();
+		if (this.settings.encryption) await this.startVault();
 
 		// Sidebar layout (section visibility + expanded folders/tags).
 		const sidebar = await platform.getState<Partial<SidebarState>>('sidebar');
@@ -340,8 +370,9 @@ class AppState {
 		await this.refresh();
 
 		// Re-open the note from the previous session, if it still exists.
+		// An encrypted one waits for the user to unlock (no passphrase prompt at launch).
 		const last = await platform.getState<string>('lastOpenFile');
-		if (last && this.notes.some((n) => n.id === last)) {
+		if (last && this.notes.some((n) => n.id === last && !n.encrypted)) {
 			await this.openNote(last);
 		}
 
@@ -519,12 +550,20 @@ class AppState {
 			this.pane = 'editor';
 			return;
 		}
+		if (this.noteMeta(id)?.encrypted && !(await this.ensureUnlocked())) return;
 		await this.flush(); // persist any pending edits before switching
-		this.draft = false; // a blank draft is simply discarded
 		// Load the body BEFORE flipping activeId. The editor is keyed on
 		// editorSession, so its content must already be in place when the new
 		// instance mounts — otherwise it mounts with stale/empty text.
-		const content = await platform.readNote(id);
+		let content: string;
+		try {
+			content = await platform.readNote(id);
+		} catch (err) {
+			this.notify('error', this.vault?.errorText(err) ?? String(err));
+			return;
+		}
+		this.draft = false; // a blank draft is simply discarded
+		this.draftEncrypted = false;
 		this.view = 'editor';
 		this.pane = 'editor';
 		this.activeContent = content;
@@ -544,6 +583,7 @@ class AppState {
 		this.view = 'editor';
 		this.pane = 'editor';
 		this.draft = true;
+		this.draftEncrypted = false;
 		this.activeId = null;
 		this.activeContent = '# ';
 		this.baseline = { id: null, text: '' };
@@ -825,7 +865,7 @@ class AppState {
 	async setPinned(id: string, pinned: boolean): Promise<void> {
 		// Persist any live edits first so we toggle against current content.
 		if (id === this.activeId) await this.flush();
-		const content = await platform.readNote(id);
+		const content = await this.readForMeta(id);
 		const next = setPinned(content, pinned);
 		if (next === content) return;
 		await platform.writeNote(id, next);
@@ -852,7 +892,7 @@ class AppState {
 	 */
 	async setLocked(id: string, locked: boolean): Promise<void> {
 		if (id === this.activeId) await this.flush();
-		const content = await platform.readNote(id);
+		const content = await this.readForMeta(id);
 		const next = setLocked(content, locked);
 		if (next === content) return;
 		await platform.writeNote(id, next);
@@ -885,7 +925,7 @@ class AppState {
 	/** Add / drop the note's `<!-- ai: local -->` marker (mirrors `setLocked`). */
 	async setHiddenFromAi(id: string, hidden: boolean): Promise<void> {
 		if (id === this.activeId) await this.flush();
-		const content = await platform.readNote(id);
+		const content = await this.readForMeta(id);
 		const next = setAiLocal(content, hidden);
 		if (next === content) return;
 		await platform.writeNote(id, next);
@@ -905,6 +945,139 @@ class AppState {
 			'ok',
 			self ? `Cloud AI may read “${baseOf(path)}”` : `“${baseOf(path)}” hidden from cloud AI`
 		);
+	}
+
+	// --- encryption ------------------------------------------------------------------
+
+	/** A note of the list or the trash. */
+	noteMeta(id: string): NoteMeta | undefined {
+		return this.notes.find((n) => n.id === id) ?? this.trashNotes.find((n) => n.id === id);
+	}
+
+	/**
+	 * Text for a metadata-line edit (pin / lock / AI). An encrypted note that
+	 * can't be read right now is edited as file text: its metadata lines sit
+	 * outside the ciphertext, and writing armored text passes straight through.
+	 */
+	private readForMeta(id: string): Promise<string> {
+		const raw = this.noteMeta(id)?.encrypted && !this.vault?.unlocked;
+		return (raw ? hostPlatform : platform).readNote(id);
+	}
+
+	/** Load the encryption code and key (switched on, or on at launch). */
+	private async startVault(): Promise<void> {
+		if (this.vault) return;
+		const { Vault } = await import('../vault/vault.svelte');
+		if (this.vault || !this.settings.encryption) return; // toggled meanwhile
+		this.vault = await Vault.start({
+			beforeLock: () => this.closeDecrypted(),
+			changed: () => void this.vaultChanged(),
+			autoLockMinutes: () => this.settings.autoLockMinutes
+		});
+		await this.vaultChanged();
+	}
+
+	/** Switched off: lock, unhook the wrapper, drop the key. */
+	private async stopVault(): Promise<void> {
+		const v = this.vault;
+		if (!v) return;
+		await v.lock();
+		v.dispose();
+		this.vault = null;
+		await this.vaultChanged();
+	}
+
+	/** Before the key goes: pending edits reach disk (encrypted), decrypted text leaves the UI. */
+	private async closeDecrypted(): Promise<void> {
+		await this.flush();
+		if (!this.activeEncrypted) return;
+		// A new editor instance: the decrypted text and its undo history go with the old one.
+		this.cancelPending();
+		this.activeId = null;
+		this.activeContent = '';
+		this.baseline = null;
+		this.draft = false;
+		this.draftEncrypted = false;
+		if (this.pane === 'editor') this.pane = 'list';
+		this.editorSession++;
+		void platform.setState('lastOpenFile', null);
+	}
+
+	/** Titles, tags and diffs of encrypted notes read differently now. */
+	private async vaultChanged(): Promise<void> {
+		await this.refresh();
+		if (this.changes !== null) void this.refreshChanges();
+		if (this.view === 'changes') void this.refreshStashes();
+	}
+
+	/** Ask for the passphrase if needed. False when encryption is off, has no key, or the user cancels. */
+	async ensureUnlocked(): Promise<boolean> {
+		const v = this.vault;
+		if (!v) {
+			this.notify('error', 'This note is encrypted. Turn on encryption in Settings to read it.');
+			return false;
+		}
+		if (!v.hasKey) {
+			this.notify('error', 'Add your encryption key in Settings to read encrypted notes.');
+			this.openSettings('encryption');
+			return false;
+		}
+		if (v.unlocked) return true;
+		const pass = await this.prompt({
+			title: 'Unlock encrypted notes',
+			label: 'Key passphrase',
+			value: '',
+			confirm: 'Unlock',
+			secret: true,
+			check: (p) => (p ? null : 'Enter your passphrase.'),
+			submit: (p) => v.unlock(p)
+		});
+		return pass !== null && v.unlocked;
+	}
+
+	lockVault(): void {
+		void this.vault?.lock();
+	}
+
+	/** Encrypt a note, or turn it back into plain text (needs the unlocked key). */
+	async setEncrypted(id: string, on: boolean): Promise<void> {
+		const v = this.vault;
+		if (!v) return;
+		if (!v.hasKey) {
+			this.notify('error', 'Create or import a key first.');
+			this.openSettings('encryption');
+			return;
+		}
+		const title = this.noteMeta(id)?.title ?? baseOf(id);
+		if (on) {
+			const ok = await this.confirm({
+				title: 'Encrypt this note?',
+				body: `“${title}” will be saved and synced as ciphertext that only your key opens. Its file name stays readable, and versions already pushed to git stay readable in the repository’s history.`,
+				confirm: 'Encrypt'
+			});
+			if (!ok) return;
+		} else if (!(await this.ensureUnlocked())) return;
+		if (id === this.activeId) await this.flush();
+		try {
+			const text = await platform.readNote(id); // plain as it is, or decrypted
+			if (on) await platform.writeNote(id, await v.encrypt(text));
+			else await hostPlatform.writeNote(id, text);
+		} catch (err) {
+			this.notify('error', v.errorText(err));
+			return;
+		}
+		await this.refresh();
+		this.notify('ok', on ? 'Encrypted' : 'Saved as plain text');
+	}
+
+	/** The open draft will be written encrypted from its first save. */
+	toggleDraftEncrypted(): void {
+		if (!this.vault?.hasKey) {
+			this.notify('error', 'Create or import a key first.');
+			this.openSettings('encryption');
+			return;
+		}
+		this.draftEncrypted = !this.draftEncrypted;
 	}
 
 	// --- move / rename -----------------------------------------------------------
@@ -1187,6 +1360,9 @@ class AppState {
 			this.closeHarness();
 			this.harnessLoaded = false;
 		}
+		if (patch.encryption !== undefined)
+			void (patch.encryption ? this.startVault() : this.stopVault());
+		if (patch.autoLockMinutes !== undefined) this.vault?.rearm();
 		localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
 		void platform.setState('settings', $state.snapshot(this.settings));
 		this.applyFonts();
@@ -1273,8 +1449,10 @@ class AppState {
 			this.saving = false;
 			return;
 		}
-		const meta = await platform.createNote(title, this.draftFolder, content);
+		const body = this.draftEncrypted && this.vault ? await this.vault.encrypt(content) : content;
+		const meta = await platform.createNote(title, this.draftFolder, body);
 		this.draft = false;
+		this.draftEncrypted = false;
 		this.activeId = meta.id;
 		this.activeContent = content;
 		this.saving = false;
@@ -1327,8 +1505,8 @@ class AppState {
 		if (!id || this.draft || !this.notes.some((n) => n.id === id)) return;
 		// Keystrokes typed while the sync ran are newer than disk — keep them.
 		if (this.pending) return;
-		const content = await platform.readNote(id);
-		if (id !== this.activeId || content === this.activeContent) return;
+		const content = await platform.readNote(id).catch(() => null);
+		if (content === null || id !== this.activeId || content === this.activeContent) return;
 		this.activeContent = content;
 		this.editorReloadToken++;
 	}

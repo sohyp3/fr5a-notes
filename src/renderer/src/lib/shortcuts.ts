@@ -6,6 +6,8 @@
 export interface Shortcut {
 	keys: string[];
 	desc: string;
+	/** Listed only while this setting is on. */
+	feature?: 'encryption';
 }
 
 export const SHORTCUTS: Shortcut[] = [
@@ -16,6 +18,7 @@ export const SHORTCUTS: Shortcut[] = [
 	{ keys: ['Mod', '⇧', 'L'], desc: 'Show / hide the note list' },
 	{ keys: ['Mod', '⇧', 'E'], desc: 'View / edit mode for the open note' },
 	{ keys: ['Mod', ','], desc: 'Open / close Settings' },
+	{ keys: ['Mod', '⇧', 'K'], desc: 'Lock encrypted notes', feature: 'encryption' },
 	{ keys: ['Mod', 'B'], desc: 'Bold  **text**' },
 	{ keys: ['Mod', 'I'], desc: 'Italic  *text*' },
 	{ keys: ['Mod', 'E'], desc: 'Inline code  `text`' },

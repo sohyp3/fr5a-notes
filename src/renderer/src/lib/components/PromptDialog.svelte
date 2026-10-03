@@ -11,38 +11,56 @@
 
 	let value = $state('');
 	let touched = $state(false);
+	/** `submit` running, and the error it returned. */
+	let busy = $state(false);
+	let failed = $state<string | null>(null);
 	let input = $state<HTMLInputElement | null>(null);
 	// The scrim cancels only for a press that started on it (see ConfirmDialog).
 	let scrimPressed = false;
 
-	const error = $derived(req?.check?.(value) ?? null);
+	const error = $derived(req?.check?.(value) ?? failed);
 
 	$effect(() => {
 		const r = req;
 		if (!r) return;
 		value = r.value;
 		touched = false;
+		failed = null;
 		void tick().then(() => {
 			input?.focus();
-			input?.select();
+			if (!r.secret) input?.select();
 		});
 		const onKey = (e: KeyboardEvent) => {
 			if (e.key === 'Escape') {
 				e.preventDefault();
 				e.stopPropagation();
-				app.answerPrompt(null);
+				cancel();
 			}
 		};
 		window.addEventListener('keydown', onKey, true);
 		return () => window.removeEventListener('keydown', onKey, true);
 	});
 
-	function submit(e?: Event): void {
+	async function submit(e?: Event): Promise<void> {
 		e?.preventDefault();
 		touched = true;
-		if (error) return;
+		const r = req;
+		if (error || busy || !r) return;
+		if (r.submit) {
+			busy = true;
+			failed = await r.submit(value);
+			busy = false;
+			if (failed) return;
+		}
+		const out = value;
+		if (r.secret) value = '';
 		// Unchanged: nothing to do, same as Cancel.
-		app.answerPrompt(value.trim() === req?.value ? null : value);
+		app.answerPrompt(out.trim() === r.value ? null : out);
+	}
+
+	function cancel(): void {
+		if (req?.secret) value = '';
+		app.answerPrompt(null);
 	}
 </script>
 
@@ -54,7 +72,7 @@
 			tabindex="-1"
 			onpointerdown={() => (scrimPressed = true)}
 			onclick={() => {
-				if (scrimPressed) app.answerPrompt(null);
+				if (scrimPressed) cancel();
 				scrimPressed = false;
 			}}
 			transition:fade={{ duration: 160 * dur }}
@@ -74,7 +92,11 @@
 					<input
 						bind:this={input}
 						bind:value
-						oninput={() => (touched = true)}
+						oninput={() => {
+							touched = true;
+							failed = null;
+						}}
+						type={req.secret ? 'password' : 'text'}
 						spellcheck="false"
 						autocomplete="off"
 						enterkeyhint="done"
@@ -85,8 +107,10 @@
 				</label>
 				<p id="prompt-error" class="err" role="status">{touched && error ? error : ''}</p>
 				<div class="actions">
-					<button type="button" class="btn" onclick={() => app.answerPrompt(null)}>Cancel</button>
-					<button type="submit" class="btn primary" disabled={!!error}>{req.confirm}</button>
+					<button type="button" class="btn" onclick={cancel}>Cancel</button>
+					<button type="submit" class="btn primary" disabled={!!error || busy} aria-busy={busy}
+						>{req.confirm}</button
+					>
 				</div>
 			</form>
 		</div>

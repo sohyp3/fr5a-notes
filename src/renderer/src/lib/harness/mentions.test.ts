@@ -18,7 +18,8 @@ const note = (id: string, title: string, tags: string[] = []): NoteMeta => ({
 	tags,
 	pinned: false,
 	locked: false,
-	aiLocal: false
+	aiLocal: false,
+	encrypted: false
 });
 
 const notes = [

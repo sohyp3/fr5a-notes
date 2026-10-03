@@ -56,6 +56,15 @@
 				? [{ label: 'Show changes', icon: 'diff', action: () => app.showChanges(n.id) } as MenuItem]
 				: []),
 			...(app.settings.ai ? [hideItem(n)] : []),
+			...(app.vault
+				? [
+						{
+							label: n.encrypted ? 'Remove encryption' : 'Encrypt',
+							icon: 'key',
+							action: () => void app.setEncrypted(n.id, !n.encrypted)
+						} as MenuItem
+					]
+				: []),
 			{
 				label: 'Move to Trash',
 				icon: 'trash',

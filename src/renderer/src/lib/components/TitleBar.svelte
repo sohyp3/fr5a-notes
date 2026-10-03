@@ -63,6 +63,15 @@
 			hint: app.changes === null ? undefined : String(changeCount),
 			action: () => app.showChanges()
 		},
+		...(app.vault?.hasKey
+			? [
+					{
+						label: app.vault.unlocked ? 'Lock encrypted notes' : 'Unlock encrypted notes',
+						icon: app.vault.unlocked ? 'lock' : 'unlock',
+						action: () => (app.vault?.unlocked ? app.lockVault() : void app.ensureUnlocked())
+					} as MenuItem
+				]
+			: []),
 		{
 			label: app.theme === 'light' ? 'Dark theme' : 'Light theme',
 			icon: app.theme === 'light' ? 'moon' : 'sun',
@@ -219,6 +228,19 @@
 						{#if changeCount}<span class="count">{changeCount}</span>{/if}
 					</button>
 				{/if}
+			{/if}
+			{#if app.vault?.hasKey}
+				<button
+					class="icon-btn"
+					class:on={app.vault.unlocked}
+					title={app.vault.unlocked
+						? 'Encrypted notes are unlocked — lock them (Mod+Shift+K)'
+						: 'Unlock encrypted notes'}
+					aria-label={app.vault.unlocked ? 'Lock encrypted notes' : 'Unlock encrypted notes'}
+					onclick={() => (app.vault?.unlocked ? app.lockVault() : app.ensureUnlocked())}
+				>
+					<Icon name={app.vault.unlocked ? 'unlock' : 'lock'} size={16} />
+				</button>
 			{/if}
 			{#if app.layout === 'tablet' && (app.activeId || app.draft)}
 				<!-- Desktop uses Mod+\; touch has no shortcut, so offer a button. -->

@@ -7,17 +7,26 @@
 	import DiffView from './DiffView.svelte';
 	import Icon from './Icon.svelte';
 	import type { GitChange, GitStash } from '../../../../shared/types';
+	import { isEncryptedNote } from '../../../../shared/encrypted';
 
 	const app = getAppState();
 	const canStash = !!platform.gitStash;
 	const canRevert = !!platform.gitRevert;
 
-	type Row = GitChange & { added: number; removed: number; lines: ReturnType<typeof compactDiff> };
+	type Row = GitChange & {
+		added: number;
+		removed: number;
+		lines: ReturnType<typeof compactDiff>;
+		/** Ciphertext on a side (encrypted note, key locked): no diff to show. */
+		sealed: boolean;
+	};
 
 	function rowOf(c: GitChange): Row {
-		const all = diffLines(c.before ?? '', c.after ?? '');
+		const sealed = [c.before, c.after].some((t) => t !== null && isEncryptedNote(t));
+		const all = sealed ? [] : diffLines(c.before ?? '', c.after ?? '');
 		return {
 			...c,
+			sealed,
 			added: all.filter((l) => l.op === 'add').length,
 			removed: all.filter((l) => l.op === 'del').length,
 			lines: compactDiff(all, 3)
@@ -407,7 +416,11 @@
 										{#if f.removed}<span class="del">−{f.removed}</span>{/if}
 									</span>
 								</h3>
-								<DiffView lines={f.lines} />
+								{#if f.sealed}
+									<p class="muted">Encrypted. Unlock your notes to see what changed.</p>
+								{:else}
+									<DiffView lines={f.lines} />
+								{/if}
 							{:else}
 								<p class="muted">
 									No notes in this stash — it holds other files only (a <code>git stash</code> made elsewhere).
@@ -456,7 +469,11 @@
 							</div>
 						</div>
 						<div class="diff-scroll" in:fade={{ duration: 120 }}>
-							<DiffView lines={current.lines} />
+							{#if current.sealed}
+								<p class="muted">Encrypted. Unlock your notes to see what changed.</p>
+							{:else}
+								<DiffView lines={current.lines} />
+							{/if}
 						</div>
 					{/key}
 				{/if}

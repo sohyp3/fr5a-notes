@@ -24,7 +24,8 @@ const note = (id: string, title: string): NoteMeta => ({
 	tags: [],
 	pinned: false,
 	locked: false,
-	aiLocal: false
+	aiLocal: false,
+	encrypted: false
 });
 
 function deps(over: Partial<ToolDeps> = {}): ToolDeps {

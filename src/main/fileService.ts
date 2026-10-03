@@ -4,8 +4,9 @@ import chokidar, { type FSWatcher } from 'chokidar';
 import { NoteIndex } from './db';
 import { parseTags } from './tags';
 import type { NoteMeta } from '../shared/types';
-import { folderMoveError, noteExt, noteMoveError } from '../shared/paths';
+import { folderDeleteError, folderMoveError, noteExt, noteMoveError } from '../shared/paths';
 import { noteSnippet } from '../shared/snippet';
+import { isEncryptedNote } from '../shared/encrypted';
 
 const MD_EXT = new Set(['.md', '.markdown', '.mdown', '.txt']);
 
@@ -48,6 +49,22 @@ export class FileService {
 		const pinned = /^\s*<!--\s*pinned:\s*true\s*-->\s*$/im.test(raw);
 		const locked = /^\s*<!--\s*locked:\s*true\s*-->\s*$/im.test(raw);
 		const aiLocal = /^\s*<!--\s*ai:\s*local\s*-->\s*$/im.test(raw);
+		const fileTitle = path.basename(absPath, path.extname(absPath));
+		// Encrypted: only ciphertext here. The renderer shows the real title once unlocked.
+		if (isEncryptedNote(raw)) {
+			return {
+				id: this.toId(absPath),
+				absPath,
+				title: fileTitle,
+				snippet: '',
+				mtime,
+				tags: [],
+				pinned,
+				locked,
+				aiLocal,
+				encrypted: true
+			};
+		}
 		// Strip hidden metadata comments (dir / pinned / locked) so they never
 		// surface as the title or in the snippet.
 		const body = raw.replace(
@@ -63,7 +80,7 @@ export class FileService {
 			title = t.replace(/^#{1,6}\s*/, '');
 			break;
 		}
-		if (!title) title = path.basename(absPath, path.extname(absPath));
+		if (!title) title = fileTitle;
 
 		// Snippet: the body after the title line, flattened (shared/snippet.ts).
 		const snippet = noteSnippet(body);
@@ -77,7 +94,8 @@ export class FileService {
 			tags: parseTags(body),
 			pinned,
 			locked,
-			aiLocal
+			aiLocal,
+			encrypted: false
 		};
 	}
 
@@ -341,6 +359,53 @@ export class FileService {
 		}
 		this.index.remove(id);
 		this.scheduleChange();
+	}
+
+	/**
+	 * Soft-delete a folder: every file in it moves into `.fr5a_trash` at its
+	 * mirrored path (notes show up in the trash, restorable one by one), then
+	 * the emptied tree goes. Refused for a nested git repo or locked notes.
+	 */
+	async deleteFolder(dir: string): Promise<void> {
+		const from = this.safeSubdir(dir);
+		const err = folderDeleteError(from);
+		if (err) throw new Error(err);
+		const src = path.join(this.root, from);
+		if (await this.holdsRepo(src)) {
+			throw new Error(`“${from}” has its own git repo — move it outside fr5a.`);
+		}
+		const files: string[] = [];
+		await this.collectFiles(src, files);
+		for (const f of files) {
+			if (!this.isNote(f)) continue;
+			const raw = await fs.readFile(f, 'utf8').catch(() => '');
+			if (/^\s*<!--\s*locked:\s*true\s*-->\s*$/im.test(raw)) {
+				throw new Error(`“${this.toId(f)}” is locked — unlock it first.`);
+			}
+		}
+		for (const f of files) {
+			const dest = await this.uniquePath(path.join(this.root, TRASH_DIR, this.toId(f)));
+			await fs.mkdir(path.dirname(dest), { recursive: true });
+			await fs.rename(f, dest).catch(() => fs.rm(f, { force: true }));
+		}
+		await fs.rm(src, { recursive: true, force: true });
+		this.index.removeUnder(from);
+		this.scheduleChange();
+	}
+
+	/** Every file under `dir` (any type, dot-files included). */
+	private async collectFiles(dir: string, out: string[]): Promise<void> {
+		let entries: import('node:fs').Dirent[];
+		try {
+			entries = await fs.readdir(dir, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		for (const entry of entries) {
+			const full = path.join(dir, entry.name);
+			if (entry.isDirectory()) await this.collectFiles(full, out);
+			else if (entry.isFile()) out.push(full);
+		}
 	}
 
 	/** List the notes currently sitting in `.fr5a_trash` (ids include the prefix). */

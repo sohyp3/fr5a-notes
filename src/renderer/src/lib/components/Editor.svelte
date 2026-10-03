@@ -195,10 +195,26 @@
 		moreAt = { x: r.right - 200, y: r.bottom + 6 };
 	}
 
-	/** Rename / move / AI privacy of the open note (crumb menu; also in ⋯ on phones). */
+	/** Encrypt / decrypt the open note; a draft is marked to be saved encrypted. */
+	const encryptItem = $derived.by((): MenuItem[] => {
+		if (!app.vault || (!activeMeta && !app.draft)) return [];
+		const on = app.activeEncrypted;
+		return [
+			{
+				label: on ? (app.draft ? 'Don’t encrypt' : 'Remove encryption') : 'Encrypt note',
+				icon: 'key',
+				action: () =>
+					app.draft
+						? app.toggleDraftEncrypted()
+						: activeMeta && void app.setEncrypted(activeMeta.id, !on)
+			}
+		];
+	});
+
+	/** Rename / move / AI privacy / encryption of the open note (crumb menu; also in ⋯ on phones). */
 	const fileItems = $derived.by((): MenuItem[] => {
 		const n = activeMeta;
-		if (!n) return [];
+		if (!n) return encryptItem;
 		const viaFolder = !n.aiLocal && hiddenAi;
 		const items: MenuItem[] = [
 			{ label: 'Rename…', icon: 'rename', action: () => void app.renameNote(n.id) },
@@ -212,7 +228,7 @@
 				hint: viaFolder ? 'folder' : undefined,
 				action: () => void app.setHiddenFromAi(n.id, !n.aiLocal)
 			});
-		return items;
+		return [...items, ...encryptItem];
 	});
 
 	function openCrumb(): void {
@@ -295,13 +311,15 @@
 		<header class="editor-head" class:scrolled bind:clientWidth={headW}>
 			{#if !compact}
 				<div class="crumb">
-					{#if activeMeta}
+					{#if fileItems.length}
 						<button
 							bind:this={crumbBtn}
 							class="crumb-btn"
 							class:on={!!crumbAt}
-							title="{app.activeId} — rename or move"
-							aria-label="File: {app.activeId}. Rename or move"
+							title="{app.activeId ?? 'New note'} — {activeMeta ? 'rename or move' : 'encryption'}"
+							aria-label="File: {app.activeId ?? 'New note'}. {activeMeta
+								? 'Rename or move'
+								: 'Encryption'}"
 							aria-haspopup="menu"
 							aria-expanded={!!crumbAt}
 							onclick={openCrumb}
@@ -313,6 +331,11 @@
 					{:else}
 						<span class="cname">{crumb.name}</span>
 					{/if}
+					{#if app.activeEncrypted}<span
+							class="state shield"
+							title="Encrypted — saved and synced as ciphertext only your key opens"
+							><Icon name="key" size={10} stroke={2.2} /> Encrypted</span
+						>{/if}
 					{#if hiddenAi}<span
 							class="state shield"
 							title="Hidden from cloud AI — only local providers can read this note"

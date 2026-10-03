@@ -12,7 +12,8 @@ function note(id: string): NoteMeta {
 		tags: [],
 		pinned: false,
 		locked: false,
-		aiLocal: false
+		aiLocal: false,
+		encrypted: false
 	};
 }
 

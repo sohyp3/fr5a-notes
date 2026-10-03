@@ -31,6 +31,7 @@ import {
 import { folderMoveError, noteExt, noteMoveError } from '../../../../shared/paths';
 import type { PlatformApi } from './types';
 import { noteSnippet } from '../../../../shared/snippet';
+import { isEncryptedNote } from '../../../../shared/encrypted';
 
 /**
  * Android host (Capacitor). Notes live in `notes/` under app-private storage
@@ -97,6 +98,23 @@ export function safeSubdir(folder: string): string {
 export function buildMeta(id: string, absPath: string, raw: string, mtime: number): NoteMeta {
 	const pinned = /^\s*<!--\s*pinned:\s*true\s*-->\s*$/im.test(raw);
 	const locked = LOCKED_RE.test(raw);
+	const aiLocal = AI_LOCAL_RE.test(raw);
+	// Encrypted: only ciphertext here. The renderer shows the real title once unlocked.
+	if (isEncryptedNote(raw)) {
+		const title = basename(id, extname(id));
+		return {
+			id,
+			absPath,
+			title,
+			snippet: '',
+			mtime,
+			tags: [],
+			pinned,
+			locked,
+			aiLocal,
+			encrypted: true
+		};
+	}
 	const body = raw.replace(
 		/^\s*<!--\s*(?:dir:\s*(?:rtl|ltr)|pinned:\s*(?:true|false)|locked:\s*(?:true|false)|ai:\s*local)\s*-->\s*$/gim,
 		''
@@ -110,8 +128,18 @@ export function buildMeta(id: string, absPath: string, raw: string, mtime: numbe
 	}
 	if (!title) title = basename(id, extname(id));
 	const snippet = noteSnippet(body);
-	const aiLocal = AI_LOCAL_RE.test(raw);
-	return { id, absPath, title, snippet, mtime, tags: parseTags(body), pinned, locked, aiLocal };
+	return {
+		id,
+		absPath,
+		title,
+		snippet,
+		mtime,
+		tags: parseTags(body),
+		pinned,
+		locked,
+		aiLocal,
+		encrypted: false
+	};
 }
 
 function sortNotes(notes: NoteMeta[]): NoteMeta[] {
