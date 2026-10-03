@@ -781,3 +781,230 @@ test('desktop: notes open editable; the note menu is anchored, not a sheet', asy
 	await expect(page.getByRole('menu')).toHaveCount(0);
 	await ctx.close();
 });
+
+// --- move / rename, privacy, tables, saved chats ------------------------------------
+
+type FakeApi = {
+	listNotes(): Promise<{ id: string }[]>;
+	readNote(id: string): Promise<string>;
+	writeNote(id: string, content: string): Promise<void>;
+};
+const fakeApi = 'api' as const;
+
+const noteIds = (page: Page) =>
+	page.evaluate(async (k) => {
+		const api = (window as unknown as Record<typeof k, FakeApi>)[k];
+		return (await api.listNotes()).map((n) => n.id).sort();
+	}, fakeApi);
+
+const readFake = (page: Page, id: string) =>
+	page.evaluate(([k, id]) => (window as unknown as Record<string, FakeApi>)[k].readNote(id), [
+		fakeApi,
+		id
+	] as const);
+
+const writeFake = (page: Page, id: string, text: string) =>
+	page.evaluate(
+		([k, id, text]) => (window as unknown as Record<string, FakeApi>)[k].writeNote(id, text),
+		[fakeApi, id, text] as const
+	);
+
+/** Hold a finger on `target` until its menu opens. */
+async function longPress(page: Page, target: Locator) {
+	const box = (await target.boundingBox())!;
+	const cdp = await page.context().newCDPSession(page);
+	const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+	await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] });
+	await page.waitForTimeout(750);
+	await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+	await expect(page.getByRole('menu')).toBeVisible();
+}
+
+test('a note is renamed and moved from its menu', async ({ page }) => {
+	await openFolder(page, /^All Notes/);
+	await longPress(page, list(page).getByRole('button', { name: /Hello/ }));
+	await page.getByRole('menuitem', { name: 'Rename…' }).tap();
+	const field = page.getByRole('dialog').getByRole('textbox');
+	await expect(field).toHaveValue('hello');
+	await field.fill('Greetings');
+	await field.press('Enter');
+	await expect.poll(() => noteIds(page)).toEqual(['Greetings.md', 'Work/plan.md']);
+	await expect(page.getByRole('dialog')).toHaveCount(0);
+
+	await longPress(page, list(page).getByRole('button', { name: /Hello/ }));
+	await page.getByRole('menuitem', { name: 'Move to…' }).tap();
+	const picker = page.getByRole('dialog', { name: /Move/ });
+	await expect(picker.getByRole('option', { name: /Notes/ })).toBeDisabled();
+	await picker.getByRole('option', { name: /Work/ }).tap();
+	await expect.poll(() => noteIds(page)).toEqual(['Work/Greetings.md', 'Work/plan.md']);
+	await expect(page.locator('.notice')).toHaveText('Moved to Work');
+});
+
+test('desktop: renaming a folder keeps the open note; notes drag onto folders', async ({
+	browser
+}) => {
+	const { ctx, page } = await desktopPage(browser);
+	await sidebar(page)
+		.getByRole('button', { name: /^Work \d+$/ })
+		.click();
+	await list(page).getByText('Plan', { exact: true }).click();
+	await sidebar(page)
+		.getByRole('button', { name: /^Work \d+$/ })
+		.click({ button: 'right' });
+	await page.getByRole('menuitem', { name: 'Rename…' }).click();
+	const field = page.getByRole('dialog').getByRole('textbox');
+	await field.fill('Projects');
+	await field.press('Enter');
+	await expect(page.locator('.editor-head .crumb')).toContainText('Projects /');
+	await expect(page.locator('.ProseMirror')).toContainText('first line');
+	expect(await noteIds(page)).toEqual(['Projects/plan.md', 'hello.md']);
+
+	// Typing after the rename saves to the new path.
+	await page.locator('.ProseMirror p', { hasText: 'first line' }).click();
+	await page.keyboard.press('End');
+	await page.keyboard.type(' more');
+	await expect.poll(() => readFake(page, 'Projects/plan.md')).toContain('first line more');
+
+	await sidebar(page)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	await list(page)
+		.getByRole('button', { name: /Hello/ })
+		.dragTo(sidebar(page).getByRole('button', { name: /^Projects \d+$/ }));
+	await expect.poll(() => noteIds(page)).toEqual(['Projects/hello.md', 'Projects/plan.md']);
+	await ctx.close();
+});
+
+test('desktop: hiding a folder or a note from cloud AI shows where it applies', async ({
+	browser
+}) => {
+	const { ctx, page } = await desktopPage(browser);
+	await sidebar(page)
+		.getByRole('button', { name: /^Work \d+$/ })
+		.click({ button: 'right' });
+	await page.getByRole('menuitem', { name: 'Hide from cloud AI' }).click();
+	await expect(sidebar(page).locator('.folder-row .shield')).toHaveCount(1);
+	await sidebar(page)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	const shields = list(page).getByRole('img', { name: 'Hidden from cloud AI' });
+	await expect(shields).toHaveCount(1);
+
+	// One note on its own: a marker in the file.
+	await list(page).getByRole('button', { name: /Hello/ }).click({ button: 'right' });
+	await page.getByRole('menuitem', { name: 'Hide from cloud AI' }).click();
+	await expect(shields).toHaveCount(2);
+	expect(await readFake(page, 'hello.md')).toBe('<!-- ai: local -->\n# Hello\n\nworld');
+
+	// Settings → AI lists both, with what each folder inherits.
+	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
+	await page
+		.getByRole('navigation', { name: 'Settings sections' })
+		.getByRole('button', { name: /AI/ })
+		.click();
+	const tree = page.getByRole('group', { name: 'Folders hidden from cloud AI' });
+	await expect(tree.locator('.prow.on')).toHaveText(/Work.*Hidden/);
+	await expect(page.locator('.psum')).toContainText('2 of 2 notes hidden');
+	await expect(page.locator('.single')).toContainText('hello.md');
+	await ctx.close();
+});
+
+test('tables render in notes; in edit mode a cell opens the source', async ({ page }) => {
+	await writeFake(page, 'hello.md', '# Hello\n\n| a | b |\n|---|--:|\n| **1** | 2 |\n\nend');
+	await openFolder(page, /^All Notes/);
+	await list(page).getByRole('button', { name: /Hello/ }).tap();
+	const table = page.locator('.md-table');
+	await expect(table.locator('th')).toHaveText(['a', 'b']);
+	await expect(table.locator('td strong')).toHaveText('1');
+	await expect(table.locator('td').nth(1)).toHaveCSS('text-align', 'right');
+	// View mode (touch default): the table stays rendered.
+	await table.locator('td').nth(1).tap();
+	await expect(table).toBeVisible();
+
+	await edit(page);
+	await page.locator('.md-table td').nth(1).tap();
+	await expect(page.locator('.md-table')).toHaveCount(0);
+	await expect(page.locator('.ProseMirror p.md-trow')).toHaveCount(3);
+	await page.keyboard.type('3');
+	expect(await editorText(page)).toContain('| **1** | 23 |');
+});
+
+test('desktop: pasting spreadsheet cells makes a Markdown table', async ({ browser }) => {
+	const { ctx, page } = await desktopPage(browser);
+	await sidebar(page)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	await list(page).getByText('Hello', { exact: true }).click();
+	await page.keyboard.press('Control+End');
+	await page.evaluate(() => {
+		const dt = new DataTransfer();
+		dt.setData('text/plain', '\tLite\tCore\nHero\t—\t1 reel\nStories\t3×/week\tdaily\n');
+		document
+			.querySelector('.ProseMirror')!
+			.dispatchEvent(
+				new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })
+			);
+	});
+	await expect(page.locator('.md-table th')).toHaveText(['', 'Lite', 'Core']);
+	expect(await editorText(page)).toContain(
+		'world\n\n|         | Lite    | Core   |\n| ------- | ------- | ------ |\n| Hero    | —       | 1 reel |'
+	);
+	await ctx.close();
+});
+
+test('AI harness: a chat is saved to notes, updated, and forked', async ({ page }) => {
+	await openPlan(page);
+	const harness = await openHarness(page);
+	const input = harness.locator('textarea');
+	await input.fill('md?');
+	await input.press('Enter');
+	await expect(harness.locator('.msg.ai .md h1')).toHaveText('Title');
+
+	await harness.getByRole('button', { name: 'Session actions' }).tap();
+	await page.getByRole('menuitem', { name: /Save to notes/ }).tap();
+	await expect(harness.locator('.toast')).toHaveText('Saved to AI chats/md-.md');
+	const saved = await readFake(page, 'AI chats/md-.md');
+	expect(saved).toContain('# md?\n\n*AI chat · ');
+	expect(saved).toContain('> **You:** md?\n\n# Title');
+	// The `.fr5a/sessions/` copy stays, and remembers the note.
+	const sessions = await page.evaluate(() =>
+		Object.entries((window as unknown as { __meta: Record<string, string> }).__meta).filter(([k]) =>
+			k.startsWith('sessions/')
+		)
+	);
+	expect(sessions[0][1]).toContain('saved: AI chats/md-.md');
+
+	await harness.getByRole('button', { name: 'Session actions' }).tap();
+	await page.getByRole('menuitem', { name: /Update saved note/ }).tap();
+	await expect(harness.locator('.toast')).toHaveText('AI chats/md-.md is up to date');
+
+	await harness.getByRole('button', { name: 'Session actions' }).tap();
+	await page.getByRole('menuitem', { name: 'Fork conversation' }).tap();
+	await expect(harness.getByRole('tab')).toHaveCount(2);
+	await expect(harness.getByRole('tab', { selected: true })).toContainText('md? (fork)');
+	await expect(harness.locator('.msg.ai .md h1')).toHaveText('Title');
+});
+
+test('desktop: a narrow window keeps room for the editor beside the AI pane', async ({
+	browser
+}) => {
+	const ctx = await browser.newContext({
+		viewport: { width: 1024, height: 640 },
+		isMobile: false,
+		hasTouch: false
+	});
+	const page = await ctx.newPage();
+	await page.addInitScript(installFakeApi);
+	await page.goto('/');
+	await sidebar(page)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	await list(page).getByText('Plan', { exact: true }).click();
+	await page.getByRole('button', { name: 'Toggle AI harness' }).click();
+	await expect(page.getByRole('region', { name: 'AI harness' })).toBeVisible();
+	// The sidebar steps aside and the AI pane narrows; the editor stays usable.
+	await expect.poll(() => width(editorPane(page))).toBeGreaterThanOrEqual(300);
+	await page.getByRole('button', { name: 'Close AI pane' }).click();
+	await expect.poll(() => width(sidebar(page))).toBeGreaterThan(150);
+	await ctx.close();
+});

@@ -2,6 +2,7 @@
 	import { slide } from 'svelte/transition';
 	import { getAppState } from '../stores/app.svelte';
 	import { buildFolderTree } from '../folders';
+	import { dropFor, endDrag } from '../dnd';
 	import TagTree from './TagTree.svelte';
 	import FolderTree from './FolderTree.svelte';
 	import logo from '$lib/assets/logo.png';
@@ -22,6 +23,18 @@
 		queueMicrotask(() => input?.focus());
 	}
 
+	// "All Notes" doubles as the drop target for the workspace root.
+	let rootOver = $state(false);
+	function onRootDrop(e: DragEvent): void {
+		rootOver = false;
+		const item = dropFor(e, '');
+		endDrag();
+		if (!item) return;
+		e.preventDefault();
+		if (item.kind === 'note') void app.moveNoteTo(item.path, '');
+		else void app.moveFolderTo(item.path, '');
+	}
+
 	async function commitAdd(): Promise<void> {
 		const name = newName.trim();
 		adding = false;
@@ -33,7 +46,20 @@
 <nav class="sidebar">
 	<div class="brand"><img src={logo} alt="fr5a" /></div>
 
-	<button class="all-notes" class:selected={allSelected} onclick={() => app.showAllNotes()}>
+	<button
+		class="all-notes"
+		class:selected={allSelected}
+		class:over={rootOver}
+		title={rootOver ? 'Move to the top level' : undefined}
+		onclick={() => app.showAllNotes()}
+		ondragover={(e) => {
+			if (!dropFor(e, '')) return;
+			e.preventDefault();
+			rootOver = true;
+		}}
+		ondragleave={() => (rootOver = false)}
+		ondrop={onRootDrop}
+	>
 		<svg width="15" height="15" viewBox="0 0 24 24" fill="none">
 			<path
 				d="M5 4h14M5 9h14M5 14h9M5 19h9"
@@ -263,6 +289,10 @@
 	.all-notes.selected {
 		background: var(--accent-soft);
 		color: var(--accent);
+	}
+	.all-notes.over {
+		background: var(--accent-soft);
+		box-shadow: inset 0 0 0 1.5px var(--accent);
 	}
 	.all-notes .count {
 		margin-left: auto;

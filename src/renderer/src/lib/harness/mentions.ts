@@ -1,4 +1,5 @@
 import type { NoteMeta } from '../../../../shared/types';
+import { remapPath } from '../../../../shared/paths';
 
 /**
  * Context mentions in the harness input:
@@ -43,6 +44,14 @@ export function fromKey(key: string): Mention {
 	if (key.startsWith('#')) return { kind: 'tag', value: key.slice(1) };
 	if (key.startsWith('@') && key.endsWith('/')) return { kind: 'dir', value: key.slice(1, -1) };
 	return { kind: 'note', value: key };
+}
+
+/** A stored mention key after a note / folder moved from `from` to `to` (tags never move). */
+export function remapKey(key: string, from: string, to: string): string {
+	const m = fromKey(key);
+	if (m.kind === 'tag') return key;
+	const next = remapPath(m.value, from, to);
+	return next === null ? key : mentionKey({ ...m, value: next });
 }
 
 /** How a mention is typed back into the input (quoted when it has spaces). */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { blockedReason, isLocalOnly } from './privacy';
+import { blockedReason, folderPrivacy, isHidden, isLocalOnly } from './privacy';
 import { estimateTokens, fitHistory, truncateToTokens } from './context';
 import { allowedTools, BUILTIN_SKILLS, loadSkillTree, parseSkill, serializeSkill } from './skills';
 import { DEFAULT_AI_CONFIG, type ChatMessage, type ProviderProfile } from './types';
@@ -21,9 +21,18 @@ describe('privacy', () => {
 		expect(isLocalOnly('private/deep/a.md', '', config)).toBe(true);
 		expect(isLocalOnly('privateer/a.md', '', config)).toBe(false);
 		expect(isLocalOnly('a.md', '# x\n<!-- ai: local -->', config)).toBe(true);
-		expect(blockedReason('private/a.md', '', remote, config)).toMatch(/local-only/);
+		expect(blockedReason('private/a.md', '', remote, config)).toMatch(/hidden from cloud AI/);
 		expect(blockedReason('private/a.md', '', { ...remote, local: true }, config)).toBeNull();
 		expect(blockedReason('a.md', 'hi', remote, config)).toBeNull();
+	});
+
+	it('says whether a folder is hidden itself or through a parent', () => {
+		expect(folderPrivacy('private', ['private'])).toEqual({ via: 'self', folder: 'private' });
+		expect(folderPrivacy('private/x', ['/private/'])).toEqual({ via: 'parent', folder: 'private' });
+		expect(folderPrivacy('work', ['private'])).toBeNull();
+		expect(isHidden({ id: 'work/a.md', aiLocal: true }, [])).toBe(true);
+		expect(isHidden({ id: 'private/x/a.md' }, ['private'])).toBe(true);
+		expect(isHidden({ id: 'a.md' }, ['private'])).toBe(false);
 	});
 });
 

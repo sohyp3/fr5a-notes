@@ -40,6 +40,9 @@
 	let toastTimer: ReturnType<typeof setTimeout> | null = null;
 	let suggestIndex = $state(0);
 	let actMenu = $state<{ at: { x: number; y: number }; entry: Entry; last: boolean } | null>(null);
+	let sessionBtn = $state<HTMLButtonElement | null>(null);
+	let sessionMenu = $state<{ x: number; y: number } | null>(null);
+	let saving = $state(false);
 
 	// The default (OpenCode Zen) and other cloud providers need a key; say so up front.
 	let keyMissing = $state(false);
@@ -283,6 +286,85 @@
 		return items;
 	});
 
+	// --- session menu: save to notes, fork ----------------------------------------
+
+	const savedNote = $derived(
+		tab?.session.saved ? app.notes.find((n) => n.id === tab.session.saved) : undefined
+	);
+	const chatsFolder = $derived(ai.config.chatsFolder?.trim() || 'top level');
+	const hiddenCount = $derived(app.notes.filter((n) => app.hiddenFromAi(n)).length);
+
+	async function saveChat(asNew = false): Promise<void> {
+		if (saving) return;
+		saving = true;
+		try {
+			const msg = await h.saveToNotes(tab, asNew);
+			if (msg) flash(msg);
+		} catch (err) {
+			flash(err instanceof Error ? err.message : String(err));
+		} finally {
+			saving = false;
+		}
+	}
+
+	function forkChat(): void {
+		h.fork(tab);
+		flash('Forked — the original is unchanged');
+	}
+
+	function openSessionMenu(): void {
+		if (sessionMenu) {
+			sessionMenu = null;
+			return;
+		}
+		const r = sessionBtn!.getBoundingClientRect();
+		sessionMenu = { x: r.right - 220, y: r.bottom + 4 };
+	}
+
+	const sessionItems = $derived.by((): MenuItem[] => {
+		const empty = !tab?.entries.some((e) => e.kind === 'ai' || e.kind === 'you');
+		const busy = !!tab?.running || saving;
+		const items: MenuItem[] = savedNote
+			? [
+					{
+						label: 'Update saved note',
+						icon: 'save',
+						hint:
+							savedNote.title.length > 22 ? `${savedNote.title.slice(0, 21)}…` : savedNote.title,
+						disabled: empty || busy,
+						action: () => void saveChat()
+					},
+					{
+						label: 'Save as new note',
+						icon: 'note',
+						disabled: empty || busy,
+						action: () => void saveChat(true)
+					},
+					{
+						label: 'Open saved note',
+						icon: 'eye',
+						action: () => void app.openNote(savedNote.id)
+					}
+				]
+			: [
+					{
+						label: 'Save to notes',
+						icon: 'save',
+						hint: `${chatsFolder}/`,
+						disabled: empty || busy,
+						action: () => void saveChat()
+					}
+				];
+		items.push({
+			label: 'Fork conversation',
+			icon: 'fork',
+			divider: true,
+			disabled: empty || !!tab?.running,
+			action: forkChat
+		});
+		return items;
+	});
+
 	async function deleteSession(file: string): Promise<void> {
 		confirmDelete = null;
 		try {
@@ -330,6 +412,18 @@
 			onclick={openHistory}
 		>
 			<Icon name="history" size={16} />
+		</button>
+		<button
+			bind:this={sessionBtn}
+			class="icon"
+			class:on={!!sessionMenu}
+			title="Save to notes, fork"
+			aria-label="Session actions"
+			aria-haspopup="menu"
+			aria-expanded={!!sessionMenu}
+			onclick={openSessionMenu}
+		>
+			<Icon name="more" size={16} />
 		</button>
 		<button
 			class="icon"
@@ -389,7 +483,8 @@
 						</div>
 					{:else}
 						<p class="muted pad">
-							No saved sessions yet. Each chat is saved to <code>.fr5a/sessions/</code>.
+							No sessions yet. Every chat is kept in <code>.fr5a/sessions/</code>; use ⋯ → Save to
+							notes to put one in your notes.
 						</p>
 					{/each}
 				{/if}
@@ -489,8 +584,15 @@
 					</div>
 					{#if provider && !provider.local}
 						<p class="privacy">
-							Notes go to <strong>{provider.name}</strong>. Local-only folders and
-							<code>&lt;!-- ai: local --&gt;</code> notes are held back.
+							<strong>{provider.name}</strong> is a cloud provider. {hiddenCount
+								? `${hiddenCount} ${hiddenCount === 1 ? 'note is' : 'notes are'} hidden from cloud AI and never sent.`
+								: 'No notes are hidden from cloud AI.'}
+							<button class="link" onclick={() => app.openSettings('ai')}>Manage…</button>
+						</p>
+					{:else if provider}
+						<p class="privacy">
+							<strong>{provider.name}</strong> runs on your hardware: it may read every note, including
+							ones hidden from cloud AI.
 						</p>
 					{/if}
 				</div>
@@ -722,6 +824,18 @@
 			{toast}
 		</div>{/if}
 </section>
+
+{#if sessionMenu}
+	<ActionMenu
+		items={sessionItems}
+		at={sessionMenu}
+		sheet={phone}
+		title={tab?.title ?? 'Session'}
+		label="Session actions"
+		trigger={sessionBtn}
+		onclose={() => (sessionMenu = null)}
+	/>
+{/if}
 
 {#if actMenu}
 	<ActionMenu

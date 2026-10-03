@@ -7,7 +7,7 @@ export interface ProviderProfile {
 	/** e.g. https://api.deepseek.com/v1 or http://10.8.0.1:11434/v1 */
 	baseUrl: string;
 	model: string;
-	/** Runs on hardware you control (localhost / VPN). Only these may see local-only notes. */
+	/** Runs on hardware you control (localhost / VPN). Only these may read notes hidden from cloud AI. */
 	local: boolean;
 	/** Model supports OpenAI tool calling; off = plain chat, no tools. */
 	tools: boolean;
@@ -39,6 +39,8 @@ export interface AiConfig {
 	search: SearchProfile | null;
 	/** Workspace-relative folders whose notes only go to `local` providers. */
 	localOnlyFolders: string[];
+	/** Workspace folder "Save to notes" puts chats in ('' = top level). */
+	chatsFolder: string;
 	/** Max model round-trips per run (tool calls each cost one). */
 	maxSteps: number;
 }
@@ -95,6 +97,7 @@ export const DEFAULT_AI_CONFIG: AiConfig = {
 	defaultProvider: OPENCODE_ZEN.id,
 	search: null,
 	localOnlyFolders: [],
+	chatsFolder: 'AI chats',
 	maxSteps: 8
 };
 

@@ -28,7 +28,9 @@ import {
 	syncOrder,
 	withNestedIgnored
 } from '../../../../shared/multiSync';
+import { folderMoveError, noteExt, noteMoveError } from '../../../../shared/paths';
 import type { PlatformApi } from './types';
+import { noteSnippet } from '../../../../shared/snippet';
 
 /**
  * Android host (Capacitor). Notes live in `notes/` under app-private storage
@@ -78,6 +80,7 @@ function isNote(p: string): boolean {
 }
 
 const LOCKED_RE = /^\s*<!--\s*locked:\s*true\s*-->\s*$/im;
+const AI_LOCAL_RE = /^\s*<!--\s*ai:\s*local\s*-->\s*$/im;
 
 /** Normalise a caller-supplied folder to a safe, workspace-relative path. */
 export function safeSubdir(folder: string): string {
@@ -106,13 +109,9 @@ export function buildMeta(id: string, absPath: string, raw: string, mtime: numbe
 		break;
 	}
 	if (!title) title = basename(id, extname(id));
-	const snippet = body
-		.replace(/^#{1,6}\s.*$/m, '')
-		.replace(/[#>*_`~-]/g, '')
-		.replace(/\s+/g, ' ')
-		.trim()
-		.slice(0, 140);
-	return { id, absPath, title, snippet, mtime, tags: parseTags(body), pinned, locked };
+	const snippet = noteSnippet(body);
+	const aiLocal = AI_LOCAL_RE.test(raw);
+	return { id, absPath, title, snippet, mtime, tags: parseTags(body), pinned, locked, aiLocal };
 }
 
 function sortNotes(notes: NoteMeta[]): NoteMeta[] {
@@ -458,6 +457,43 @@ export function createAndroidPlatform(): PlatformApi {
 		async deleteNote(id) {
 			await ready;
 			await trash(id);
+		},
+		async moveNote(id, to) {
+			await ready;
+			const from = safeSubdir(id);
+			let dest = safeSubdir(to);
+			if (dest && !noteExt(dest)) dest += noteExt(from) || '.md';
+			const err = noteMoveError(from, dest);
+			if (err) throw new Error(err);
+			if (dest === from) return from;
+			dest = await uniqueId(dest);
+			await ensureDir(dirname(dest));
+			await Filesystem.rename({ from: rel(from), to: rel(dest), directory: DIR, toDirectory: DIR });
+			index.delete(from);
+			await reindexFile(dest);
+			emitChange();
+			return dest;
+		},
+		async moveFolder(path, to) {
+			await ready;
+			const from = safeSubdir(path);
+			const dest = safeSubdir(to);
+			if (dest === from) return from;
+			const err = folderMoveError(from, dest);
+			if (err) throw new Error(err);
+			if (await exists(dest)) throw new Error(`“${dest}” already exists.`);
+			// A nested repo's sync setup (token, .gitignore entry) is tied to its path.
+			const repos = await nestedRepos();
+			if (
+				repos.some((r) => r === from || r.startsWith(`${from}/`)) ||
+				(await exists(join(from, '.git')))
+			)
+				throw new Error(`“${from}” has its own git repo — remove it from Sync first.`);
+			await ensureDir(dirname(dest));
+			await Filesystem.rename({ from: rel(from), to: rel(dest), directory: DIR, toDirectory: DIR });
+			await rebuild();
+			emitChange();
+			return dest;
 		},
 
 		async listFolders() {

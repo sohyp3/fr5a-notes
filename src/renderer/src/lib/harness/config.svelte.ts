@@ -1,5 +1,5 @@
 import { platform } from '../platform';
-import { listModels } from './openai';
+import { remapPath } from '../../../../shared/paths';
 import {
 	BUILTIN_PROVIDERS,
 	DEFAULT_AI_CONFIG,
@@ -45,6 +45,8 @@ class AiSettings {
 		const p = this.config.providers.find((x) => x.id === id);
 		if (!p) return;
 		try {
+			// Loaded on demand: the rest of the app reads this config without the client.
+			const { listModels } = await import('./openai');
 			const ids = await listModels(platform, p, await this.apiKey(id));
 			this.models = { ...this.models, [id]: ids };
 			const { [id]: _drop, ...rest } = this.modelErrors;
@@ -66,6 +68,21 @@ class AiSettings {
 	update(patch: Partial<AiConfig>): void {
 		this.config = { ...this.config, ...patch };
 		void platform.setState('ai', $state.snapshot(this.config));
+	}
+
+	/** Hide folder `dir` (and everything below it) from cloud AI, or stop hiding it. */
+	setFolderHidden(dir: string, hidden: boolean): void {
+		const rest = this.config.localOnlyFolders.filter((f) => f !== dir);
+		this.update({ localOnlyFolders: (hidden ? [...rest, dir] : rest).sort() });
+	}
+
+	/** A folder moved / was renamed: its privacy goes with it. */
+	async folderMoved(from: string, to: string): Promise<void> {
+		await this.load();
+		const cur = this.config.localOnlyFolders;
+		const next = cur.map((f) => remapPath(f, from, to) ?? f);
+		if (next.some((f, i) => f !== cur[i]))
+			this.update({ localOnlyFolders: next.filter((f, i) => next.indexOf(f) === i).sort() });
 	}
 
 	provider(id: string | null | undefined): ProviderProfile | null {

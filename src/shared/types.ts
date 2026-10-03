@@ -17,6 +17,8 @@ export interface NoteMeta {
 	pinned: boolean;
 	/** Locked notes are read-only and can't be deleted until unlocked. */
 	locked: boolean;
+	/** Carries `<!-- ai: local -->`: only local AI providers may read it. */
+	aiLocal: boolean;
 }
 
 export interface TagNode {
@@ -144,6 +146,9 @@ export const Channels = {
 	noteWrite: 'note:write',
 	noteCreate: 'note:create',
 	noteDelete: 'note:delete',
+	/** Move / rename a note or a folder inside the workspace. */
+	noteMove: 'note:move',
+	folderMove: 'folder:move',
 	tagsList: 'tags:list',
 	// Folders: the workspace's sub-directories (incl. empty ones), and creation.
 	foldersList: 'folders:list',

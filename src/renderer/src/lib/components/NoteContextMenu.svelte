@@ -1,11 +1,24 @@
 <script lang="ts">
 	import { getAppState } from '../stores/app.svelte';
 	import ActionMenu, { type MenuItem } from './ActionMenu.svelte';
+	import type { NoteMeta } from '../../../../shared/types';
 
 	const app = getAppState();
 
 	// The open menu, or null. Reading it here keeps everything below reactive.
 	const menu = $derived(app.contextMenu);
+
+	/** Hide from / show to cloud AI. A folder-wide setting can't be lifted per note. */
+	function hideItem(n: NoteMeta): MenuItem {
+		const viaFolder = !n.aiLocal && app.hiddenFromAi(n);
+		return {
+			label: n.aiLocal || viaFolder ? 'Let cloud AI read' : 'Hide from cloud AI',
+			icon: 'shield',
+			disabled: viaFolder,
+			hint: viaFolder ? 'folder' : undefined,
+			action: () => void app.setHiddenFromAi(n.id, !n.aiLocal)
+		};
+	}
 
 	const items = $derived.by((): MenuItem[] => {
 		if (!menu) return [];
@@ -37,9 +50,12 @@
 				icon: n.locked ? 'unlock' : 'lock',
 				action: () => void app.toggleLock(n.id)
 			},
+			{ label: 'Rename…', icon: 'rename', action: () => void app.renameNote(n.id) },
+			{ label: 'Move to…', icon: 'move', action: () => app.openMove('note', n.id) },
 			...(app.changeFor(n.id)
 				? [{ label: 'Show changes', icon: 'diff', action: () => app.showChanges(n.id) } as MenuItem]
 				: []),
+			...(app.settings.ai ? [hideItem(n)] : []),
 			{
 				label: 'Move to Trash',
 				icon: 'trash',

@@ -2,6 +2,7 @@
 	import { Spring } from 'svelte/motion';
 	import { getAppState } from '../stores/app.svelte';
 	import { haptic, reducedMotion } from '../portal';
+	import { endDrag, startDrag } from '../dnd';
 	import Icon from './Icon.svelte';
 	import type { NoteMeta } from '../../../../shared/types';
 
@@ -26,6 +27,7 @@
 	const side = $derived(offset.current > 0.5 ? 'right' : offset.current < -0.5 ? 'left' : null);
 	// The left action can't trash a locked note: it only says so.
 	const leftLocked = $derived(!trash && note.locked);
+	const hidden = $derived(!trash && app.hiddenFromAi(note));
 
 	/** Past the open position the card resists, asymptotically. */
 	function band(x: number): number {
@@ -352,6 +354,9 @@
 		style:transform="translateX({offset.current}px)"
 		onclick={onClick}
 		oncontextmenu={onContextMenu}
+		draggable={!app.touch && !trash}
+		ondragstart={(e) => startDrag(e, { kind: 'note', path: note.id })}
+		ondragend={endDrag}
 		onpointerdown={onPointerDown}
 		onpointermove={onPointerMove}
 		onpointerup={onPointerUp}
@@ -361,6 +366,12 @@
 			<span class="title">
 				{#if note.pinned && !trash}<span class="pindot" title="Pinned">📌</span>{/if}
 				{#if note.locked && !trash}<span class="pindot" title="Locked">🔒</span>{/if}
+				{#if hidden}<span
+						class="shield"
+						role="img"
+						title="Hidden from cloud AI — only local providers can read it"
+						aria-label="Hidden from cloud AI"><Icon name="shield" size={11} stroke={2} /></span
+					>{/if}
 				{note.title}
 			</span>
 			<span class="time">{relTime(note.mtime)}</span>
@@ -470,6 +481,12 @@
 	.pindot {
 		font-size: 11px;
 		margin-right: 2px;
+	}
+	.shield {
+		display: inline-grid;
+		vertical-align: -1px;
+		margin-right: 3px;
+		color: var(--text-muted);
 	}
 	.time {
 		flex: 0 0 auto;

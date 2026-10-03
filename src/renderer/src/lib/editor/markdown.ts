@@ -160,3 +160,31 @@ export function setLocked(text: string, locked: boolean): string {
 	lines.splice(insertAt, 0, comment);
 	return lines.join('\n');
 }
+
+// --- AI privacy ---------------------------------------------------------------
+
+/** Matches the AI privacy line `<!-- ai: local -->` (only local providers may read the note). */
+export const AI_LOCAL_COMMENT_RE = /^<!--\s*ai:\s*local\s*-->$/i;
+
+/**
+ * Return `text` with its `ai: local` marker set or dropped. Added below any
+ * leading dir / pinned / locked metadata, like the lock.
+ */
+export function setAiLocal(text: string, on: boolean): string {
+	const lines = text.split('\n');
+	const idx = lines.findIndex((l) => AI_LOCAL_COMMENT_RE.test(l.trim()));
+	if (!on) {
+		if (idx !== -1) lines.splice(idx, 1);
+		return lines.join('\n');
+	}
+	if (idx !== -1) return text;
+	let insertAt = 0;
+	while (
+		insertAt < lines.length &&
+		[DIR_COMMENT_RE, PIN_COMMENT_RE, LOCK_COMMENT_RE].some((re) => re.test(lines[insertAt].trim()))
+	) {
+		insertAt++;
+	}
+	lines.splice(insertAt, 0, '<!-- ai: local -->');
+	return lines.join('\n');
+}

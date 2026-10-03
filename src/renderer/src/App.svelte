@@ -11,6 +11,10 @@
 	import CheatSheet from './lib/components/CheatSheet.svelte';
 	import NoteContextMenu from './lib/components/NoteContextMenu.svelte';
 	import ConfirmDialog from './lib/components/ConfirmDialog.svelte';
+	import FolderContextMenu from './lib/components/FolderContextMenu.svelte';
+	import PromptDialog from './lib/components/PromptDialog.svelte';
+	import MoveDialog from './lib/components/MoveDialog.svelte';
+	import Notice from './lib/components/Notice.svelte';
 	import ConflictWindow from './lib/components/ConflictWindow.svelte';
 	import Resizer from './lib/components/Resizer.svelte';
 	import { platform } from './lib/platform';
@@ -41,14 +45,33 @@
 	// In Zen mode the sidebar and note list animate away, centring the editor.
 	const showSidebar = $derived(app.sidebarOpen && !app.zen);
 	const showList = $derived(app.listOpen && !app.zen);
+
+	let winW = $state(window.innerWidth);
+	/**
+	 * Desktop widths actually used. With the AI pane open on a narrow window (a
+	 * landscape tablet) the editor keeps EDITOR_MIN: the sidebar steps aside
+	 * first, then the AI pane narrows toward its minimum, then the list steps
+	 * aside. Nothing is persisted — closing the AI pane brings them back.
+	 */
+	const fit = $derived.by(() => {
+		let side = showSidebar ? app.widths.sidebar : 0;
+		let list = showList ? app.widths.list : 0;
+		let ai = app.widths.harness;
+		if (!desktop || !app.harnessOpen) return { side, list, ai };
+		const room = winW - EDITOR_MIN - 40;
+		if (side + list + ai > room) side = 0;
+		if (list + ai > room) ai = Math.max(PANE_WIDTHS.harness.min, room - list);
+		if (list + ai > room) list = 0;
+		return { side, list, ai };
+	});
 	const overlay = $derived(app.view !== 'editor');
 
 	// Which panes are on screen for the current layout. Every pane stays mounted
 	// across layouts (only CSS changes), so rotating keeps the editor + caret.
 	const sidebarShown = $derived(
-		desktop ? showSidebar : tablet ? app.drawerOpen : app.pane === 'nav'
+		desktop ? fit.side > 0 : tablet ? app.drawerOpen : app.pane === 'nav'
 	);
-	const listShown = $derived(phone ? app.pane === 'list' : showList);
+	const listShown = $derived(phone ? app.pane === 'list' : fit.list > 0);
 	const editorShown = $derived(phone ? app.pane === 'editor' : true);
 	const harnessShown = $derived(phone ? app.pane === 'harness' : app.harnessOpen);
 
@@ -66,9 +89,9 @@
 		if (app.resizing) void spring.set(w, { instant: true });
 		else spring.target = w;
 	}
-	$effect(() => follow(sidebarWidth, showSidebar ? app.widths.sidebar : 0));
-	$effect(() => follow(listWidth, showList ? app.widths.list : 0));
-	$effect(() => follow(harnessWidth, app.harnessOpen ? app.widths.harness : 0));
+	$effect(() => follow(sidebarWidth, fit.side));
+	$effect(() => follow(listWidth, fit.list));
+	$effect(() => follow(harnessWidth, app.harnessOpen ? fit.ai : 0));
 
 	/** Resize one pane, keeping at least EDITOR_MIN for the editor. */
 	function resize(pane: PaneName, px: number): void {
@@ -178,6 +201,7 @@
 		const coarse = matchMedia('(pointer: coarse)');
 		const update = () => {
 			const touch = platform.platform === 'android' || coarse.matches;
+			winW = window.innerWidth;
 			app.setLayout(layoutFor(window.innerWidth, touch), touch);
 		};
 		update();
@@ -221,7 +245,7 @@
 			>
 				<Sidebar />
 			</div>
-			{#if desktop && showSidebar}
+			{#if desktop && fit.side > 0}
 				<Resizer
 					value={app.widths.sidebar}
 					min={PANE_WIDTHS.sidebar.min}
@@ -249,7 +273,7 @@
 				>
 					<NoteList />
 				</div>
-				{#if !phone && showList}
+				{#if !phone && fit.list > 0}
 					<Resizer
 						value={app.widths.list}
 						min={PANE_WIDTHS.list.min}
@@ -348,7 +372,11 @@
 	{/if}
 
 	<NoteContextMenu />
+	<FolderContextMenu />
+	<MoveDialog />
+	<PromptDialog />
 	<ConfirmDialog />
+	<Notice />
 
 	{#if app.conflictOpen}
 		<!-- Same resolver the desktop opens as a second window; closes on sync done. -->

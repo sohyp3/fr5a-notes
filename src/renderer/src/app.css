@@ -76,6 +76,8 @@
 	--del-bg: rgba(192, 69, 59, 0.09);
 	--del-fg: #a83a31;
 	--del-strike: rgba(168, 58, 49, 0.4);
+	--table-line: rgba(0, 0, 0, 0.11);
+	--table-head: rgba(0, 0, 0, 0.035);
 }
 
 /* ---- dark ---- */
@@ -111,6 +113,8 @@
 	--del-bg: rgba(240, 103, 92, 0.12);
 	--del-fg: #f2958c;
 	--del-strike: rgba(242, 149, 140, 0.45);
+	--table-line: rgba(255, 255, 255, 0.13);
+	--table-head: rgba(255, 255, 255, 0.045);
 }
 
 /* Follow OS theme until the user explicitly overrides via the toggle. */
@@ -327,6 +331,92 @@ button {
 	color: var(--accent);
 	font-weight: 600;
 	font-variant-numeric: tabular-nums;
+}
+
+/* --- tables (GFM pipe tables) ---
+   Outside the caret a table is a rendered <table> widget (.md-table) and its
+   lines are hidden; with the caret inside, the lines show as source. */
+.ProseMirror p.md-trow-hidden {
+	display: none;
+}
+.md-table {
+	margin: 0.6em 0;
+	overflow-x: auto;
+	font-size: 0.92em;
+	line-height: 1.5;
+	-webkit-user-select: text;
+	user-select: text;
+}
+.md-table table {
+	border-collapse: collapse;
+}
+.md-table th,
+.md-table td {
+	padding: 0.42em 0.8em;
+	border: 1px solid var(--table-line);
+	text-align: start;
+	vertical-align: top;
+	min-width: 3em;
+}
+.md-table th {
+	background: var(--table-head);
+	font-weight: 600;
+	color: var(--text-strong);
+}
+.md-table thead tr {
+	border-bottom: 2px solid var(--table-line);
+}
+.ProseMirror[contenteditable='true'] .md-table td,
+.ProseMirror[contenteditable='true'] .md-table th {
+	cursor: text;
+}
+.md-table strong {
+	font-weight: 700;
+	color: var(--text-strong);
+}
+.md-table del {
+	color: var(--text-muted);
+}
+.md-table code {
+	font-family: var(--font-mono);
+	font-size: 0.88em;
+	background: var(--code-bg);
+	padding: 0.1em 0.32em;
+	border-radius: 4px;
+}
+.md-table .md-link {
+	color: var(--accent);
+}
+
+/* Source mode: the lines as a tinted monospace block. */
+.ProseMirror p.md-trow {
+	margin: 0;
+	padding: 0 0.7em;
+	font-family: var(--font-mono);
+	font-size: 0.84em;
+	line-height: 1.75;
+	background: var(--code-bg);
+}
+.ProseMirror p.md-trow-first {
+	margin-top: 0.5em;
+	padding-top: 0.35em;
+	border-radius: 8px 8px 0 0;
+}
+.ProseMirror p.md-trow-last {
+	margin-bottom: 0.5em;
+	padding-bottom: 0.35em;
+	border-radius: 0 0 8px 8px;
+}
+.ProseMirror p.md-trow-head {
+	font-weight: 600;
+	color: var(--text-strong);
+}
+.md-tpipe {
+	color: var(--md-syntax);
+	opacity: 0.7;
+}
+.md-tsep-text {
+	color: var(--text-faint);
 }
 
 /* Tags rendered inside the note body. */

@@ -20,7 +20,8 @@ export class NoteIndex {
 				snippet TEXT NOT NULL,
 				mtime   INTEGER NOT NULL,
 				pinned  INTEGER NOT NULL DEFAULT 0,
-				locked  INTEGER NOT NULL DEFAULT 0
+				locked  INTEGER NOT NULL DEFAULT 0,
+				aiLocal INTEGER NOT NULL DEFAULT 0
 			);
 			CREATE TABLE IF NOT EXISTS tags (
 				note_id TEXT NOT NULL,
@@ -29,10 +30,12 @@ export class NoteIndex {
 			);
 			CREATE INDEX IF NOT EXISTS idx_tags_tag ON tags(tag);
 		`);
-		// Migrate older index files that predate the `locked` column.
+		// Migrate older index files that predate the `locked` / `aiLocal` columns.
 		const cols = this.db.prepare('PRAGMA table_info(notes)').all() as { name: string }[];
-		if (!cols.some((c) => c.name === 'locked')) {
-			this.db.exec('ALTER TABLE notes ADD COLUMN locked INTEGER NOT NULL DEFAULT 0');
+		for (const col of ['locked', 'aiLocal']) {
+			if (!cols.some((c) => c.name === col)) {
+				this.db.exec(`ALTER TABLE notes ADD COLUMN ${col} INTEGER NOT NULL DEFAULT 0`);
+			}
 		}
 	}
 
@@ -41,15 +44,16 @@ export class NoteIndex {
 		const tx = this.db.transaction((m: NoteMeta) => {
 			this.db
 				.prepare(
-					`INSERT INTO notes (id, absPath, title, snippet, mtime, pinned, locked)
-					 VALUES (@id, @absPath, @title, @snippet, @mtime, @pinned, @locked)
+					`INSERT INTO notes (id, absPath, title, snippet, mtime, pinned, locked, aiLocal)
+					 VALUES (@id, @absPath, @title, @snippet, @mtime, @pinned, @locked, @aiLocal)
 					 ON CONFLICT(id) DO UPDATE SET
 					   absPath = excluded.absPath,
 					   title   = excluded.title,
 					   snippet = excluded.snippet,
 					   mtime   = excluded.mtime,
 					   pinned  = excluded.pinned,
-					   locked  = excluded.locked`
+					   locked  = excluded.locked,
+					   aiLocal = excluded.aiLocal`
 				)
 				.run({
 					id: m.id,
@@ -58,7 +62,8 @@ export class NoteIndex {
 					snippet: m.snippet,
 					mtime: m.mtime,
 					pinned: m.pinned ? 1 : 0,
-					locked: m.locked ? 1 : 0
+					locked: m.locked ? 1 : 0,
+					aiLocal: m.aiLocal ? 1 : 0
 				});
 			this.db.prepare('DELETE FROM tags WHERE note_id = ?').run(m.id);
 			const insTag = this.db.prepare('INSERT OR IGNORE INTO tags (note_id, tag) VALUES (?, ?)');
@@ -75,6 +80,14 @@ export class NoteIndex {
 		tx(id);
 	}
 
+	/** Drop every note inside folder `dir` (a moved / renamed folder). */
+	removeUnder(dir: string): void {
+		const ids = this.db
+			.prepare('SELECT id FROM notes WHERE substr(id, 1, ?) = ?')
+			.all(dir.length + 1, `${dir}/`) as { id: string }[];
+		for (const { id } of ids) this.remove(id);
+	}
+
 	/** Wipe everything — used when switching workspaces. */
 	clear(): void {
 		this.db.exec('DELETE FROM tags; DELETE FROM notes;');
@@ -84,17 +97,19 @@ export class NoteIndex {
 		// Pinned notes first, then most-recently-modified.
 		const rows = this.db
 			.prepare(
-				'SELECT id, absPath, title, snippet, mtime, pinned, locked FROM notes ORDER BY pinned DESC, mtime DESC'
+				'SELECT id, absPath, title, snippet, mtime, pinned, locked, aiLocal FROM notes ORDER BY pinned DESC, mtime DESC'
 			)
-			.all() as (Omit<NoteMeta, 'tags' | 'pinned' | 'locked'> & {
+			.all() as (Omit<NoteMeta, 'tags' | 'pinned' | 'locked' | 'aiLocal'> & {
 			pinned: number;
 			locked: number;
+			aiLocal: number;
 		})[];
 		const tagStmt = this.db.prepare('SELECT tag FROM tags WHERE note_id = ?');
 		return rows.map((r) => ({
 			...r,
 			pinned: r.pinned === 1,
 			locked: r.locked === 1,
+			aiLocal: r.aiLocal === 1,
 			tags: (tagStmt.all(r.id) as { tag: string }[]).map((t) => t.tag)
 		}));
 	}

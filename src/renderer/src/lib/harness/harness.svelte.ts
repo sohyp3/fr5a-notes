@@ -9,14 +9,19 @@ import { AbortError, ProviderError, chatCompletion } from './openai';
 import { blockedReason } from './privacy';
 import { prepareWrite, type PreparedWrite } from './apply';
 import {
+	forkTitle,
+	hashText,
+	notesRead,
 	parseSession,
 	serializeSession,
 	sessionFileName,
+	sessionToNote,
 	SESSIONS_DIR,
 	turnsToMessages,
 	type Session,
 	type Turn
 } from './session';
+import { cleanFolder, cleanName, remapPath } from '../../../../shared/paths';
 import {
 	BUILTIN_SKILLS,
 	SEEDED_MARKER,
@@ -27,7 +32,7 @@ import {
 	type Skill
 } from './skills';
 import { createTools, type WriteProposal } from './tools';
-import { expandMentions, mentionKey, parseMentions } from './mentions';
+import { expandMentions, mentionKey, parseMentions, remapKey } from './mentions';
 import { fetchPage, webSearch } from './web';
 import type { QuestionItem } from './questions';
 import { OPENCODE_ZEN, ZEN_KEY_URL, type ChatMessage, type ProviderProfile } from './types';
@@ -189,11 +194,16 @@ export class HarnessTab {
 	}
 }
 
+/** Now, as stored in a session's `created`. */
+function stamp(): string {
+	return new Date().toISOString();
+}
+
 function newSession(title = 'New session'): Session {
 	return {
 		file: sessionFileName(title),
 		title,
-		created: new Date().toISOString(),
+		created: stamp(),
 		provider: '',
 		skill: '',
 		notes: [],
@@ -233,6 +243,17 @@ class HarnessState {
 
 	async init(): Promise<void> {
 		if (this.ready) return;
+		// Attachments and saved-chat links follow notes / folders that move.
+		getAppState().onMoved((from, to) => {
+			for (const t of this.tabs) {
+				t.attached = t.attached.map((k) => remapKey(k, from, to));
+				const saved = t.session.saved && remapPath(t.session.saved, from, to);
+				if (saved) {
+					t.session.saved = saved;
+					t.scheduleSave();
+				}
+			}
+		});
 		await getAiSettings().load();
 		await this.loadSkills().catch((err) => console.error('[harness] skills', err));
 		await this.refreshSessions();
@@ -273,6 +294,97 @@ class HarnessState {
 		this.tabs.splice(i, 1);
 		if (!this.tabs.length) this.newTab();
 		this.active = Math.min(this.active, this.tabs.length - 1);
+	}
+
+	/**
+	 * Copy a conversation into a new tab and continue there; the original
+	 * session stays as it was. The copy keeps the model history, so it picks
+	 * up exactly where the original stopped.
+	 */
+	fork(tab = this.tab): void {
+		if (!tab || tab.running || !tab.entries.length) return;
+		void tab.save();
+		const title = forkTitle(tab.session.title);
+		const source = $state.snapshot(tab.session);
+		const copy = new HarnessTab(
+			{
+				...source,
+				file: sessionFileName(title),
+				title,
+				created: stamp(),
+				turns: tab.turns(),
+				saved: undefined,
+				savedHash: undefined
+			},
+			// Plain JSON messages: a deep copy so the two tabs never share one.
+			JSON.parse(JSON.stringify(tab.history)) as ChatMessage[]
+		);
+		// Live entries keep what the files drop (diff cards, retry marks).
+		copy.entries = $state.snapshot(tab.entries) as Entry[];
+		copy.attached = [...tab.attached];
+		copy.useCurrent = tab.useCurrent;
+		copy.skill = tab.skill;
+		copy.providerId = tab.providerId;
+		this.tabs.splice(this.active + 1, 0, copy);
+		this.active += 1;
+		void copy.save().then(() => this.refreshSessions());
+	}
+
+	/**
+	 * Write the chat as a readable note in the workspace (Settings → AI →
+	 * saved chats folder), so it syncs with the notes. Saving again updates
+	 * that note — after asking, if it was edited since. Returns a status line.
+	 */
+	async saveToNotes(tab = this.tab, asNew = false): Promise<string> {
+		if (!tab) return '';
+		const app = getAppState();
+		const ai = getAiSettings();
+		const turns = tab.turns();
+		if (!turns.length) throw new Error('Nothing to save yet.');
+		await tab.save();
+		const session = { ...$state.snapshot(tab.session), turns };
+		const provider = this.providerFor(tab);
+		// A local-only chat that read notes hidden from cloud AI stays hidden.
+		const touched = [...session.notes, ...notesRead(turns)];
+		const local =
+			!!provider?.local &&
+			touched.some((id) => {
+				const n = app.notes.find((x) => x.id === id);
+				return !!n && app.hiddenFromAi(n);
+			});
+		const text = sessionToNote(session, {
+			provider: provider ? `${provider.name} (${provider.model})` : '',
+			local
+		});
+
+		const existing = asNew ? undefined : app.notes.find((n) => n.id === tab.session.saved);
+		let id: string;
+		if (existing) {
+			id = existing.id;
+			if (id === app.activeId) await app.flush();
+			const current = await platform.readNote(id);
+			if (current === text) return `${id} is up to date`;
+			if (tab.session.savedHash && hashText(current) !== tab.session.savedHash) {
+				const ok = await app.confirm({
+					title: 'Replace your edits?',
+					body: `“${existing.title}” was edited after the chat was saved. Updating it replaces those edits with the whole chat. Cancel, then “Save as new note” to keep both.`,
+					confirm: 'Replace',
+					danger: true
+				});
+				if (!ok) return '';
+			}
+			await platform.writeNote(id, text);
+			if (id === app.activeId) await app.reloadFromDisk();
+		} else {
+			const folder = cleanFolder(ai.config.chatsFolder ?? '');
+			const meta = await platform.createNote(cleanName(session.title) || 'AI chat', folder, text);
+			id = meta.id;
+		}
+		tab.session.saved = id;
+		tab.session.savedHash = hashText(text);
+		await tab.save();
+		await app.refresh();
+		return existing ? `Updated ${id}` : `Saved to ${id}`;
 	}
 
 	async openSession(file: string): Promise<void> {
@@ -366,7 +478,9 @@ class HarnessState {
 					ctx.omitted
 						? `${ctx.omitted} more notes listed but not inlined (the model can read them).`
 						: '',
-					skipped.length ? `${skipped.length} local-only notes left out for ${profile.name}.` : ''
+					skipped.length
+						? `${skipped.length} ${skipped.length === 1 ? 'note' : 'notes'} hidden from cloud AI left out for ${profile.name}.`
+						: ''
 				]
 					.filter(Boolean)
 					.join(' ')

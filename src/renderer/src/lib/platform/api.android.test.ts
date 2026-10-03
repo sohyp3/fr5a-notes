@@ -72,11 +72,25 @@ vi.mock('@capacitor/filesystem', () => {
 				if (!mem.files.delete(path)) return fail('File does not exist');
 			},
 			rename: async ({ from, to }: { from: string; to: string }) => {
-				const f = mem.files.get(from);
-				if (!f) return fail('File does not exist');
 				if (!mem.dirs.has(parent(to))) return fail('Parent directory missing');
-				mem.files.delete(from);
-				mem.files.set(to, f);
+				const f = mem.files.get(from);
+				if (f) {
+					mem.files.delete(from);
+					mem.files.set(to, f);
+					return;
+				}
+				if (!mem.dirs.has(from)) return fail('File does not exist');
+				// A directory moves with everything under it.
+				const moved = (p: string) =>
+					p === from || p.startsWith(`${from}/`) ? to + p.slice(from.length) : p;
+				for (const d of [...mem.dirs]) {
+					mem.dirs.delete(d);
+					mem.dirs.add(moved(d));
+				}
+				for (const [p, v] of [...mem.files]) {
+					mem.files.delete(p);
+					mem.files.set(moved(p), v);
+				}
 			}
 		}
 	};
@@ -249,6 +263,28 @@ describe('android platform', () => {
 		await api.deleteNote('d/n.md');
 		await api.permanentDelete('.fr5a_trash/d/n.md');
 		expect(await api.listTrash()).toEqual([]);
+	});
+
+	it('moves and renames notes and folders', async () => {
+		seed('work/a.md', '# A\n<!-- ai: local -->');
+		seed('work/deep/b.md', '# B');
+		seed('c.md', '# C');
+		const api = createAndroidPlatform();
+		expect((await api.listNotes()).find((n) => n.id === 'work/a.md')?.aiLocal).toBe(true);
+		expect(await api.moveNote('c.md', 'Renamed')).toBe('Renamed.md');
+		expect(await api.moveNote('Renamed.md', 'work/a.md')).toBe('work/a 2.md');
+		await expect(api.moveNote('work/a.md', '.fr5a/a.md')).rejects.toThrow('hidden');
+
+		expect(await api.moveFolder('work', 'archive/work')).toBe('archive/work');
+		expect((await api.listNotes()).map((n) => n.id).sort()).toEqual([
+			'archive/work/a 2.md',
+			'archive/work/a.md',
+			'archive/work/deep/b.md'
+		]);
+		expect(await api.readNote('archive/work/deep/b.md')).toBe('# B');
+		await expect(api.moveFolder('archive', 'archive/x')).rejects.toThrow('into itself');
+		await api.createFolder('taken');
+		await expect(api.moveFolder('archive', 'taken')).rejects.toThrow('already exists');
 	});
 
 	it('refuses to delete a locked note', async () => {

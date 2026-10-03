@@ -23,7 +23,8 @@ const note = (id: string, title: string): NoteMeta => ({
 	mtime: 0,
 	tags: [],
 	pinned: false,
-	locked: false
+	locked: false,
+	aiLocal: false
 });
 
 function deps(over: Partial<ToolDeps> = {}): ToolDeps {
@@ -121,7 +122,7 @@ describe('runLoop', () => {
 			complete: model.complete
 		});
 		const results = messages.filter((m) => m.role === 'tool').map((m) => m.content);
-		expect(results[0]).toMatch(/local-only/);
+		expect(results[0]).toMatch(/hidden from cloud AI/);
 		expect(results[1]).toMatch(/Unknown tool/);
 		expect(results[2]).toMatch(/Invalid JSON/);
 	});

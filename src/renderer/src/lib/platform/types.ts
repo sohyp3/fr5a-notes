@@ -34,6 +34,17 @@ export interface PlatformApi {
 	writeNote(id: string, content: string): Promise<void>;
 	createNote(title?: string, folder?: string, content?: string): Promise<NoteMeta>;
 	deleteNote(id: string): Promise<void>;
+	/**
+	 * Move / rename a note to workspace path `to` (its folder is created; the
+	 * extension is kept when `to` has none). A taken name gets a numeric
+	 * suffix. Returns the note's final id.
+	 */
+	moveNote(id: string, to: string): Promise<string>;
+	/**
+	 * Move / rename a folder and everything in it. Refused when `to` exists,
+	 * lies inside the folder, or the folder holds a nested git repo.
+	 */
+	moveFolder(path: string, to: string): Promise<string>;
 
 	listFolders(): Promise<string[]>;
 	createFolder(name: string, parent?: string): Promise<string>;

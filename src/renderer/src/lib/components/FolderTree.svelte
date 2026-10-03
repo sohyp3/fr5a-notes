@@ -2,6 +2,9 @@
 	import { slide } from 'svelte/transition';
 	import { getAppState } from '../stores/app.svelte';
 	import type { FolderNode } from '../folders';
+	import { dropFor, endDrag, startDrag } from '../dnd';
+	import { haptic } from '../portal';
+	import Icon from './Icon.svelte';
 	import Self from './FolderTree.svelte';
 
 	let { node, depth = 0 }: { node: FolderNode; depth?: number } = $props();
@@ -13,9 +16,109 @@
 
 	const hasChildren = $derived(node.children.length > 0);
 	const selected = $derived(app.selectedFolder === node.path);
+	const hidden = $derived(app.folderHidden(node.path));
+
+	// --- drop target (mouse drag of a note / folder) ---------------------------
+	let over = $state(false);
+	let expandTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function onDragOver(e: DragEvent): void {
+		if (!dropFor(e, node.path)) return;
+		e.preventDefault();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+		if (over) return;
+		over = true;
+		// Hovering a closed folder opens it, so a deeper target can be reached.
+		if (hasChildren && !expanded)
+			expandTimer = setTimeout(() => app.toggleFolderExpanded(node.path, depth), 650);
+	}
+
+	function onDragLeave(e: DragEvent): void {
+		if ((e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) return;
+		over = false;
+		if (expandTimer) clearTimeout(expandTimer);
+	}
+
+	function onDrop(e: DragEvent): void {
+		over = false;
+		if (expandTimer) clearTimeout(expandTimer);
+		const item = dropFor(e, node.path);
+		endDrag();
+		if (!item) return;
+		e.preventDefault();
+		if (item.kind === 'note') void app.moveNoteTo(item.path, node.path);
+		else void app.moveFolderTo(item.path, node.path);
+	}
+
+	// --- menu: right-click, long-press (touch), or the ⋯ button ----------------
+	const LONG_PRESS_MS = 500;
+	let press: { x: number; y: number; timer: ReturnType<typeof setTimeout> } | null = null;
+	let longPressed = false;
+
+	function openMenu(x: number, y: number): void {
+		app.folderMenu = { x, y, path: node.path };
+	}
+
+	function onPointerDown(e: PointerEvent): void {
+		longPressed = false;
+		if (e.pointerType === 'mouse') return;
+		const { clientX: x, clientY: y } = e;
+		press = {
+			x,
+			y,
+			timer: setTimeout(() => {
+				press = null;
+				longPressed = true;
+				haptic(8);
+				openMenu(x, y);
+			}, LONG_PRESS_MS)
+		};
+	}
+
+	function onPointerMove(e: PointerEvent): void {
+		if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 10) cancelPress();
+	}
+
+	function cancelPress(): void {
+		if (press) clearTimeout(press.timer);
+		press = null;
+	}
+
+	function onContextMenu(e: MouseEvent): void {
+		e.preventDefault();
+		if (!e.clientX && !e.clientY) {
+			// From the keyboard (Menu key / Shift+F10): hang it off the row.
+			const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+			openMenu(r.left + 24, r.bottom + 2);
+		} else if (press) {
+			// The browser's own long-press beat the timer: open once, at the finger.
+			const { x, y } = press;
+			cancelPress();
+			longPressed = true;
+			openMenu(x, y);
+		} else if (!longPressed) openMenu(e.clientX, e.clientY);
+	}
+
+	function onSelect(): void {
+		// The release of a long-press only opens the menu.
+		if (longPressed) {
+			longPressed = false;
+			return;
+		}
+		app.selectFolder(node.path);
+	}
 </script>
 
-<div class="folder-row" style="padding-left:{8 + depth * 14}px" class:selected>
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+	class="folder-row"
+	style="padding-left:{8 + depth * 14}px"
+	class:selected
+	class:over
+	ondragover={onDragOver}
+	ondragleave={onDragLeave}
+	ondrop={onDrop}
+>
 	<button
 		class="twist"
 		class:hidden={!hasChildren}
@@ -30,7 +133,18 @@
 		</svg>
 	</button>
 
-	<button class="label" onclick={() => app.selectFolder(node.path)}>
+	<button
+		class="label"
+		draggable={!app.touch}
+		onclick={onSelect}
+		oncontextmenu={onContextMenu}
+		onpointerdown={onPointerDown}
+		onpointermove={onPointerMove}
+		onpointerup={cancelPress}
+		onpointercancel={cancelPress}
+		ondragstart={(e) => startDrag(e, { kind: 'folder', path: node.path })}
+		ondragend={endDrag}
+	>
 		<svg class="ico" width="14" height="14" viewBox="0 0 24 24" fill="none">
 			<path
 				d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
@@ -40,8 +154,30 @@
 			/>
 		</svg>
 		<span class="name">{node.name}</span>
+		{#if hidden}
+			<span
+				class="shield"
+				class:inherited={hidden.via === 'parent'}
+				title={hidden.via === 'self'
+					? 'Hidden from cloud AI — only local providers can read these notes'
+					: `Hidden from cloud AI (inside “${hidden.folder || 'Everything'}”)`}
+				aria-hidden="true"><Icon name="shield" size={11} stroke={2} /></span
+			>
+		{/if}
 		<span class="count">{node.count}</span>
 	</button>
+	{#if !app.touch}
+		<button
+			class="more"
+			title="Folder actions"
+			aria-label="Folder actions for {node.name}"
+			aria-haspopup="menu"
+			onclick={(e) => {
+				const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+				openMenu(r.left, r.bottom + 4);
+			}}><Icon name="more" size={14} /></button
+		>
+	{/if}
 </div>
 
 {#if hasChildren && expanded}
@@ -54,6 +190,7 @@
 
 <style>
 	.folder-row {
+		position: relative;
 		display: flex;
 		align-items: center;
 		gap: 2px;
@@ -69,6 +206,10 @@
 	}
 	.folder-row.selected {
 		background: var(--accent-soft);
+	}
+	.folder-row.over {
+		background: var(--accent-soft);
+		box-shadow: inset 0 0 0 1.5px var(--accent);
 	}
 	.folder-row.selected .name,
 	.folder-row.selected .ico {
@@ -99,6 +240,9 @@
 		gap: 7px;
 		font-size: 13.5px;
 		min-width: 0;
+		/* Touch: long-press opens our menu, not the browser's text selection. */
+		-webkit-touch-callout: none;
+		user-select: none;
 	}
 	.ico {
 		flex: 0 0 auto;
@@ -109,10 +253,43 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
+	.shield {
+		flex: 0 0 auto;
+		display: grid;
+		margin-left: -2px;
+		color: var(--accent);
+	}
+	.shield.inherited {
+		color: var(--text-faint);
+	}
 	.count {
 		margin-left: auto;
 		font-size: 11px;
 		color: var(--text-faint);
 		font-variant-numeric: tabular-nums;
+	}
+	/* Mouse: the ⋯ button sits over the count, shown on hover / keyboard focus. */
+	.more {
+		position: absolute;
+		right: 4px;
+		top: 4px;
+		display: grid;
+		place-items: center;
+		width: 22px;
+		height: 22px;
+		border-radius: 6px;
+		color: var(--text-muted);
+		opacity: 0;
+	}
+	.more:hover,
+	.more:focus-visible {
+		background: var(--bg-active);
+	}
+	.folder-row:hover .more,
+	.more:focus-visible {
+		opacity: 1;
+	}
+	.folder-row:hover .count {
+		visibility: hidden;
 	}
 </style>

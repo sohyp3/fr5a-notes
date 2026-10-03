@@ -19,6 +19,7 @@
 	import { tick } from 'svelte';
 	import Icon from './Icon.svelte';
 	import { portal, reducedMotion } from '../portal';
+	import { getAppState } from '../stores/app.svelte';
 
 	interface Props {
 		items: MenuItem[];
@@ -81,11 +82,14 @@
 			if (el && !el.contains(t) && !trigger?.contains(t)) onclose();
 		};
 		const wheel = () => !sheet && onclose();
+		// Android back closes the menu (not the pane under it).
+		const undismiss = getAppState().onDismiss(() => onclose());
 		window.addEventListener('pointerdown', outside, true);
 		window.addEventListener('keydown', onKey, true);
 		window.addEventListener('resize', onclose);
 		window.addEventListener('wheel', wheel, true);
 		return () => {
+			undismiss();
 			window.removeEventListener('pointerdown', outside, true);
 			window.removeEventListener('keydown', onKey, true);
 			window.removeEventListener('resize', onclose);

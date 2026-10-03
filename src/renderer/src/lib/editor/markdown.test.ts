@@ -7,7 +7,8 @@ import {
 	detectPinned,
 	setPinned,
 	detectLocked,
-	setLocked
+	setLocked,
+	setAiLocal
 } from './markdown';
 
 describe('textToDoc', () => {
@@ -128,5 +129,15 @@ describe('locking metadata', () => {
 	it('is idempotent when already locked', () => {
 		const once = setLocked('# hi', true);
 		expect(setLocked(once, true)).toBe(once);
+	});
+});
+
+describe('AI privacy metadata', () => {
+	it('adds the marker below other metadata and removes it cleanly', () => {
+		const src = '<!-- dir: rtl -->\n<!-- locked: true -->\n# hi';
+		const on = setAiLocal(src, true);
+		expect(on).toBe('<!-- dir: rtl -->\n<!-- locked: true -->\n<!-- ai: local -->\n# hi');
+		expect(setAiLocal(on, true)).toBe(on);
+		expect(setAiLocal(on, false)).toBe(src);
 	});
 });

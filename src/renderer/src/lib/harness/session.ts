@@ -29,6 +29,10 @@ export interface Session {
 	/** Note ids attached as context. */
 	notes: string[];
 	turns: Turn[];
+	/** The workspace note this chat was saved to ("Save to notes"). */
+	saved?: string;
+	/** `hashText` of what was last written there, to notice edits made since. */
+	savedHash?: string;
 }
 
 const MARK_RE = /^<!-- turn: (you|ai|tool)(?: ([\w.-]+))? -->$/;
@@ -57,7 +61,9 @@ export function serializeSession(s: Session): string {
 		created: s.created,
 		provider: s.provider || undefined,
 		skill: s.skill || undefined,
-		notes: s.notes
+		notes: s.notes,
+		saved: s.saved || undefined,
+		savedHash: s.savedHash || undefined
 	});
 	const parts = s.turns.map((t) => {
 		const text =
@@ -91,8 +97,87 @@ export function parseSession(file: string, text: string): Session {
 		provider: str(data.provider),
 		skill: str(data.skill),
 		notes: list(data.notes),
-		turns
+		turns,
+		...(str(data.saved) ? { saved: str(data.saved), savedHash: str(data.savedHash) } : {})
 	};
+}
+
+/** Short, stable fingerprint of a text (FNV-1a), enough to notice a change. */
+export function hashText(text: string): string {
+	let h = 0x811c9dc5;
+	for (let i = 0; i < text.length; i++) {
+		h ^= text.charCodeAt(i);
+		h = Math.imul(h, 0x01000193);
+	}
+	return `${text.length.toString(36)}-${(h >>> 0).toString(36)}`;
+}
+
+/** Title for a copy of a session: "Plan (fork)", then "Plan (fork 2)", … */
+export function forkTitle(title: string): string {
+	const m = /^(.*) \(fork(?: (\d+))?\)$/.exec(title);
+	if (!m) return `${title} (fork)`;
+	return `${m[1]} (fork ${m[2] ? Number(m[2]) + 1 : 2})`;
+}
+
+/** Notes a conversation read with the read_note tool (from the recorded tool turns). */
+export function notesRead(turns: Turn[]): string[] {
+	const ids: string[] = [];
+	for (const t of turns) {
+		if (t.role !== 'tool' || t.tool !== 'read_note') continue;
+		const m = /^\{.*?\}/.exec(t.text);
+		try {
+			const id = m ? (JSON.parse(m[0]) as { id?: unknown }).id : null;
+			if (typeof id === 'string') ids.push(id);
+		} catch {
+			/* not the args line */
+		}
+	}
+	return ids;
+}
+
+/**
+ * A chat as a readable note for the workspace ("Save to notes"): title, a
+ * byline, then each question as a quote followed by the reply. Tool calls
+ * shrink to one line; `<!-- ai: local -->` keeps a chat about notes hidden
+ * from cloud AI hidden too.
+ */
+export function sessionToNote(
+	s: Session,
+	opts: { provider?: string; local?: boolean; date?: Date } = {}
+): string {
+	const date = opts.date ?? (s.created ? new Date(s.created) : new Date());
+	const pad = (n: number) => String(n).padStart(2, '0');
+	// The local day the chat started (created is stored in UTC).
+	const day = Number.isNaN(date.getTime())
+		? ''
+		: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+	const byline = ['AI chat', day, opts.provider, s.skill ? `/${s.skill}` : '']
+		.filter(Boolean)
+		.join(' · ');
+	const out: string[] = [];
+	if (opts.local) out.push('<!-- ai: local -->');
+	out.push(`# ${s.title}`, '', `*${byline}*`);
+	let tools: string[] = [];
+	const flushTools = () => {
+		if (tools.length) out.push('', `*Used ${[...new Set(tools)].join(', ')}*`);
+		tools = [];
+	};
+	s.turns.forEach((t, i) => {
+		if (t.role === 'tool') {
+			tools.push(t.tool ?? 'a tool');
+			return;
+		}
+		flushTools();
+		if (t.role === 'you') {
+			if (i > 0) out.push('', '---');
+			out.push(
+				'',
+				...t.text.split('\n').map((l, j) => (j === 0 ? `> **You:** ${l}` : `> ${l}`.trimEnd()))
+			);
+		} else out.push('', t.text.trim());
+	});
+	flushTools();
+	return `${out.join('\n')}\n`;
 }
 
 /**

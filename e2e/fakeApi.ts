@@ -22,8 +22,14 @@ export function installFakeApi(): void {
 			mtime: 1,
 			tags: [],
 			pinned: false,
-			locked: false
+			locked: false,
+			aiLocal: /^<!-- ai: local -->$/m.test(raw)
 		};
+	};
+	const folders = new Set(['Work']);
+	const parentDirs = (p: string) => {
+		const segs = p.split('/');
+		for (let i = 1; i < segs.length; i++) folders.add(segs.slice(0, i).join('/'));
 	};
 	const noop = () => () => {};
 	// AI harness: one local provider, in-memory state / secrets / `.fr5a/` files.
@@ -140,18 +146,56 @@ export function installFakeApi(): void {
 		pickWorkspace: async () => '/notes',
 		listNotes: async () => Object.keys(files).map(meta),
 		listTags: async () => [],
-		listFolders: async () => ['Work'],
+		listFolders: async () => [...folders].sort(),
 		listTrash: async () => Object.keys(trash).map(meta),
 		readNote: async (id: string) => files[id],
 		writeNote: async (id: string, content: string) => {
 			files[id] = content;
 			writes.push({ id, content });
 		},
-		createNote: async () => meta('hello.md'),
+		createNote: async (title?: string, folder = '', content?: string) => {
+			// Drafts in the existing tests only need some note back.
+			if (!title) return meta('hello.md');
+			let id = folder ? `${folder}/${title}.md` : `${title}.md`;
+			for (let n = 2; id in files; n++)
+				id = folder ? `${folder}/${title} ${n}.md` : `${title} ${n}.md`;
+			files[id] = content ?? `# ${title}\n\n`;
+			if (folder) parentDirs(`${folder}/x`);
+			return meta(id);
+		},
 		deleteNote: async (id: string) => {
 			trashed.push(id);
 		},
-		createFolder: async (name: string) => name,
+		createFolder: async (name: string, parent = '') => {
+			const rel = parent ? `${parent}/${name}` : name;
+			folders.add(rel);
+			return rel;
+		},
+		moveNote: async (id: string, to: string) => {
+			const dest = /\.md$/.test(to) ? to : `${to}.md`;
+			if (dest in files) throw new Error('taken');
+			files[dest] = files[id];
+			delete files[id];
+			parentDirs(dest);
+			return dest;
+		},
+		moveFolder: async (dir: string, to: string) => {
+			if (folders.has(to)) throw new Error(`“${to}” already exists.`);
+			const moved = (p: string) =>
+				p === dir || p.startsWith(`${dir}/`) ? to + p.slice(dir.length) : p;
+			for (const id of Object.keys(files)) {
+				const next = moved(id);
+				if (next === id) continue;
+				files[next] = files[id];
+				delete files[id];
+			}
+			for (const f of [...folders]) {
+				folders.delete(f);
+				folders.add(moved(f));
+			}
+			parentDirs(`${to}/x`);
+			return to;
+		},
 		restoreNote: async (id: string) => {
 			const to = id.replace('.fr5a_trash/', '');
 			files[to] = trash[id];

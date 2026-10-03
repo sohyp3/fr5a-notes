@@ -9,8 +9,19 @@ import type {
 } from '../../../../shared/types';
 import { uiStack, editorStack } from '../fonts';
 import { accentById, applyPalette, DEFAULT_ACCENT } from '../accents';
-import { setPinned, setLocked, titleFromContent } from '../editor/markdown';
+import { setPinned, setLocked, setAiLocal, titleFromContent } from '../editor/markdown';
 import { syncErrorMessage } from '../sync';
+import { getAiSettings } from '../harness/config.svelte';
+import { folderPrivacy, isHidden } from '../harness/privacy';
+import {
+	baseOf,
+	cleanName,
+	joinPath,
+	noteStem,
+	parentOf,
+	remapPath,
+	withNoteExt
+} from '../../../../shared/paths';
 import type { Layout } from '../layout';
 import type { Editor } from '@tiptap/core';
 
@@ -54,6 +65,23 @@ export interface ConfirmRequest {
 	confirm: string;
 	danger?: boolean;
 	resolve(ok: boolean): void;
+}
+
+/** A one-field dialog (rename): resolves the typed text, or null on cancel. */
+export interface PromptRequest {
+	title: string;
+	label: string;
+	value: string;
+	confirm: string;
+	/** Why `value` can't be used (shown under the field), or null when it's fine. */
+	check?(value: string): string | null;
+	resolve(value: string | null): void;
+}
+
+/** The "Move to…" folder picker's subject. */
+export interface MoveRequest {
+	kind: 'note' | 'folder';
+	path: string;
 }
 
 export interface Settings {
@@ -174,6 +202,15 @@ class AppState {
 	swipeOpen = $state<string | null>(null);
 	/** A pending confirmation dialog. */
 	confirmRequest = $state<ConfirmRequest | null>(null);
+	/** A pending one-field dialog (rename). */
+	promptRequest = $state<PromptRequest | null>(null);
+	/** The "Move to…" picker, open for a note or a folder. */
+	moveRequest = $state<MoveRequest | null>(null);
+	/** Short-lived message at the bottom of the window (moves, saves, errors). */
+	notice = $state<{ kind: 'ok' | 'error'; text: string } | null>(null);
+	private noticeTimer: ReturnType<typeof setTimeout> | null = null;
+	/** Folder context menu: screen position + folder path. */
+	folderMenu = $state<{ x: number; y: number; path: string } | null>(null);
 	/** Tablet AI bottom sheet: expanded to (almost) full height. */
 	sheetExpanded = $state(false);
 
@@ -228,6 +265,11 @@ class AppState {
 
 	private saveTimer: ReturnType<typeof setTimeout> | null = null;
 	private pending: { id: string; content: string } | null = null;
+	/** A move / rename in flight: saves wait for it, then write to the new path. */
+	private moving: Promise<unknown> | null = null;
+	private moveListeners: ((from: string, to: string) => void)[] = [];
+	/** Close functions of open menus (ActionMenu), newest last: Android back closes them first. */
+	private dismissers: (() => void)[] = [];
 
 	/** Notes filtered by the selected folder, tag and search box. */
 	filtered = $derived.by(() => {
@@ -293,6 +335,8 @@ class AppState {
 		}
 
 		this.workspace = await platform.getWorkspace();
+		// Folder privacy (hidden from cloud AI) shows in the sidebar and list.
+		if (this.settings.ai) void getAiSettings().load();
 		await this.refresh();
 
 		// Re-open the note from the previous session, if it still exists.
@@ -683,6 +727,20 @@ class AppState {
 			this.answerConfirm(false);
 			return true;
 		}
+		if (this.promptRequest) {
+			this.answerPrompt(null);
+			return true;
+		}
+		const menu = this.dismissers[this.dismissers.length - 1];
+		if (menu) {
+			menu();
+			return true;
+		}
+		if (this.moveRequest || this.folderMenu) {
+			this.moveRequest = null;
+			this.folderMenu = null;
+			return true;
+		}
 		if (this.contextMenu) {
 			this.closeContextMenu();
 			return true;
@@ -810,6 +868,237 @@ class AppState {
 	async toggleLock(id: string): Promise<void> {
 		const note = this.notes.find((n) => n.id === id);
 		await this.setLocked(id, !note?.locked);
+	}
+
+	// --- AI privacy (hidden from cloud AI) --------------------------------------
+
+	/** The note may only go to local AI providers (its own marker or its folder). */
+	hiddenFromAi(note: { id: string; aiLocal?: boolean }): boolean {
+		return this.settings.ai && isHidden(note, getAiSettings().config.localOnlyFolders);
+	}
+
+	/** How a folder is hidden from cloud AI: itself, through a parent, or not. */
+	folderHidden(path: string): ReturnType<typeof folderPrivacy> {
+		return this.settings.ai ? folderPrivacy(path, getAiSettings().config.localOnlyFolders) : null;
+	}
+
+	/** Add / drop the note's `<!-- ai: local -->` marker (mirrors `setLocked`). */
+	async setHiddenFromAi(id: string, hidden: boolean): Promise<void> {
+		if (id === this.activeId) await this.flush();
+		const content = await platform.readNote(id);
+		const next = setAiLocal(content, hidden);
+		if (next === content) return;
+		await platform.writeNote(id, next);
+		if (id === this.activeId) {
+			this.activeContent = next;
+			this.editorReloadToken++;
+		}
+		await this.refresh();
+		this.notify('ok', hidden ? 'Hidden from cloud AI' : 'Cloud AI may read this note');
+	}
+
+	toggleFolderHidden(path: string): void {
+		const ai = getAiSettings();
+		const self = ai.config.localOnlyFolders.includes(path);
+		ai.setFolderHidden(path, !self);
+		this.notify(
+			'ok',
+			self ? `Cloud AI may read “${baseOf(path)}”` : `“${baseOf(path)}” hidden from cloud AI`
+		);
+	}
+
+	// --- move / rename -----------------------------------------------------------
+
+	openMove(kind: MoveRequest['kind'], path: string): void {
+		this.contextMenu = null;
+		this.folderMenu = null;
+		this.moveRequest = { kind, path };
+	}
+
+	/** An open menu, closed by Android back before anything else; returns an unregister. */
+	onDismiss(close: () => void): () => void {
+		this.dismissers.push(close);
+		return () => {
+			this.dismissers = this.dismissers.filter((x) => x !== close);
+		};
+	}
+
+	/** Subscribe to moves (`from` → `to`, a note or a folder); returns an unsubscribe. */
+	onMoved(cb: (from: string, to: string) => void): () => void {
+		this.moveListeners.push(cb);
+		return () => {
+			this.moveListeners = this.moveListeners.filter((x) => x !== cb);
+		};
+	}
+
+	folderExists(path: string): boolean {
+		const p = path.toLowerCase();
+		return (
+			this.folders.some((f) => f.toLowerCase() === p) ||
+			this.notes.some((n) => n.id.toLowerCase().startsWith(`${p}/`))
+		);
+	}
+
+	async renameNote(id: string): Promise<void> {
+		const dir = parentOf(id);
+		const target = (v: string) => joinPath(dir, withNoteExt(cleanName(v), id));
+		const name = await this.prompt({
+			title: 'Rename note',
+			label: 'File name',
+			value: noteStem(id),
+			confirm: 'Rename',
+			check: (v) => {
+				if (!cleanName(v)) return 'Enter a name.';
+				const to = target(v).toLowerCase();
+				return to !== id.toLowerCase() && this.notes.some((n) => n.id.toLowerCase() === to)
+					? 'A note with that name is already in this folder.'
+					: null;
+			}
+		});
+		if (name !== null) await this.relocateNote(id, target(name));
+	}
+
+	/** Move a note into `folder` ('' = workspace root). */
+	async moveNoteTo(id: string, folder: string): Promise<void> {
+		if (parentOf(id) !== folder) await this.relocateNote(id, joinPath(folder, baseOf(id)));
+	}
+
+	async renameFolder(path: string): Promise<void> {
+		const parent = parentOf(path);
+		const name = await this.prompt({
+			title: 'Rename folder',
+			label: 'Folder name',
+			value: baseOf(path),
+			confirm: 'Rename',
+			check: (v) => {
+				const c = cleanName(v);
+				if (!c) return 'Enter a name.';
+				const to = joinPath(parent, c);
+				return to.toLowerCase() !== path.toLowerCase() && this.folderExists(to)
+					? 'A folder with that name is already here.'
+					: null;
+			}
+		});
+		if (name !== null) await this.relocateFolder(path, joinPath(parent, cleanName(name)));
+	}
+
+	/** Move a folder into `parent` ('' = workspace root). */
+	async moveFolderTo(path: string, parent: string): Promise<void> {
+		if (parentOf(path) === parent) return;
+		if (parent === path || parent.startsWith(`${path}/`)) {
+			this.notify('error', 'A folder can’t move into itself.');
+			return;
+		}
+		await this.relocateFolder(path, joinPath(parent, baseOf(path)));
+	}
+
+	private async relocateNote(id: string, to: string): Promise<void> {
+		const note = this.notes.find((n) => n.id === id);
+		if (note && !(await this.keepsPrivacy(note.title, note.aiLocal ? null : id, to))) return;
+		if (id === this.activeId) await this.flush();
+		const next = await this.runMove(() => platform.moveNote(id, to));
+		if (next === null) return;
+		this.pathMoved(id, next);
+		await this.refresh();
+		this.notify(
+			'ok',
+			parentOf(next) === parentOf(id)
+				? `Renamed to ${baseOf(next)}`
+				: `Moved to ${parentOf(next) || 'Notes'}`
+		);
+	}
+
+	private async relocateFolder(from: string, to: string): Promise<void> {
+		// A folder listed itself stays hidden (the setting moves along); only an inherited one can lapse.
+		const self = getAiSettings().config.localOnlyFolders.includes(from);
+		if (!self && !(await this.keepsPrivacy(baseOf(from), from, to))) return;
+		await this.flush();
+		const next = await this.runMove(() => platform.moveFolder(from, to));
+		if (next === null) return;
+		await getAiSettings().folderMoved(from, next);
+		this.pathMoved(from, next);
+		await this.refresh();
+		this.notify(
+			'ok',
+			parentOf(next) === parentOf(from)
+				? `Renamed to ${baseOf(next)}`
+				: `Moved to ${parentOf(next) || 'Notes'}`
+		);
+	}
+
+	/** Run a host move; saves queued meanwhile wait for it. Null (and a notice) on failure. */
+	private async runMove(op: () => Promise<string>): Promise<string | null> {
+		const run = op();
+		this.moving = run;
+		try {
+			return await run;
+		} catch (err) {
+			this.notify('error', err instanceof Error ? err.message : String(err));
+			return null;
+		} finally {
+			if (this.moving === run) this.moving = null;
+		}
+	}
+
+	/**
+	 * Moving out of a folder hidden from cloud AI would expose the note/folder
+	 * at `path` (null = it stays hidden anyway): ask first.
+	 */
+	private async keepsPrivacy(name: string, path: string | null, to: string): Promise<boolean> {
+		if (path === null || !this.settings.ai) return true;
+		const folders = getAiSettings().config.localOnlyFolders;
+		const now = folderPrivacy(parentOf(path), folders) ?? folderPrivacy(path, folders);
+		if (!now || folderPrivacy(parentOf(to), folders)) return true;
+		return this.confirm({
+			title: 'Let cloud AI read it?',
+			body: `“${name}” is hidden from cloud AI because it’s in “${now.folder || 'Notes'}”. Moved to “${parentOf(to) || 'Notes'}”, cloud providers could read it.`,
+			confirm: 'Move anyway'
+		});
+	}
+
+	/** Re-point everything that names a moved note / folder (open note, filters, expansion…). */
+	private pathMoved(from: string, to: string): void {
+		const active = this.activeId && remapPath(this.activeId, from, to);
+		if (active) {
+			// The editor is keyed on the session, not the id: no remount, caret stays.
+			this.activeId = active;
+			if (this.baseline) this.baseline = { ...this.baseline, id: active };
+			void platform.setState('lastOpenFile', active);
+		}
+		if (this.pending) this.pending.id = remapPath(this.pending.id, from, to) ?? this.pending.id;
+		if (this.selectedFolder)
+			this.selectedFolder = remapPath(this.selectedFolder, from, to) ?? this.selectedFolder;
+		const expanded: Record<string, boolean> = {};
+		let changed = false;
+		for (const [k, v] of Object.entries(this.sidebar.folderExpanded)) {
+			const nk = remapPath(k, from, to);
+			if (nk !== null) changed = true;
+			expanded[nk ?? k] = v;
+		}
+		if (changed) {
+			this.sidebar.folderExpanded = expanded;
+			this.persistSidebar();
+		}
+		for (const cb of this.moveListeners) cb(from, to);
+	}
+
+	// --- notices + prompt dialog ---------------------------------------------------
+
+	notify(kind: 'ok' | 'error', text: string): void {
+		if (this.noticeTimer) clearTimeout(this.noticeTimer);
+		this.notice = { kind, text };
+		this.noticeTimer = setTimeout(() => (this.notice = null), kind === 'ok' ? 2400 : 5000);
+	}
+
+	prompt(req: Omit<PromptRequest, 'resolve'>): Promise<string | null> {
+		this.promptRequest?.resolve(null);
+		return new Promise((resolve) => (this.promptRequest = { ...req, resolve }));
+	}
+
+	answerPrompt(value: string | null): void {
+		const r = this.promptRequest;
+		this.promptRequest = null;
+		r?.resolve(value);
 	}
 
 	// --- note context menu -------------------------------------------------
@@ -946,6 +1235,8 @@ class AppState {
 
 	/** Write any pending edit to disk immediately. */
 	async flush(): Promise<void> {
+		// Mid-move the old path is going away: write once the new one is known.
+		if (this.moving) await this.moving.catch(() => {});
 		if (this.saveTimer) {
 			clearTimeout(this.saveTimer);
 			this.saveTimer = null;

@@ -37,7 +37,14 @@ export const ICONS = {
 	web: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z',
 	chevron: 'M9 6l6 6-6 6',
 	down: 'M12 5v14m0 0-6-6m6 6 6-6',
-	back: 'M15 5l-7 7 7 7'
+	back: 'M15 5l-7 7 7 7',
+	shield: 'M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z',
+	folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
+	move: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM9 13h6m-2-2 2 2-2 2',
+	rename: 'M4 8h8M4 12h6M4 16h8M17 5v14M15 5h4M15 19h4',
+	fork: 'M6 7v10M8 5a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM8 19a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM20 7a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM18 9v1a5 5 0 0 1-5 5H6',
+	save: 'M5 4h11l3 3v13H5zM8 4v5h7V4M8 20v-6h8v6',
+	table: 'M4 5h16v14H4zM4 10h16M4 15h16M10 5v14'
 } as const;
 
 export type IconName = keyof typeof ICONS;

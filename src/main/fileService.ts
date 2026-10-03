@@ -4,6 +4,8 @@ import chokidar, { type FSWatcher } from 'chokidar';
 import { NoteIndex } from './db';
 import { parseTags } from './tags';
 import type { NoteMeta } from '../shared/types';
+import { folderMoveError, noteExt, noteMoveError } from '../shared/paths';
+import { noteSnippet } from '../shared/snippet';
 
 const MD_EXT = new Set(['.md', '.markdown', '.mdown', '.txt']);
 
@@ -45,6 +47,7 @@ export class FileService {
 	private buildMeta(absPath: string, raw: string, mtime: number): NoteMeta {
 		const pinned = /^\s*<!--\s*pinned:\s*true\s*-->\s*$/im.test(raw);
 		const locked = /^\s*<!--\s*locked:\s*true\s*-->\s*$/im.test(raw);
+		const aiLocal = /^\s*<!--\s*ai:\s*local\s*-->\s*$/im.test(raw);
 		// Strip hidden metadata comments (dir / pinned / locked) so they never
 		// surface as the title or in the snippet.
 		const body = raw.replace(
@@ -62,13 +65,8 @@ export class FileService {
 		}
 		if (!title) title = path.basename(absPath, path.extname(absPath));
 
-		// Snippet: the body after the title line, flattened, first ~140 chars.
-		const snippet = body
-			.replace(/^#{1,6}\s.*$/m, '')
-			.replace(/[#>*_`~-]/g, '')
-			.replace(/\s+/g, ' ')
-			.trim()
-			.slice(0, 140);
+		// Snippet: the body after the title line, flattened (shared/snippet.ts).
+		const snippet = noteSnippet(body);
 
 		return {
 			id: this.toId(absPath),
@@ -78,7 +76,8 @@ export class FileService {
 			mtime,
 			tags: parseTags(body),
 			pinned,
-			locked
+			locked,
+			aiLocal
 		};
 	}
 
@@ -241,6 +240,77 @@ export class FileService {
 	private safeSubdir(folder: string): string {
 		const norm = path.normalize(folder).replace(/^([/\\]|\.\.?([/\\]|$))+/, '');
 		return norm === '.' ? '' : norm.replace(/\\/g, '/');
+	}
+
+	/**
+	 * Move / rename a note to workspace path `to` (its folder is created). A
+	 * taken name gets a numeric suffix; returns the note's final id.
+	 */
+	async move(id: string, to: string): Promise<string> {
+		const from = this.safeSubdir(id);
+		let dest = this.safeSubdir(to);
+		if (dest && !noteExt(dest)) dest += noteExt(from) || '.md';
+		const err = noteMoveError(from, dest);
+		if (err) throw new Error(err);
+		if (dest === from) return from;
+		const src = path.join(this.root, from);
+		// A case-only rename is the same file on case-insensitive disks: no suffix.
+		const target =
+			dest.toLowerCase() === from.toLowerCase()
+				? path.join(this.root, dest)
+				: await this.uniquePath(path.join(this.root, dest));
+		await fs.mkdir(path.dirname(target), { recursive: true });
+		await fs.rename(src, target);
+		this.index.remove(from);
+		await this.indexFile(target);
+		this.scheduleChange();
+		return this.toId(target).replace(/\\/g, '/');
+	}
+
+	/**
+	 * Move / rename a folder (with everything in it) to workspace path `to`.
+	 * Refused when `to` exists, lies inside the folder, or the folder holds a
+	 * nested git repo (its sync setup is tied to the path).
+	 */
+	async moveFolder(dir: string, to: string): Promise<string> {
+		const from = this.safeSubdir(dir);
+		const dest = this.safeSubdir(to);
+		if (dest === from) return from;
+		const err = folderMoveError(from, dest);
+		if (err) throw new Error(err);
+		const src = path.join(this.root, from);
+		const target = path.join(this.root, dest);
+		if (dest.toLowerCase() !== from.toLowerCase() && (await this.exists(target))) {
+			throw new Error(`“${dest}” already exists.`);
+		}
+		if (await this.holdsRepo(src)) {
+			throw new Error(`“${from}” has its own git repo — move it outside fr5a.`);
+		}
+		await fs.mkdir(path.dirname(target), { recursive: true });
+		await fs.rename(src, target);
+		this.index.removeUnder(from);
+		const files: string[] = [];
+		await this.collect(target, files);
+		await Promise.all(files.map((f) => this.indexFile(f)));
+		this.scheduleChange();
+		return dest;
+	}
+
+	/** True when `dir` or anything below it is a git repo (has a `.git`). */
+	private async holdsRepo(dir: string): Promise<boolean> {
+		let entries: import('node:fs').Dirent[];
+		try {
+			entries = await fs.readdir(dir, { withFileTypes: true });
+		} catch {
+			return false;
+		}
+		for (const entry of entries) {
+			if (entry.name === '.git') return true;
+			if (entry.isDirectory() && entry.name !== 'node_modules') {
+				if (await this.holdsRepo(path.join(dir, entry.name))) return true;
+			}
+		}
+		return false;
 	}
 
 	/**

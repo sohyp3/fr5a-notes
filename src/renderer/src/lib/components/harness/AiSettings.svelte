@@ -18,6 +18,9 @@
 		type SearchKind
 	} from '../../harness/types';
 	import Icon from '../Icon.svelte';
+	import { buildFolderTree, type FolderNode } from '../../folders';
+	import { folderPrivacy } from '../../harness/privacy';
+	import { cleanFolder } from '../../../../../shared/paths';
 
 	const app = getAppState();
 	const ai = getAiSettings();
@@ -63,8 +66,28 @@
 	let draft = $state<Draft | null>(null);
 	/** The one provider row showing its key + model fields. */
 	let expanded = $state<string | null>(null);
-	/** Local-only folders list (long in big workspaces): collapsed by default. */
-	let foldersOpen = $state(false);
+	// --- hidden from cloud AI: folder tree + single notes ---------------------
+	type PrivacyRow = { path: string; name: string; depth: number; count: number };
+	function flattenTree(nodes: FolderNode[], depth: number, out: PrivacyRow[]): PrivacyRow[] {
+		for (const n of nodes) {
+			out.push({ path: n.path, name: n.name, depth, count: n.count });
+			flattenTree(n.children, depth + 1, out);
+		}
+		return out;
+	}
+	const privacyRows = $derived(
+		flattenTree(buildFolderTree(app.notes, app.folders), 1, [
+			{ path: '', name: 'Everything', depth: 0, count: app.notes.length }
+		])
+	);
+	const hiddenCount = $derived(app.notes.filter((n) => app.hiddenFromAi(n)).length);
+	/** Notes hidden on their own (`<!-- ai: local -->`), not through a folder. */
+	const singles = $derived(
+		app.notes.filter((n) => n.aiLocal && !folderPrivacy(dirOf(n.id), cfg.localOnlyFolders))
+	);
+	function dirOf(id: string): string {
+		return id.includes('/') ? id.slice(0, id.lastIndexOf('/')) : '';
+	}
 	let testing = $state(false);
 	let message = $state<{ kind: 'ok' | 'error'; text: string } | null>(null);
 
@@ -247,12 +270,6 @@
 			searchMsg = { kind: 'error', text: err instanceof Error ? err.message : String(err) };
 		}
 	}
-
-	function toggleLocalFolder(f: string): void {
-		const cur = cfg.localOnlyFolders;
-		const next = cur.includes(f) ? cur.filter((x) => x !== f) : [...cur, f];
-		ai.update({ localOnlyFolders: next.sort() });
-	}
 </script>
 
 <section class="group">
@@ -412,14 +429,14 @@
 			<label class="check">
 				<input type="checkbox" bind:checked={draft.local} />
 				<span
-					><span class="name">Local / private</span>
+					><span class="name">Runs on my hardware (local)</span>
 					{#if draft.baseUrl.includes('opencode.ai/zen')}
 						<span class="desc"
 							>Zen models (incl. free <code>big-pickle</code>) need a key from
 							<a href={ZEN_KEY_URL} target="_blank" rel="noreferrer">opencode.ai/zen</a>.</span
 						>
 					{/if}<span class="desc"
-						>Runs on hardware you control. Only local providers may read local-only notes.</span
+						>localhost, your LAN or VPN. Local providers may read notes hidden from cloud AI.</span
 					></span
 				>
 			</label>
@@ -533,36 +550,70 @@
 </section>
 
 <section class="group">
-	<h3>Privacy</h3>
-	<div class="row">
-		<div class="label">
-			<span class="name">Local-only folders</span>
-			<span class="desc"
-				>{cfg.localOnlyFolders.length ? cfg.localOnlyFolders.join(', ') : 'None'} — only local providers
-				may read these. A single note can opt in with
-				<code>&lt;!-- ai: local --&gt;</code>.</span
-			>
-		</div>
-		<button class="btn" aria-expanded={foldersOpen} onclick={() => (foldersOpen = !foldersOpen)}
-			>{foldersOpen ? 'Done' : 'Choose…'}</button
+	<h3>Hidden from cloud AI</h3>
+	<p class="lead">
+		Cloud providers never receive these notes — not as context, not through tools. Providers that
+		run on your hardware can read everything.
+	</p>
+	<p class="psum" role="status">
+		<Icon name="shield" size={14} stroke={2} />
+		<span
+			><strong>{hiddenCount}</strong> of {app.notes.length}
+			{app.notes.length === 1 ? 'note' : 'notes'} hidden{cfg.localOnlyFolders.length ||
+			singles.length
+				? ` · ${cfg.localOnlyFolders.length} ${cfg.localOnlyFolders.length === 1 ? 'folder' : 'folders'}, ${singles.length} single ${singles.length === 1 ? 'note' : 'notes'}`
+				: ''}</span
 		>
+	</p>
+
+	<div class="ptree" role="group" aria-label="Folders hidden from cloud AI">
+		{#each privacyRows as r (r.path)}
+			{@const state = folderPrivacy(r.path, cfg.localOnlyFolders)}
+			<label
+				class="prow"
+				class:on={!!state}
+				style:padding-inline-start="{10 + r.depth * 16}px"
+				title={state?.via === 'parent'
+					? `Hidden because “${state.folder || 'Everything'}” is hidden`
+					: undefined}
+			>
+				<input
+					type="checkbox"
+					checked={!!state}
+					disabled={state?.via === 'parent'}
+					onchange={() => ai.setFolderHidden(r.path, state?.via !== 'self')}
+				/>
+				<Icon name={r.path ? 'folder' : 'note'} size={14} />
+				<span class="pname">{r.name}</span>
+				<span class="pcount">{r.count}</span>
+				{#if state}
+					<span class="pstate" class:inherited={state.via === 'parent'}
+						>{state.via === 'self' ? 'Hidden' : 'Hidden via parent'}</span
+					>
+				{/if}
+			</label>
+		{/each}
 	</div>
-	{#if foldersOpen}
-		<div class="folders">
-			{#each app.folders as f (f)}
-				<label class="folder" style:padding-inline-start="{(f.split('/').length - 1) * 16}px">
-					<input
-						type="checkbox"
-						checked={cfg.localOnlyFolders.includes(f)}
-						onchange={() => toggleLocalFolder(f)}
-					/>
-					{f.split('/').pop()}
-				</label>
-			{:else}
-				<span class="desc">No folders.</span>
-			{/each}
-		</div>
-	{/if}
+
+	<div class="singles">
+		<span class="small">Single notes</span>
+		{#each singles as n (n.id)}
+			<div class="single">
+				<span class="label">
+					<span class="sname">{n.title}</span>
+					<span class="desc">{n.id}</span>
+				</span>
+				<button class="btn" onclick={() => app.setHiddenFromAi(n.id, false)}
+					>Let cloud AI read</button
+				>
+			</div>
+		{:else}
+			<p class="desc">
+				None. Hide one note from its menu (⋯ or long-press → Hide from cloud AI); it adds
+				<code>&lt;!-- ai: local --&gt;</code> to the file.
+			</p>
+		{/each}
+	</div>
 </section>
 
 <section class="group">
@@ -598,6 +649,26 @@
 
 <section class="group">
 	<h3>Advanced</h3>
+	<div class="row">
+		<label class="label" for="chats-folder">
+			<span class="name">Saved chats folder</span>
+			<span class="desc"
+				>Where ⋯ → Save to notes puts a chat (it syncs with your notes). Empty = top level.</span
+			>
+		</label>
+		<input
+			id="chats-folder"
+			class="text"
+			type="text"
+			spellcheck="false"
+			autocomplete="off"
+			autocapitalize="off"
+			value={cfg.chatsFolder ?? ''}
+			placeholder="top level"
+			onchange={(e) =>
+				ai.update({ chatsFolder: cleanFolder((e.currentTarget as HTMLInputElement).value) })}
+		/>
+	</div>
 	<div class="row">
 		<label class="label" for="max-steps">
 			<span class="name">Max steps per run</span>
@@ -839,31 +910,112 @@
 		flex-direction: column;
 		gap: 2px;
 	}
-	.check input,
-	.folder input {
+	.check input {
 		margin-top: 3px;
 		accent-color: var(--accent);
 	}
-	.folders {
+
+	/* --- hidden from cloud AI -------------------------------------------- */
+	.psum {
+		display: flex;
+		align-items: center;
+		gap: 7px;
+		margin: 0 0 8px;
+		font-size: 13px;
+		color: var(--text-muted);
+	}
+	.psum :global(.icon) {
+		color: var(--accent);
+	}
+	.psum strong {
+		color: var(--text-strong);
+	}
+	.ptree {
 		display: flex;
 		flex-direction: column;
-		gap: 2px;
-		max-height: 240px;
+		max-height: 300px;
 		overflow-y: auto;
-		padding: 6px 10px;
+		padding: 4px;
 		border-radius: 10px;
 		background: var(--bg-list);
 	}
-	.folder {
+	.prow {
 		display: flex;
 		align-items: center;
 		gap: 8px;
-		min-height: 30px;
+		min-height: 32px;
+		padding-inline-end: 8px;
+		border-radius: 7px;
 		font-size: 13px;
+		cursor: pointer;
 	}
-	:global(html[data-touch]) .folder {
+	.prow:hover {
+		background: var(--bg-hover);
+	}
+	.prow :global(.icon) {
+		color: var(--text-muted);
+	}
+	.prow.on :global(.icon) {
+		color: var(--accent);
+	}
+	.prow input {
+		accent-color: var(--accent);
+		margin: 0;
+	}
+	.prow input:disabled {
+		opacity: 0.55;
+	}
+	:global(html[data-touch]) .prow {
 		min-height: 44px;
 		font-size: 15px;
+	}
+	.pname {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.pcount {
+		font-size: 11px;
+		color: var(--text-faint);
+		font-variant-numeric: tabular-nums;
+	}
+	.pstate {
+		flex: 0 0 auto;
+		padding: 1px 8px;
+		border-radius: 999px;
+		background: var(--accent-soft);
+		color: var(--accent);
+		font-size: 11px;
+		font-weight: 600;
+	}
+	.pstate.inherited {
+		background: var(--bg-hover);
+		color: var(--text-muted);
+		font-weight: 500;
+	}
+	.singles {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		margin-top: 14px;
+	}
+	.single {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 6px 2px;
+	}
+	.sname {
+		font-size: 13.5px;
+		font-weight: 500;
+		color: var(--text-strong);
+	}
+	.text {
+		width: 180px;
+		min-width: 0;
 	}
 	.actions {
 		display: flex;
@@ -965,6 +1117,8 @@
 	code {
 		font-family: var(--font-mono);
 		font-size: 11.5px;
+		/* `<!--` must not become an arrow ligature. */
+		font-variant-ligatures: none;
 	}
 	@keyframes spin {
 		to {

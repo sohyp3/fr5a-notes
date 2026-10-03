@@ -11,7 +11,8 @@ function note(id: string): NoteMeta {
 		mtime: 0,
 		tags: [],
 		pinned: false,
-		locked: false
+		locked: false,
+		aiLocal: false
 	};
 }
 

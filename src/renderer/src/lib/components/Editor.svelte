@@ -11,6 +11,7 @@
 	import { MarkdownSyntax } from '../editor/MarkdownSyntax';
 	import { MarkdownShortcuts } from '../editor/MarkdownShortcuts';
 	import { ListBehavior } from '../editor/ListBehavior';
+	import { TableBehavior } from '../editor/TableBehavior';
 	import { TagSuggest, flattenTagTree } from '../editor/TagSuggest';
 	import { Vim, type VimMode } from '../editor/vim';
 	import {
@@ -39,6 +40,8 @@
 	let scrolled = $state(false);
 	let moreBtn = $state<HTMLButtonElement | null>(null);
 	let moreAt = $state<{ x: number; y: number } | null>(null);
+	let crumbBtn = $state<HTMLButtonElement | null>(null);
+	let crumbAt = $state<{ x: number; y: number } | null>(null);
 	// Suppress auto-save while we programmatically replace content.
 	let loading = false;
 
@@ -51,7 +54,15 @@
 	// View mode (or a lock): no caret, no keyboard, no accidental edits.
 	const editable = $derived(app.editing && !locked);
 	const compact = $derived(app.layout === 'phone');
+	let headW = $state(0);
+	/**
+	 * Too narrow for every header button (touch tablets: 44px targets beside
+	 * the list): direction / lock / changes / trash fold into ⋯, so the crumb
+	 * keeps room and nothing is clipped.
+	 */
+	const narrow = $derived(compact || (headW > 0 && headW < (app.touch ? 620 : 440)));
 	const change = $derived(app.changeFor(app.activeId));
+	const hiddenAi = $derived(!!activeMeta && app.hiddenFromAi(activeMeta));
 	// Recreate the editor when a different buffer opens (editorSession), Vim is
 	// toggled, or an external rewrite (e.g. pin toggle) bumps the reload token.
 	// Keyed on the session — not the note id — so a draft materialising into a
@@ -74,6 +85,7 @@
 			MarkdownSyntax,
 			MarkdownShortcuts,
 			ListBehavior,
+			TableBehavior,
 			// Fed from the store's tag tree (itself the SQLite index over IPC).
 			TagSuggest.configure({ getTags: () => flattenTagTree(app.tags) })
 		];
@@ -134,6 +146,12 @@
 		await tick();
 		const ed = editor;
 		if (!ed || !scroller) return;
+		// A rendered table cell: the table puts the caret into that cell's source.
+		const cell = at && document.elementFromPoint(at.x, at.y)?.closest('.md-table [data-line]');
+		if (cell) {
+			cell.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+			return;
+		}
 		let point = at;
 		if (!point) {
 			const r = scroller.getBoundingClientRect();
@@ -177,12 +195,43 @@
 		moreAt = { x: r.right - 200, y: r.bottom + 6 };
 	}
 
+	/** Rename / move / AI privacy of the open note (crumb menu; also in ⋯ on phones). */
+	const fileItems = $derived.by((): MenuItem[] => {
+		const n = activeMeta;
+		if (!n) return [];
+		const viaFolder = !n.aiLocal && hiddenAi;
+		const items: MenuItem[] = [
+			{ label: 'Rename…', icon: 'rename', action: () => void app.renameNote(n.id) },
+			{ label: 'Move to…', icon: 'move', action: () => app.openMove('note', n.id) }
+		];
+		if (app.settings.ai)
+			items.push({
+				label: hiddenAi ? 'Let cloud AI read' : 'Hide from cloud AI',
+				icon: 'shield',
+				disabled: viaFolder,
+				hint: viaFolder ? 'folder' : undefined,
+				action: () => void app.setHiddenFromAi(n.id, !n.aiLocal)
+			});
+		return items;
+	});
+
+	function openCrumb(): void {
+		if (crumbAt) {
+			crumbAt = null;
+			return;
+		}
+		const r = crumbBtn!.getBoundingClientRect();
+		crumbAt = { x: r.left, y: r.bottom + 4 };
+	}
+
 	const moreItems = $derived.by((): MenuItem[] => [
+		...fileItems,
 		{
 			label: dir === 'rtl' ? 'Left-to-right text' : 'Right-to-left text',
 			icon: 'dir',
 			hint: dir.toUpperCase(),
 			disabled: locked,
+			divider: fileItems.length > 0,
 			action: toggleDir
 		},
 		{
@@ -243,11 +292,32 @@
 			</EmptyState>
 		</div>
 	{:else}
-		<header class="editor-head" class:scrolled>
+		<header class="editor-head" class:scrolled bind:clientWidth={headW}>
 			{#if !compact}
-				<div class="crumb" title={app.activeId ?? ''}>
-					{#if crumb.dir}<span class="cdir">{crumb.dir} /</span>{/if}
-					<span class="cname">{crumb.name}</span>
+				<div class="crumb">
+					{#if activeMeta}
+						<button
+							bind:this={crumbBtn}
+							class="crumb-btn"
+							class:on={!!crumbAt}
+							title="{app.activeId} — rename or move"
+							aria-label="File: {app.activeId}. Rename or move"
+							aria-haspopup="menu"
+							aria-expanded={!!crumbAt}
+							onclick={openCrumb}
+						>
+							{#if crumb.dir}<span class="cdir">{crumb.dir} /</span>{/if}
+							<span class="cname">{crumb.name}</span>
+							<span class="caret-down" aria-hidden="true"><Icon name="chevron" size={11} /></span>
+						</button>
+					{:else}
+						<span class="cname">{crumb.name}</span>
+					{/if}
+					{#if hiddenAi}<span
+							class="state shield"
+							title="Hidden from cloud AI — only local providers can read this note"
+							><Icon name="shield" size={10} stroke={2.2} /> Local AI only</span
+						>{/if}
 					{#if locked}<span class="state">Locked</span>{:else if !editable}<span class="state"
 							>Viewing</span
 						>{/if}
@@ -299,7 +369,7 @@
 				>
 					<Icon name="pin" size={16} stroke={1.7} />
 				</button>
-				{#if compact}
+				{#if narrow}
 					<button
 						bind:this={moreBtn}
 						class="act icon"
@@ -387,6 +457,17 @@
 	{/if}
 </section>
 
+{#if crumbAt}
+	<ActionMenu
+		items={fileItems}
+		at={crumbAt}
+		title={activeMeta?.title ?? 'Note'}
+		label="File actions"
+		trigger={crumbBtn}
+		onclose={() => (crumbAt = null)}
+	/>
+{/if}
+
 {#if moreAt}
 	<ActionMenu
 		items={moreItems}
@@ -447,6 +528,41 @@
 		color: var(--text-faint);
 		white-space: nowrap;
 		overflow: hidden;
+	}
+	.crumb-btn {
+		flex: 0 1 auto;
+		min-width: 0;
+		display: flex;
+		align-items: baseline;
+		gap: 5px;
+		margin: -3px -6px;
+		padding: 3px 6px;
+		border-radius: 6px;
+		font-size: inherit;
+		color: inherit;
+		transition: background var(--dur-fast) ease;
+	}
+	.crumb-btn:hover,
+	.crumb-btn.on {
+		background: var(--bg-hover);
+	}
+	.caret-down {
+		align-self: center;
+		transform: rotate(90deg);
+		opacity: 0;
+		transition: opacity var(--dur-fast) ease;
+	}
+	.crumb-btn:hover .caret-down,
+	.crumb-btn:focus-visible .caret-down,
+	.crumb-btn.on .caret-down {
+		opacity: 1;
+	}
+	.state.shield {
+		display: inline-flex;
+		align-items: center;
+		gap: 3px;
+		color: var(--accent);
+		background: var(--accent-soft);
 	}
 	.cdir {
 		flex: 0 1 auto;

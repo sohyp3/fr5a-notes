@@ -1,8 +1,10 @@
 import { Extension } from '@tiptap/core';
-import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import type { EditorState } from '@tiptap/pm/state';
+import type { EditorView } from '@tiptap/pm/view';
+import { cellRanges, findTables, pipeOffsets, tableHtml } from './tables';
 
 /**
  * MarkdownSyntax
@@ -19,6 +21,10 @@ import type { EditorState } from '@tiptap/pm/state';
  *     looks formatted while the raw symbols remain.
  *   • A token is "active" (md-active → opacity 1) when the selection sits
  *     inside its full span, i.e. the cursor is inside that word/node.
+ *   • Tables (GFM pipe tables, see tables.ts) show as a rendered `<table>`
+ *     widget with their lines hidden — until the caret enters them (a click
+ *     on a cell puts it there), when the lines show as editable source. View
+ *     mode always shows the rendered table.
  */
 
 interface Deco {
@@ -207,7 +213,13 @@ function tokenizeLine(text: string, contentStart: number): { tokens: Token[]; no
 		}
 	}
 
-	// Inline rules.
+	tokens.push(...inlineTokens(text, contentStart, consumed));
+	return { tokens, nodeClass: block?.nodeClass };
+}
+
+/** Inline rules over the characters not yet `consumed` (marked as they're used). */
+function inlineTokens(text: string, contentStart: number, consumed: boolean[]): Token[] {
+	const tokens: Token[] = [];
 	for (const rule of INLINE_RULES) {
 		rule.re.lastIndex = 0;
 		let m: RegExpExecArray | null;
@@ -224,24 +236,119 @@ function tokenizeLine(text: string, contentStart: number): { tokens: Token[]; no
 			tokens.push({ outerFrom, outerTo, decos });
 		}
 	}
+	return tokens;
+}
 
-	return { tokens, nodeClass: block?.nodeClass };
+/** A table line in source mode: pipes tinted, separator dashes muted, cells styled inline. */
+function tokenizeTableSource(text: string, contentStart: number, sep: boolean): Token[] {
+	const consumed = new Array(text.length).fill(false);
+	const decos: Deco[] = [];
+	for (const p of pipeOffsets(text)) {
+		decos.push({ from: contentStart + p, to: contentStart + p + 1, class: 'md-tpipe' });
+		consumed[p] = true;
+	}
+	const whole = { outerFrom: contentStart, outerTo: contentStart + text.length, decos };
+	if (sep) {
+		for (const { from, to } of cellRanges(text))
+			if (to > from)
+				decos.push({ from: contentStart + from, to: contentStart + to, class: 'md-tsep-text' });
+		return [whole];
+	}
+	return [...inlineTokens(text, contentStart, consumed), whole];
+}
+
+/**
+ * The rendered table, standing in for its hidden lines. A press on a cell
+ * (while editable) puts the caret at the end of that cell's source, which
+ * flips the table to source mode.
+ */
+function tableWidget(
+	view: EditorView,
+	getPos: () => number | undefined,
+	html: string
+): HTMLElement {
+	const wrap = document.createElement('div');
+	wrap.className = 'md-table';
+	wrap.contentEditable = 'false';
+	wrap.innerHTML = html; // tableHtml escapes every cell (renderInline)
+	const toCell = (e: Event) => {
+		const cell = (e.target as Element).closest<HTMLElement>('[data-line]');
+		const at = getPos();
+		if (!cell || at === undefined || !view.editable) return false;
+		const $at = view.state.doc.resolve(at);
+		const index = $at.index(0) + Number(cell.dataset.line);
+		if (index >= view.state.doc.childCount) return false;
+		let pos = 0;
+		for (let k = 0; k < index; k++) pos += view.state.doc.child(k).nodeSize;
+		const text = view.state.doc.child(index).textContent;
+		const range = cellRanges(text)[Number(cell.dataset.cell)];
+		const head = pos + 1 + (range ? range.to : text.length);
+		view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, head)));
+		view.focus();
+		return true;
+	};
+	wrap.addEventListener('mousedown', (e) => {
+		if (toCell(e)) e.preventDefault();
+	});
+	return wrap;
 }
 
 const key = new PluginKey('markdownSyntax');
 
-function buildDecorations(state: EditorState): DecorationSet {
+function buildDecorations(state: EditorState, editable: boolean): DecorationSet {
 	const decorations: Decoration[] = [];
 	const { from: selFrom, to: selTo } = state.selection;
+	// Tables span lines, so find them over the whole document first.
+	const lines: string[] = [];
+	const starts: number[] = [];
+	state.doc.forEach((node, pos) => {
+		lines.push(node.textContent);
+		starts.push(pos);
+	});
+	const tables = findTables(lines);
+	/** Per table row: show it as source (caret inside, editable) or hide it behind the widget. */
+	const source = new Map<number, boolean>();
+	for (const [i, row] of tables) {
+		if (row.role !== 'head') continue;
+		let end = i;
+		while (!tables.get(end)?.last) end++;
+		const from = starts[i];
+		const to = starts[end] + state.doc.child(end).nodeSize;
+		const raw = editable && selTo >= from && selFrom <= to;
+		for (let k = i; k <= end; k++) source.set(k, raw);
+		if (!raw) {
+			const html = tableHtml(lines.slice(i, end + 1));
+			decorations.push(
+				Decoration.widget(from, (view, getPos) => tableWidget(view, getPos, html), {
+					side: -1,
+					key: `table:${html}`,
+					stopEvent: (e) => e.type.startsWith('mouse') || e.type.startsWith('touch')
+				})
+			);
+		}
+	}
+	let line = -1;
 
-	state.doc.descendants((node: PMNode, pos: number) => {
+	state.doc.forEach((node: PMNode, pos: number) => {
+		line++;
 		if (!node.isTextblock) return;
 		const text = node.textContent;
 		const contentStart = pos + 1;
+		const row = tables.get(line);
 
-		const { tokens, nodeClass } = tokenizeLine(text, contentStart);
-		if (nodeClass) {
-			decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: nodeClass }));
+		let tokens: Token[];
+		if (row && !source.get(line)) {
+			decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: 'md-trow-hidden' }));
+			return;
+		} else if (row) {
+			const cls = `md-trow md-trow-${row.role}${row.role === 'head' ? ' md-trow-first' : ''}${row.last ? ' md-trow-last' : ''}`;
+			decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: cls }));
+			tokens = tokenizeTableSource(text, contentStart, row.role === 'sep');
+		} else {
+			const t = tokenizeLine(text, contentStart);
+			tokens = t.tokens;
+			if (t.nodeClass)
+				decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: t.nodeClass }));
 		}
 
 		for (const token of tokens) {
@@ -252,10 +359,15 @@ function buildDecorations(state: EditorState): DecorationSet {
 				decorations.push(Decoration.inline(d.from, d.to, { class: cls }));
 			}
 		}
-		return false; // don't descend into inline text
 	});
 
 	return DecorationSet.create(state.doc, decorations);
+}
+
+interface SyntaxState {
+	set: DecorationSet;
+	/** The view is editable: tables holding the caret show their source. */
+	editable: boolean;
 }
 
 export const MarkdownSyntax = Extension.create({
@@ -263,17 +375,34 @@ export const MarkdownSyntax = Extension.create({
 
 	addProseMirrorPlugins() {
 		return [
-			new Plugin({
+			new Plugin<SyntaxState>({
 				key,
 				state: {
-					init: (_config, state) => buildDecorations(state),
-					// Recompute on any doc or selection change so hover/active track live.
-					apply: (tr, old, _oldState, newState) =>
-						tr.docChanged || tr.selectionSet ? buildDecorations(newState) : old
+					init: (_config, state) => ({ set: buildDecorations(state, true), editable: true }),
+					// Recompute on any doc or selection change so hover/active track live,
+					// and when the view flips between view and edit mode.
+					apply: (tr, old, _oldState, newState) => {
+						const editable = (tr.getMeta(key) as boolean | undefined) ?? old.editable;
+						return tr.docChanged || tr.selectionSet || editable !== old.editable
+							? { set: buildDecorations(newState, editable), editable }
+							: old;
+					}
+				},
+				view(view) {
+					// Mirror `view.editable` into the plugin state (decorations only see state).
+					const sync = () => {
+						if (view.isDestroyed) return;
+						if (key.getState(view.state)?.editable !== view.editable)
+							view.dispatch(
+								view.state.tr.setMeta(key, view.editable).setMeta('addToHistory', false)
+							);
+					};
+					queueMicrotask(sync);
+					return { update: () => queueMicrotask(sync) };
 				},
 				props: {
 					decorations(state) {
-						return key.getState(state);
+						return key.getState(state)?.set;
 					}
 				}
 			})

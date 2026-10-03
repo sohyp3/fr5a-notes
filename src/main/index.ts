@@ -244,6 +244,14 @@ function registerIpc(): void {
 	);
 
 	ipcMain.handle(Channels.noteDelete, (_e, id: string) => fileService?.delete(id));
+	ipcMain.handle(Channels.noteMove, (_e, id: string, to: string) => {
+		if (!fileService) throw new Error('No workspace open');
+		return fileService.move(id, to);
+	});
+	ipcMain.handle(Channels.folderMove, (_e, dir: string, to: string) => {
+		if (!fileService) throw new Error('No workspace open');
+		return fileService.moveFolder(dir, to);
+	});
 
 	ipcMain.handle(
 		Channels.foldersList,

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { expandMentions, fromKey, mentionKey, mentionText, parseMentions } from './mentions';
+import {
+	expandMentions,
+	fromKey,
+	mentionKey,
+	mentionText,
+	parseMentions,
+	remapKey
+} from './mentions';
 import type { NoteMeta } from '../../../../shared/types';
 
 const note = (id: string, title: string, tags: string[] = []): NoteMeta => ({
@@ -10,7 +17,8 @@ const note = (id: string, title: string, tags: string[] = []): NoteMeta => ({
 	mtime: 0,
 	tags,
 	pinned: false,
-	locked: false
+	locked: false,
+	aiLocal: false
 });
 
 const notes = [
@@ -49,5 +57,12 @@ describe('mentions', () => {
 			ids: ['Work/plan.md'],
 			omitted: 1
 		});
+	});
+
+	it('follows moved notes and folders', () => {
+		expect(remapKey('Work/plan.md', 'Work', 'Archive/Work')).toBe('Archive/Work/plan.md');
+		expect(remapKey('@Work/', 'Work', 'Old')).toBe('@Old/');
+		expect(remapKey('@Workshop/', 'Work', 'Old')).toBe('@Workshop/');
+		expect(remapKey('#Work', 'Work', 'Old')).toBe('#Work');
 	});
 });
