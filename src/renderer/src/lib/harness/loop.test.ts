@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { runLoop } from './loop';
+import { abortable, closeCalls, pendingCalls, runLoop } from './loop';
 import { createTools, type ToolDeps, type WriteProposal } from './tools';
-import type { CompletionResult } from './openai';
+import { AbortError, ProviderError, type CompletionResult } from './openai';
 import { DEFAULT_AI_CONFIG, type ChatMessage, type ProviderProfile } from './types';
 import type { NoteMeta } from '../../../../shared/types';
 
@@ -145,5 +145,124 @@ describe('runLoop', () => {
 		const search = createTools(deps()).find((t) => t.def.name === 'search_notes')!;
 		expect(await search.run({ query: 'alp' })).toMatch(/^- a\.md — Alpha/);
 		expect(await search.run({ query: 'zzz' })).toBe('No matching notes.');
+	});
+
+	it('stops at once, even while a tool or the model never answers', async () => {
+		const ctl = new AbortController();
+		const hang = new Promise<never>(() => {});
+		const search = createTools({ ...deps(), search: () => hang });
+		const model = scripted([
+			{ toolCalls: [{ id: 's', name: 'web_search', arguments: '{"query":"x"}' }] }
+		]);
+		const messages: ChatMessage[] = [{ role: 'system', content: 's' }];
+		const run = runLoop({
+			profile,
+			messages,
+			tools: search,
+			maxSteps: 3,
+			signal: ctl.signal,
+			complete: model.complete
+		});
+		await new Promise((r) => setTimeout(r, 0));
+		ctl.abort();
+		await expect(run).rejects.toBeInstanceOf(AbortError);
+		// The call that never finished has no result: carrying on runs it again.
+		expect(pendingCalls(messages).map((c) => c.id)).toEqual(['s']);
+
+		const stuck = new AbortController();
+		const silent = runLoop({
+			profile,
+			messages: [{ role: 'system', content: 's' }],
+			tools: [],
+			maxSteps: 1,
+			signal: stuck.signal,
+			complete: () => hang
+		});
+		stuck.abort();
+		await expect(silent).rejects.toBeInstanceOf(AbortError);
+	});
+
+	it('carries on a broken-off step: only its unfinished calls run again', async () => {
+		const asked: string[] = [];
+		const messages: ChatMessage[] = [
+			{ role: 'system', content: 's' },
+			{ role: 'user', content: 'go' },
+			{
+				role: 'assistant',
+				content: null,
+				tool_calls: [
+					{ id: '1', name: 'read_note', arguments: '{"id":"a.md"}' },
+					{ id: '2', name: 'ask_user', arguments: '{"question":"Which?","options":["A","B"]}' }
+				]
+			},
+			{ role: 'tool', tool_call_id: '1', content: '# Alpha\nbody' }
+		];
+		expect(pendingCalls(messages).map((c) => c.id)).toEqual(['2']);
+		const model = scripted([{ content: 'Done' }]);
+		await runLoop({
+			profile,
+			messages,
+			tools: createTools(
+				deps({
+					readNote: async () => {
+						asked.push('read');
+						return '';
+					},
+					ask: async () => {
+						asked.push('ask');
+						return ['A'];
+					}
+				})
+			),
+			maxSteps: 2,
+			complete: model.complete
+		});
+		expect(asked).toEqual(['ask']);
+		expect(model.seen[0].filter((m) => m.role === 'tool').map((m) => m.content)).toEqual([
+			'# Alpha\nbody',
+			'User answered: A'
+		]);
+		expect(messages.at(-1)).toEqual({ role: 'assistant', content: 'Done' });
+	});
+
+	it('closes calls a stopped run left open before a new message', () => {
+		const open: ChatMessage[] = [
+			{ role: 'user', content: 'go' },
+			{
+				role: 'assistant',
+				content: null,
+				tool_calls: [{ id: '1', name: 'list_notes', arguments: '{}' }]
+			}
+		];
+		expect(closeCalls(open).at(-1)).toEqual({
+			role: 'tool',
+			tool_call_id: '1',
+			content: '(cancelled)'
+		});
+		const done: ChatMessage[] = [...open, { role: 'tool', tool_call_id: '1', content: 'x' }];
+		expect(closeCalls(done)).toBe(done);
+		expect(pendingCalls([{ role: 'user', content: 'hi' }])).toEqual([]);
+	});
+
+	it('turns a reply the content filter stopped into an error', async () => {
+		const model = scripted([{ content: '', finishReason: 'content_filter' }]);
+		await expect(
+			runLoop({
+				profile,
+				messages: [{ role: 'system', content: 's' }],
+				tools: [],
+				maxSteps: 1,
+				complete: model.complete
+			})
+		).rejects.toBeInstanceOf(ProviderError);
+	});
+
+	it('abortable settles with the promise unless aborted first', async () => {
+		expect(await abortable(Promise.resolve(1), new AbortController().signal)).toBe(1);
+		const ctl = new AbortController();
+		ctl.abort();
+		await expect(abortable(Promise.reject(new Error('late')), ctl.signal)).rejects.toBeInstanceOf(
+			AbortError
+		);
 	});
 });

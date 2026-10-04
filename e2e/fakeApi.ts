@@ -140,6 +140,10 @@ export function installFakeApi(): void {
 	const maybeFail = (body: string) => {
 		if (body.includes('flaky?') && flaky++ === 0) throw new Error('net::ERR_INTERNET_DISCONNECTED');
 	};
+	/** "filter?": the request after the answer is refused once, as by a provider's content filter. */
+	let filtered = 0;
+	const refused = (body: string) =>
+		body.includes('filter?') && body.includes('User answered') && filtered++ === 0;
 	const trash: Record<string, string> = { '.fr5a_trash/old.md': '# Old\n\ngone soon' };
 	const deleted: string[] = [];
 	(window as unknown as { __deleted: string[] }).__deleted = deleted;
@@ -261,6 +265,16 @@ export function installFakeApi(): void {
 		}),
 		httpStream: async (_id: string, req: { body?: string }, onChunk: (t: string) => void) => {
 			maybeFail(req.body ?? '');
+			// "hang?" never answers, and the abort is a no-op (like Android's buffered requests).
+			if (req.body?.includes('hang?')) return new Promise<never>(() => {});
+			if (refused(req.body ?? ''))
+				return {
+					status: 400,
+					headers: {},
+					body: JSON.stringify({
+						error: { message: 'Input data may contain inappropriate content.' }
+					})
+				};
 			const text = fakeModel(req.body ?? '{}');
 			for (let i = 0; i < text.length; i += 16) onChunk(text.slice(i, i + 16));
 			return { status: 200, headers: {}, body: '' };

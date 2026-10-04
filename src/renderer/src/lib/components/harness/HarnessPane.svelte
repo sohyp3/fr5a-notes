@@ -72,6 +72,11 @@
 		ai.config.providers.filter((p) => ai.usable(p) || p.id === provider?.id)
 	);
 
+	// A question or a change to review needs the room: fold the context details away.
+	$effect(() => {
+		if (tab?.question || tab?.approval) ctxOpen = false;
+	});
+
 	// Offline: say so before a send fails.
 	let online = $state(typeof navigator === 'undefined' ? true : navigator.onLine);
 	$effect(() => {
@@ -1147,12 +1152,20 @@
 	}
 
 	/* --- context summary ----------------------------------------------------- */
+	/* On a short pane the details give way (and scroll) before a question card does. */
 	.context {
-		flex: 0 0 auto;
+		flex: 0 4 auto;
+		display: flex;
+		flex-direction: column;
+		min-height: 33px;
 		box-shadow: inset 0 -1px 0 var(--bg-active);
 		font-size: 11.5px;
 	}
+	:global(html[data-touch]) .context {
+		min-height: 43px;
+	}
 	.ctx-sum {
+		flex: 0 0 auto;
 		display: flex;
 		align-items: center;
 		gap: 6px;
@@ -1225,6 +1238,8 @@
 		transform: rotate(90deg);
 	}
 	.ctx-more {
+		min-height: 0;
+		overflow-y: auto;
 		display: flex;
 		flex-direction: column;
 		gap: 8px;
@@ -1313,6 +1328,8 @@
 		flex: 1;
 		min-height: 0;
 		display: flex;
+		/* Squeezed to nothing by a tall question card: no padding or Latest button peeking over it. */
+		overflow: hidden;
 	}
 	.transcript {
 		flex: 1;
@@ -1615,7 +1632,8 @@
 
 	/* --- docked approval card (full width, controls always visible) --------- */
 	.dock {
-		flex: 0 0 auto;
+		flex: 0 1 auto;
+		min-height: 0;
 		display: flex;
 		flex-direction: column;
 		max-height: min(70%, 560px);
@@ -1646,6 +1664,7 @@
 		color: var(--text);
 	}
 	.dock-body {
+		flex: 1 1 auto;
 		min-height: 0;
 		overflow-y: auto;
 	}

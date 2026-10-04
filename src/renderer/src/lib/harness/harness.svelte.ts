@@ -4,7 +4,8 @@ import { docToText } from '../editor/markdown';
 import { getAiSettings } from './config.svelte';
 import { buildSystemPrompt, estimateTokens, today, type AttachedNote } from './context';
 import { compactDiff, diffLines } from './diff';
-import { runLoop } from './loop';
+import { abortable, closeCalls, runLoop } from './loop';
+import { describeError } from './errors';
 import { AbortError, ProviderError, chatCompletion } from './openai';
 import { blockedReason } from './privacy';
 import { prepareWrite, type PreparedWrite } from './apply';
@@ -60,6 +61,8 @@ export type Entry =
 	| { kind: 'ai'; text: string; streaming: boolean; usage?: UsageRecord }
 	| {
 			kind: 'tool';
+			/** The model's call id (live sessions only). */
+			id?: string;
 			name: string;
 			args: string;
 			result: string | null;
@@ -84,6 +87,9 @@ export interface Approval {
 }
 
 const SAVE_DEBOUNCE = 400;
+/** A tool result left out after the provider's content filter refused the chat with it. */
+const WITHHELD =
+	"Withheld: the provider's content filter refused the conversation with this result in it.";
 /** Most notes inlined in one request; folder/tag mentions list the rest by id. */
 const MAX_INLINE_NOTES = 25;
 
@@ -108,6 +114,11 @@ export class HarnessTab {
 	private decide: ((ok: boolean) => void) | null = null;
 	private reject: ((e: Error) => void) | null = null;
 	ctl: AbortController | null = null;
+	/**
+	 * The last run broke off (an error, Stop): entries from here on aren't in
+	 * `history`, and Retry carries on from there instead of starting over.
+	 */
+	resumeAt: number | null = null;
 	private saveTimer: ReturnType<typeof setTimeout> | null = null;
 	/** Session file writes / moves, in order (a move must not race a save). */
 	private writing: Promise<void> = Promise.resolve();
@@ -178,6 +189,22 @@ export class HarnessTab {
 		this.approval = null;
 		this.answer = this.decide = this.reject = null;
 		r?.(new AbortError());
+	}
+
+	/** Replace the last step's tool results (model history and their rows) with a note. */
+	withholdResults(): void {
+		for (let i = this.history.length - 1; i >= 0; i--) {
+			const m = this.history[i];
+			if (m.role !== 'tool') break;
+			this.history[i] = { ...m, content: WITHHELD };
+			for (let k = this.entries.length - 1; k >= 0; k--) {
+				const e = this.entries[k];
+				if (e.kind === 'tool' && e.id === m.tool_call_id) {
+					e.result = WITHHELD;
+					break;
+				}
+			}
+		}
 	}
 
 	turns(): Turn[] {
@@ -383,6 +410,7 @@ class HarnessState {
 		copy.useCurrent = tab.useCurrent;
 		copy.skill = tab.skill;
 		copy.providerId = tab.providerId;
+		copy.resumeAt = tab.resumeAt;
 		this.tabs.splice(this.active + 1, 0, copy);
 		this.active += 1;
 		void copy.save().then(() => this.refreshSessions());
@@ -616,12 +644,10 @@ class HarnessState {
 		return n;
 	}
 
-	async send(input: string): Promise<void> {
-		const tab = this.tab;
+	async send(input: string, tab = this.tab): Promise<void> {
 		if (!tab || tab.running) return;
 		const { skill: skillName, text, mentions } = parseInput(input);
 		const app = getAppState();
-		const ai = getAiSettings();
 
 		if (skillName) {
 			if (!this.skill(skillName)) {
@@ -650,10 +676,30 @@ class HarnessState {
 		}
 
 		tab.entries.push({ kind: 'you', text: input.trim(), mark: tab.history.length });
+		await this.run(tab, profile, userText);
+	}
+
+	/**
+	 * One run of the agent loop. With `userText` it starts a new turn; with
+	 * null it carries on one that broke off, from its last finished tool call.
+	 */
+	private async run(
+		tab: HarnessTab,
+		profile: ProviderProfile,
+		userText: string | null
+	): Promise<void> {
+		const app = getAppState();
+		const ai = getAiSettings();
+		const skill = this.skill(tab.skill);
 		const runStart = tab.entries.length;
+		/** Entries up to here are in the model history (see `resumeAt`). */
+		let settled = runStart;
+		/** Set once the history is handed to the loop: a failure after that can be resumed. */
+		let messages: ChatMessage[] | null = null;
 		/** Tokens of every model call in this run (tool steps included). */
 		let used: Usage | null = null;
 		tab.running = true;
+		tab.resumeAt = null;
 		tab.ctl = new AbortController();
 		const signal = tab.ctl.signal;
 
@@ -672,11 +718,14 @@ class HarnessState {
 		};
 
 		try {
-			const [notes, apiKey, searchKey] = await Promise.all([
-				this.gatherNotes(tab, profile),
-				ai.apiKey(profile.id),
-				ai.searchKey(ai.config.search?.kind)
-			]);
+			const [notes, apiKey, searchKey] = await abortable(
+				Promise.all([
+					this.gatherNotes(tab, profile),
+					ai.apiKey(profile.id),
+					ai.searchKey(ai.config.search?.kind)
+				]),
+				signal
+			);
 			if (!apiKey && !profile.local)
 				throw new Error(
 					profile.id === OPENCODE_ZEN.id
@@ -693,8 +742,10 @@ class HarnessState {
 				noteBudget: Math.floor(profile.contextTokens * 0.5),
 				today: today()
 			});
-			tab.history.push({ role: 'user', content: userText });
-			const messages: ChatMessage[] = [{ role: 'system', content: system }, ...tab.history];
+			// A new message answers calls a stopped run left open (the API wants one result each).
+			if (userText !== null)
+				tab.history = [...closeCalls(tab.history), { role: 'user', content: userText }];
+			messages = [{ role: 'system', content: system }, ...tab.history];
 
 			const search = ai.config.search;
 			const tools = allowedTools(
@@ -728,6 +779,8 @@ class HarnessState {
 					return res;
 				},
 				onDelta: (t) => {
+					// A request that outlives Stop may still stream a little.
+					if (signal.aborted) return;
 					pending += t;
 					if (!frame) frame = requestAnimationFrame(flush);
 				},
@@ -741,19 +794,27 @@ class HarnessState {
 					}
 					pending = '';
 					current = null;
+					settled = tab.entries.length;
 					tab.scheduleSave();
 				},
 				onToolStart: (call) => {
-					tab.entries.push({ kind: 'tool', name: call.name, args: call.arguments, result: null });
+					tab.entries.push({
+						kind: 'tool',
+						id: call.id,
+						name: call.name,
+						args: call.arguments,
+						result: null
+					});
 				},
 				onToolResult: (call, result) => {
 					for (let i = tab.entries.length - 1; i >= 0; i--) {
 						const e = tab.entries[i];
-						if (e.kind === 'tool' && e.name === call.name && e.result === null) {
+						if (e.kind === 'tool' && e.id === call.id && e.result === null) {
 							e.result = result;
 							break;
 						}
 					}
+					settled = tab.entries.length;
 					tab.scheduleSave();
 				}
 			});
@@ -770,6 +831,9 @@ class HarnessState {
 				c.streaming = false;
 				if (!c.text.trim()) tab.entries.splice(tab.entries.indexOf(c), 1);
 			}
+			// Keep what finished (answers, tool results) so Retry carries on from there.
+			if (messages) tab.history = messages.slice(1);
+			if (messages || userText === null) tab.resumeAt = Math.min(settled, tab.entries.length);
 			if (err instanceof AbortError) tab.entries.push({ kind: 'info', text: 'Stopped.' });
 			else
 				tab.entries.push({
@@ -800,11 +864,29 @@ class HarnessState {
 	}
 
 	/**
-	 * Run the last message again — after a network error, a stop, or for a
-	 * fresh answer. Rewinds the transcript and model history to just before it.
+	 * Retry. A run that broke off (a network or provider error, Stop) carries
+	 * on from its last finished tool call, so answers already given stay; a
+	 * question or change it was waiting on comes back. After a finished reply,
+	 * the last message runs again for a fresh answer.
 	 */
 	async retry(tab = this.tab): Promise<void> {
 		if (!tab || tab.running) return;
+		if (tab.resumeAt !== null) {
+			const profile = this.providerFor(tab);
+			if (!profile) {
+				tab.entries.push({ kind: 'error', text: 'Add an AI provider in Settings → AI first.' });
+				return;
+			}
+			const last = tab.entries[tab.entries.length - 1];
+			// Sending the same thing again would trip the same filter: leave the latest results out.
+			const filtered =
+				last?.kind === 'error' && describeError(last.text, last.status).kind === 'content';
+			// The error / "Stopped." note and whatever the history doesn't have (a cut-off reply).
+			tab.entries.splice(tab.resumeAt);
+			if (filtered) tab.withholdResults();
+			await this.run(tab, profile, null);
+			return;
+		}
 		let i = tab.entries.length - 1;
 		while (i >= 0 && tab.entries[i].kind !== 'you') i--;
 		if (i < 0) return;
@@ -818,7 +900,7 @@ class HarnessState {
 		}
 		tab.entries.splice(i);
 		tab.history = tab.history.slice(0, mark);
-		await this.send(you.text);
+		await this.send(you.text, tab);
 	}
 
 	/** write_note: show the diff card, apply on approval. */

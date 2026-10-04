@@ -176,7 +176,11 @@
 </div>
 
 <style>
+	/* Gives way when the pane is short (keyboard up, context open, small sheet):
+	   the question scrolls, the steps and buttons stay. */
 	.qpanel {
+		flex: 0 1 auto;
+		min-height: 0;
 		display: flex;
 		flex-direction: column;
 		max-height: min(70%, 560px);
@@ -188,6 +192,7 @@
 		outline: none;
 	}
 	.steps {
+		flex: 0 0 auto;
 		display: flex;
 		gap: 4px;
 		margin: 0 -4px 10px;
@@ -229,6 +234,7 @@
 		color: #fff;
 	}
 	.qbody {
+		flex: 1 1 auto;
 		min-height: 0;
 		overflow-y: auto;
 	}
@@ -355,6 +361,7 @@
 		color: var(--text-faint);
 	}
 	.qfoot {
+		flex: 0 0 auto;
 		display: flex;
 		align-items: center;
 		gap: 8px;

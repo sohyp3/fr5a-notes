@@ -26,4 +26,16 @@ describe('describeError', () => {
 		expect(describeError('upstream', 502)).toMatchObject({ kind: 'server', retry: true });
 		expect(describeError('Add an AI provider in Settings → AI first.').kind).toBe('setup');
 	});
+
+	it('tells a content-filter refusal from a bad key', () => {
+		expect(describeError('400: Input data may contain inappropriate content.', 400)).toMatchObject({
+			kind: 'content',
+			retry: true
+		});
+		expect(describeError('Your input was flagged for "harassment"', 403).kind).toBe('content');
+		expect(
+			describeError("The provider's content filter stopped the reply (content_filter).").kind
+		).toBe('content');
+		expect(describeError('Forbidden', 403).kind).toBe('auth');
+	});
 });

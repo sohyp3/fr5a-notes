@@ -24,7 +24,15 @@
 	const args = $derived.by((): [string, string][] => {
 		try {
 			const o = JSON.parse(entry.args || '{}') as Record<string, unknown>;
-			return Object.entries(o).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)]);
+			return Object.entries(o).map(([k, v]) => [
+				k,
+				typeof v === 'string'
+					? v
+					: // ask_user: the questions, one per line, not their JSON.
+						k === 'questions' && Array.isArray(v)
+						? v.map((q) => (q as { question?: unknown })?.question ?? '').join('\n')
+						: JSON.stringify(v)
+			]);
 		} catch {
 			return entry.args ? [['args', entry.args]] : [];
 		}
@@ -33,7 +41,7 @@
 	/** One-line summary: the most telling argument. */
 	const summary = $derived.by(() => {
 		const pick = args.find(([k]) =>
-			['query', 'id', 'url', 'target', 'folder', 'question'].includes(k)
+			['query', 'id', 'url', 'target', 'folder', 'question', 'questions'].includes(k)
 		);
 		const text = (pick ?? args[0])?.[1] ?? '';
 		return text.replace(/\s+/g, ' ').slice(0, 120);
@@ -46,7 +54,7 @@
 		if (r === '(cancelled)') return 'cancelled';
 		if (entry.write && !entry.write.applied) return /rejected/i.test(r) ? 'rejected' : 'failed';
 		if (
-			/^(Error:|Not written|Unknown tool|Invalid JSON|No note with id|Search failed|HTTP \d)/.test(
+			/^(Error:|Not written|Unknown tool|Invalid JSON|No note with id|Search failed|HTTP \d|Withheld)/.test(
 				r
 			)
 		)

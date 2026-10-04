@@ -671,6 +671,88 @@ test('AI harness: several questions in one full-width card', async ({ page }) =>
 	await expect(harness.locator('textarea')).toBeVisible();
 });
 
+test('AI harness: a long question card keeps its buttons on a short pane', async ({ page }) => {
+	await openPlan(page);
+	const harness = await openHarness(page);
+	const input = harness.locator('textarea');
+	await input.fill('many?');
+	await input.press('Enter');
+	const panel = harness.getByRole('group', { name: 'Question from the AI' });
+	await expect(panel.getByRole('heading', { name: /^Question 1:/ })).toBeVisible();
+	const inside = async () => {
+		const pane = (await harness.boundingBox())!;
+		for (const el of [
+			panel.getByRole('tab').first(),
+			panel.getByRole('button', { name: 'Stop' })
+		]) {
+			const b = (await el.boundingBox())!;
+			expect(b.y).toBeGreaterThanOrEqual(pane.y);
+			expect(b.y + b.height).toBeLessThanOrEqual(pane.y + pane.height + 1);
+		}
+	};
+	await inside();
+	// Context details open and the window shrinks (the keyboard comes up).
+	await harness.locator('.ctx-sum').tap();
+	const size = page.viewportSize()!;
+	await page.setViewportSize({ width: size.width, height: Math.round(size.height * 0.6) });
+	await expect(panel.getByRole('button', { name: 'Stop' })).toBeInViewport();
+	await inside();
+	// The transcript row shows the questions, not their JSON.
+	await expect(harness.locator('.tool .args')).toHaveText(/^Question 1: which/);
+});
+
+test('AI harness: Stop ends a run whose request never answers', async ({ page }) => {
+	await openPlan(page);
+	const harness = await openHarness(page);
+	const input = harness.locator('textarea');
+	await input.fill('hang?');
+	await input.press('Enter');
+	await expect(harness.locator('.msg.ai.streaming')).toBeVisible();
+	await harness.getByRole('button', { name: 'Stop' }).tap();
+	await expect(harness.locator('.note.stopped')).toBeVisible();
+	await expect(harness.getByRole('button', { name: 'Send' })).toBeVisible();
+});
+
+test('AI harness: Retry after Stop brings back what the run was waiting on', async ({ page }) => {
+	await openPlan(page);
+	const harness = await openHarness(page);
+	const input = harness.locator('textarea');
+	await input.fill('help me with tone');
+	await input.press('Enter');
+	await harness.getByRole('button', { name: 'Casual' }).tap();
+	const review = harness.getByRole('group', { name: 'Review change' });
+	await expect(review).toBeVisible();
+	await review.getByRole('button', { name: 'Stop' }).tap();
+	await harness.locator('.note.stopped').getByRole('button', { name: 'Retry' }).tap();
+	// The change comes back for review; the answer given before stays, not asked again.
+	await expect(review).toBeVisible();
+	await expect(harness.getByRole('heading', { name: 'Which tone?' })).toHaveCount(0);
+	await expect(harness.locator('.tool')).toHaveCount(2);
+	await expect(harness.locator('.note.stopped')).toHaveCount(0);
+	await review.getByRole('button', { name: 'Apply' }).tap();
+	await expect(harness.getByText('Done: Applied to Work/plan.md (append)')).toBeVisible();
+	await expect(harness.locator('.msg.you')).toHaveCount(1);
+});
+
+test('AI harness: Retry after a refused request keeps the answers', async ({ page }) => {
+	await openPlan(page);
+	const harness = await openHarness(page);
+	const input = harness.locator('textarea');
+	await input.fill('filter?');
+	await input.press('Enter');
+	await expect(harness.getByRole('heading', { name: 'Which tone?' })).toBeVisible();
+	await harness.getByRole('button', { name: 'Casual' }).tap();
+	const alert = harness.getByRole('alert');
+	await expect(alert).toContainText("Blocked by the provider's content filter");
+	await alert.getByRole('button', { name: 'Retry' }).tap();
+	// Carried on from the answer (its result left out), not from the first message.
+	await expect(harness.getByText(/^Done: Withheld/)).toBeVisible();
+	await expect(harness.getByRole('heading', { name: 'Which tone?' })).toHaveCount(0);
+	await expect(harness.locator('.tool')).toHaveCount(1);
+	await expect(harness.getByRole('alert')).toHaveCount(0);
+	await expect(harness.locator('.msg.you')).toHaveCount(1);
+});
+
 test('AI harness: replies render Markdown and JSON, never raw HTML', async ({ page }) => {
 	await openPlan(page);
 	const harness = await openHarness(page);
