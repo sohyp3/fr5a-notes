@@ -2,7 +2,8 @@
  * What chats cost. Each model call reports its tokens (`usage` in the
  * response; streams send it in the last chunk). Cost is what the provider
  * reports when it does (OpenRouter), else tokens × the provider's price set
- * in Settings → AI, else free for local models, else unknown. One record per
+ * in Settings → AI, else the model's models.dev price (prices.ts), else free
+ * for local models, else unknown. One record per
  * run (a message and its tool steps) goes into the session file, so a chat's
  * cost syncs with it and the Usage window can add everything up.
  */
@@ -74,7 +75,8 @@ export function priceTokens(input: number, output: number, p: Priced | undefined
 
 export function runRecord(
 	usage: Usage,
-	profile: Priced & { id: string; model: string },
+	profile: { id: string; model: string },
+	priced: Priced | undefined,
 	at = new Date()
 ): UsageRecord {
 	return {
@@ -83,9 +85,12 @@ export function runRecord(
 		model: profile.model,
 		input: usage.input,
 		output: usage.output,
-		cost: usage.cost ?? priceTokens(usage.input, usage.output, profile)
+		cost: usage.cost ?? priceTokens(usage.input, usage.output, priced)
 	};
 }
+
+/** A provider (+ model) → how its runs are priced. */
+export type PriceLookup = (provider: string, model: string) => Priced | undefined;
 
 /** A record's cost: as stored, else priced with the provider's current price. */
 export function recordCost(r: UsageRecord, p: Priced | undefined): number | null {
@@ -135,9 +140,9 @@ function add(t: Totals, r: UsageRecord, cost: number | null): void {
 	else t.cost += cost;
 }
 
-export function totalOf(records: UsageRecord[], priced: (provider: string) => Priced | undefined) {
+export function totalOf(records: UsageRecord[], priced: PriceLookup) {
 	const t = empty();
-	for (const r of records) add(t, r, recordCost(r, priced(r.provider)));
+	for (const r of records) add(t, r, recordCost(r, priced(r.provider, r.model)));
 	return t;
 }
 
@@ -159,7 +164,7 @@ export interface UsageReport {
 /** Everything the Usage window shows; days and months are local time. */
 export function usageReport(
 	chats: ChatUsage[],
-	priced: (provider: string) => Priced | undefined,
+	priced: PriceLookup,
 	now = new Date()
 ): UsageReport {
 	const day = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -176,7 +181,7 @@ export function usageReport(
 		if (!chat.records.length) continue;
 		const row = { ...empty(), file: chat.file, title: chat.title, last: '' };
 		for (const r of chat.records) {
-			const cost = recordCost(r, priced(r.provider));
+			const cost = recordCost(r, priced(r.provider, r.model));
 			const at = Date.parse(r.at);
 			add(report.all, r, cost);
 			if (at >= month) add(report.month, r, cost);

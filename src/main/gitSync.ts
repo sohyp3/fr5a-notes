@@ -23,6 +23,16 @@ export class GitSyncError extends Error {
 	}
 }
 
+/** Repo-relative path → its mtime before a merge; null when it wasn't on disk. */
+type FileTimes = Record<string, number | null>;
+
+/** File times kept across a merge stopped on conflicts (in the git dir, never synced). */
+interface SavedTimes {
+	theirs: string;
+	times: FileTimes;
+}
+const TIMES_FILE = 'fr5a-mtimes.json';
+
 interface RunResult {
 	code: number;
 	stdout: string;
@@ -151,6 +161,112 @@ export function createGitSync(root: string) {
 		return files;
 	}
 
+	// --- file times ---------------------------------------------------------
+	// A merge rewrites every file the remote changed, and the fresh mtime would
+	// sort the note to the top of the list as if it had just been edited here.
+	// So a pull keeps each file's time from before it; a file new to this device
+	// gets the time of the last commit that changed it.
+
+	const absOf = (p: string) => path.join(root, p);
+	const statOf = (p: string) => fs.stat(absOf(p)).catch(() => null);
+
+	/** Files that differ between two commits (every file of `b` when `a` is null). */
+	async function changedFiles(a: string | null, b: string): Promise<string[]> {
+		const r = a
+			? await run(['diff', '--name-only', '-z', '--no-renames', a, b])
+			: await run(['ls-tree', '-r', '--name-only', '-z', b]);
+		return r.stdout.split('\0').filter(Boolean);
+	}
+
+	/** Times of the files a merge of `theirs` into `ours` may rewrite. */
+	async function timesBefore(ours: string | null, theirs: string): Promise<FileTimes> {
+		const paths = await changedFiles(ours, theirs);
+		const stats = await Promise.all(paths.map(statOf));
+		return Object.fromEntries(
+			paths.map((p, i) => [p, stats[i]?.isFile() ? stats[i].mtimeMs : null])
+		);
+	}
+
+	/** When each path was last changed in `ref`'s history (author time). */
+	async function commitTimes(paths: string[], ref: string): Promise<Map<string, number>> {
+		const out = new Map<string, number>();
+		for (let i = 0; i < paths.length; i += 200) {
+			const r = await run(
+				[
+					'--literal-pathspecs',
+					'log',
+					'-z',
+					'--format=%x01%at',
+					'--name-only',
+					ref,
+					'--',
+					...paths.slice(i, i + 200)
+				],
+				true
+			);
+			// `\x01<time>\0\n<path>\0<path>\0` per commit, newest first.
+			let at = 0;
+			for (const token of r.stdout.split('\0')) {
+				if (token.startsWith('\x01')) at = Number(token.slice(1)) * 1000;
+				else {
+					const p = token.replace(/^\n/, '');
+					if (p && at && !out.has(p)) out.set(p, at);
+				}
+			}
+		}
+		return out;
+	}
+
+	async function setMtime(p: string, ms: number): Promise<void> {
+		const st = await statOf(p);
+		if (st) await fs.utimes(absOf(p), st.atime, ms / 1000).catch(() => {});
+	}
+
+	/**
+	 * Put back the times from before a merge (`only`: just these paths); files
+	 * the merge created get their last commit's time from `ref`.
+	 */
+	async function restoreTimes(times: FileTimes, ref: string, only?: string[]): Promise<void> {
+		const fresh: string[] = [];
+		for (const p of only ?? Object.keys(times)) {
+			if (!(p in times)) continue;
+			const now = await statOf(p);
+			const before = times[p];
+			if (!now?.isFile()) continue;
+			if (before === null) fresh.push(p);
+			else if (now.mtimeMs !== before) await setMtime(p, before);
+		}
+		if (fresh.length) for (const [p, at] of await commitTimes(fresh, ref)) await setMtime(p, at);
+	}
+
+	async function timesFile(): Promise<string> {
+		return path.resolve(root, (await run(['rev-parse', '--git-path', TIMES_FILE])).stdout.trim());
+	}
+
+	async function saveTimes(saved: SavedTimes | null): Promise<void> {
+		const file = await timesFile();
+		if (saved) await fs.writeFile(file, JSON.stringify(saved), 'utf8');
+		else await fs.rm(file, { force: true });
+	}
+
+	/** Times saved by the pull that started the merge in progress (not a merge begun elsewhere). */
+	async function pendingTimes(): Promise<SavedTimes | null> {
+		try {
+			const saved = JSON.parse(await fs.readFile(await timesFile(), 'utf8')) as SavedTimes;
+			return saved.theirs === (await revParse('MERGE_HEAD')) ? saved : null;
+		} catch {
+			return null;
+		}
+	}
+
+	/** After a clone: every file gets the time of the last commit that changed it. */
+	async function commitTimesAfterClone(): Promise<void> {
+		const head = await revParse('HEAD');
+		if (!head) return;
+		const fresh = (await changedFiles(null, head)).map((p) => [p, null]);
+		await restoreTimes(Object.fromEntries(fresh), head);
+	}
+
 	/** Stage everything and commit it as `sync: <timestamp>`; no-op on a clean tree. */
 	async function commitAll(): Promise<void> {
 		await run(['add', '-A']);
@@ -182,7 +298,9 @@ export function createGitSync(root: string) {
 		await commitAll();
 		await run(['fetch', '--quiet', remote]);
 		const theirs = `refs/remotes/${remote}/${branch}`;
-		if ((await revParse(theirs)) === null) return { status: 'ok' }; // remote branch not created yet
+		const theirsOid = await revParse(theirs);
+		if (theirsOid === null) return { status: 'ok' }; // remote branch not created yet
+		const times = await timesBefore(await revParse('HEAD'), theirsOid);
 		const merge = await run(
 			[
 				...(await identityArgs()),
@@ -194,9 +312,19 @@ export function createGitSync(root: string) {
 			],
 			true
 		);
-		if (merge.code === 0) return { status: 'ok' };
+		if (merge.code === 0) {
+			await restoreTimes(times, theirsOid);
+			return { status: 'ok' };
+		}
 		const files = await conflicts();
-		if (files.length > 0) return { status: 'conflict', files };
+		if (files.length > 0) {
+			await saveTimes({ theirs: theirsOid, times });
+			// Conflicted files get their old time back as each one is resolved.
+			const conflicted = new Set(files.map((f) => f.path));
+			const merged = Object.keys(times).filter((p) => !conflicted.has(p));
+			await restoreTimes(times, theirsOid, merged);
+			return { status: 'conflict', files };
+		}
 		const msg = (merge.stderr || merge.stdout).trim();
 		throw new GitSyncError(classify(msg), msg || 'git merge failed');
 	}
@@ -245,6 +373,7 @@ export function createGitSync(root: string) {
 		await ensureRepo();
 		if (!(await mergeInProgress())) throw new GitSyncError('git', 'No merge is in progress.');
 		const pending = new Set(await unmergedPaths());
+		const saved = await pendingTimes();
 		const absRoot = path.resolve(root);
 		for (const choice of choices) {
 			if (!pending.has(choice.path))
@@ -262,19 +391,28 @@ export function createGitSync(root: string) {
 			} else {
 				await fs.mkdir(path.dirname(abs), { recursive: true });
 				await fs.writeFile(abs, content, 'utf8');
+				if (saved) await restoreTimes(saved.times, saved.theirs, [choice.path]);
 				await run(['add', '--', choice.path]);
 			}
 		}
 		const left = await unmergedPaths();
 		if (left.length > 0) return { status: 'conflict', files: await conflicts() };
 		await run([...(await identityArgs()), 'commit', '--no-edit', '--no-verify']);
+		await saveTimes(null);
 		return { status: 'ok' };
 	}
 
 	/** Abandon an in-progress merge, restoring the pre-pull state. */
 	async function abort(): Promise<void> {
 		await ensureRepo();
+		const saved = await pendingTimes();
 		await run(['merge', '--abort']);
+		if (saved) {
+			// Back to the times from before the pull (files it brought in are gone).
+			const times = Object.entries(saved.times).filter(([, t]) => t !== null);
+			await restoreTimes(Object.fromEntries(times), saved.theirs);
+		}
+		await saveTimes(null);
 	}
 
 	/** A merge is stopped awaiting resolve/abort (false when not a repo). */
@@ -294,7 +432,7 @@ export function createGitSync(root: string) {
 		}
 	}
 
-	return { push, pull, resolve, abort, inMerge, remoteUrl };
+	return { push, pull, resolve, abort, inMerge, remoteUrl, commitTimesAfterClone };
 }
 
 export type GitSync = ReturnType<typeof createGitSync>;

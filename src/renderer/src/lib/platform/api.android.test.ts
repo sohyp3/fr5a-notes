@@ -133,7 +133,9 @@ vi.mock('@capacitor/core', () => ({
 			mem.http.push(opts);
 			return { status: 401, headers: {}, data: '', url: '' };
 		}
-	}
+	},
+	// The app's own FileTimes plugin (git sync keeps note mtimes across a pull).
+	registerPlugin: () => ({ setMtime: async () => {} })
 }));
 
 import { buildMeta, createAndroidPlatform, safeSubdir, TOKEN_KEY } from './api.android';

@@ -1004,6 +1004,14 @@ test('desktop: a narrow window keeps room for the editor beside the AI pane', as
 	await expect(page.getByRole('region', { name: 'AI harness' })).toBeVisible();
 	// The sidebar steps aside and the AI pane narrows; the editor stays usable.
 	await expect.poll(() => width(editorPane(page))).toBeGreaterThanOrEqual(300);
+	// The pane itself narrows too: none of it is cut off at the window's edge.
+	await expect
+		.poll(() =>
+			page
+				.getByRole('region', { name: 'AI harness' })
+				.evaluate((el) => el.getBoundingClientRect().right)
+		)
+		.toBeLessThanOrEqual(1024);
 	await page.getByRole('button', { name: 'Close AI pane' }).click();
 	await expect.poll(() => width(sidebar(page))).toBeGreaterThan(150);
 	await ctx.close();
@@ -1056,12 +1064,12 @@ test('desktop: encryption — off by default, then a key, an encrypted note, loc
 	await dialog.getByRole('button', { name: 'Unlock' }).click();
 	await expect(page.locator('.ProseMirror')).toContainText('world');
 
-	// The AI never sees it: not offered as a mention.
+	// Unlocked, the AI may read it (Settings → Encryption): offered as a mention.
 	await page.getByRole('button', { name: 'Toggle AI harness' }).click();
 	const input = page.getByRole('region', { name: 'AI harness' }).getByRole('textbox');
 	await input.fill('@');
 	await expect(page.getByRole('option', { name: /Plan/ })).toBeVisible();
-	await expect(page.getByRole('option', { name: /Hello/ })).toHaveCount(0);
+	await expect(page.getByRole('option', { name: /Hello/ })).toBeVisible();
 	await input.fill('');
 	await page.getByRole('button', { name: 'Toggle AI harness' }).click();
 
@@ -1289,5 +1297,132 @@ test('desktop: a remembered passphrase unlocks without asking; forgetting delete
 	await page.getByRole('button', { name: 'Lock now' }).click();
 	await page.getByRole('button', { name: 'Unlock…' }).click();
 	await expect(page.getByRole('dialog', { name: 'Unlock encrypted notes' })).toBeVisible();
+	await ctx.close();
+});
+
+/** `.fr5a/` files of the fake workspace. */
+const metaKeys = (page: Page) =>
+	page.evaluate(() =>
+		Object.keys((window as unknown as { __meta: Record<string, string> }).__meta).sort()
+	);
+
+test('desktop: the model picker lists providers that are set up; models.dev prices the rest', async ({
+	browser
+}) => {
+	const { ctx, page } = await desktopPage(browser);
+	await sidebar(page)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	await list(page).getByText('Plan', { exact: true }).click();
+	await page.getByRole('button', { name: 'Toggle AI harness' }).click();
+	const harness = page.getByRole('region', { name: 'AI harness' });
+	await harness.locator('.ctx-sum').click();
+	const picker = harness.getByLabel('Provider');
+	// OpenCode Zen, OpenAI and DeepSeek have no key: not offered.
+	await expect(picker.locator('option')).toHaveText(['Fake · m']);
+
+	// A key for DeepSeek: offered now, priced from models.dev. (The sidebar
+	// steps aside for the AI pane: close it to reach Settings.)
+	const toggle = page.getByRole('button', { name: 'Toggle AI harness' });
+	await toggle.click();
+	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
+	await page.getByRole('button', { name: 'AI assistant' }).click();
+	await page.getByRole('button', { name: 'Show DeepSeek details' }).click();
+	const deepseek = page.locator('.provider', { hasText: 'DeepSeek' });
+	await deepseek.locator('#key-deepseek').fill('sk-test');
+	await deepseek.getByRole('button', { name: 'Save', exact: true }).click();
+	await expect(deepseek.locator('.badge.warn')).toHaveCount(0);
+	await expect(deepseek.getByText('$0.28 in · $0.42 out (models.dev)')).toBeVisible();
+	await page.getByRole('button', { name: 'Close settings' }).click();
+	await toggle.click();
+
+	await expect(picker.locator('option')).toHaveText(['DeepSeek · deepseek-chat', 'Fake · m']);
+	await picker.selectOption('deepseek');
+	const input = harness.locator('textarea');
+	await input.fill('md?');
+	await input.press('Enter');
+	// 1200 in × $0.28 + 34 out × $0.42 per 1M tokens.
+	await expect(harness.locator('.usage')).toHaveText('1.2k in · 34 out · $0.0004');
+	await ctx.close();
+});
+
+test('desktop: unlocked encrypted notes reach the AI; such a chat stays on this device until synced', async ({
+	browser
+}) => {
+	const { ctx, page } = await desktopPage(browser);
+	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
+	await page.getByRole('button', { name: 'Encryption' }).click();
+	await page.getByRole('switch', { name: 'Encrypt notes' }).click();
+	await page.getByLabel('Passphrase', { exact: true }).fill('correct horse');
+	await page.getByLabel('Repeat passphrase').fill('correct horse');
+	await page.getByRole('button', { name: 'Create key' }).click();
+	await expect(page.getByText('Unlocked', { exact: true })).toBeVisible();
+	const allow = page.getByRole('switch', { name: 'AI can read encrypted notes' });
+	await expect(allow).toHaveAttribute('aria-checked', 'true');
+	await allow.click();
+	await page.getByRole('button', { name: 'Close settings' }).click();
+
+	await sidebar(page)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	await list(page).getByRole('button', { name: /Hello/ }).click({ button: 'right' });
+	await page.getByRole('menuitem', { name: 'Encrypt' }).click();
+	await page.getByRole('alertdialog').getByRole('button', { name: 'Encrypt' }).click();
+	await expect.poll(() => readFake(page, 'hello.md')).toContain('-----BEGIN PGP MESSAGE-----');
+	await list(page).getByText('Hello', { exact: true }).click();
+	await expect(page.locator('.ProseMirror')).toContainText('world');
+
+	// Not allowed: the open note stays out, and the chat syncs as usual.
+	await page.getByRole('button', { name: 'Toggle AI harness' }).click();
+	const harness = page.getByRole('region', { name: 'AI harness' });
+	const input = harness.locator('textarea');
+	await input.fill('context?');
+	await input.press('Enter');
+	await expect(harness.getByText('ctx:', { exact: true })).toBeVisible();
+	await expect
+		.poll(() => metaKeys(page))
+		.toContainEqual(expect.stringMatching(/^sessions\/[^/]+\.md$/));
+	await expect(harness.locator('.pill', { hasText: 'device' })).toHaveCount(0);
+
+	// Allowed: it reads the note, and the chat moves out of sync.
+	const toggle = page.getByRole('button', { name: 'Toggle AI harness' });
+	await toggle.click();
+	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
+	await page.getByRole('button', { name: 'Encryption' }).click();
+	await allow.click();
+	await page.getByRole('button', { name: 'Close settings' }).click();
+	await toggle.click();
+	await input.fill('context?');
+	await input.press('Enter');
+	await expect(harness.getByText('ctx: hello.md')).toBeVisible();
+	await expect(harness.locator('.pill', { hasText: 'device' })).toBeVisible();
+	await expect
+		.poll(() => metaKeys(page))
+		.toEqual(expect.arrayContaining([expect.stringMatching(/^sessions\/device\/[^/]+\.md$/)]));
+	expect((await metaKeys(page)).filter((k) => /^sessions\/[^/]+\.md$/.test(k))).toEqual([]);
+	expect(
+		await page.evaluate(
+			() => (window as unknown as { __meta: Record<string, string> }).__meta['sessions/.gitignore']
+		)
+	).toMatch(/^device\/$/m);
+
+	// Saved to notes, it's encrypted.
+	await harness.getByRole('button', { name: 'Session actions' }).click();
+	await page.getByRole('menuitem', { name: /Save to notes/ }).click();
+	const chatId = async () => (await noteIds(page)).find((id) => id.startsWith('AI chats/'));
+	await expect.poll(chatId).toBeTruthy();
+	await expect
+		.poll(async () => readFake(page, (await chatId())!))
+		.toContain('-----BEGIN PGP MESSAGE-----');
+
+	// Synced on request: back in the synced folder.
+	await harness.getByRole('button', { name: 'Session actions' }).click();
+	await page.getByRole('menuitem', { name: /Sync this chat/ }).click();
+	await page.getByRole('alertdialog').getByRole('button', { name: 'Sync it' }).click();
+	await expect(harness.locator('.pill', { hasText: 'device' })).toHaveCount(0);
+	await expect
+		.poll(async () => (await metaKeys(page)).filter((k) => k.startsWith('sessions/device/')))
+		.toEqual([]);
+	expect((await metaKeys(page)).filter((k) => /^sessions\/[^/]+\.md$/.test(k))).toHaveLength(1);
 	await ctx.close();
 });

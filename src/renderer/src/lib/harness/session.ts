@@ -11,6 +11,28 @@ import type { ChatMessage } from './types';
 
 export const SESSIONS_DIR = 'sessions';
 
+/**
+ * Chats that read encrypted notes live in `sessions/device/`, which the
+ * `sessions/.gitignore` keeps out of every sync (root or nested `.fr5a` repo).
+ * "Sync this chat" moves one back. Their keys in a session list: `device/<file>`.
+ */
+export const DEVICE_DIR = 'device';
+export const SESSIONS_IGNORE = `${SESSIONS_DIR}/.gitignore`;
+
+/** `.fr5a/`-relative path of a session file. */
+export function sessionPath(file: string, deviceOnly: boolean): string {
+	return `${SESSIONS_DIR}/${deviceOnly ? `${DEVICE_DIR}/` : ''}${file}`;
+}
+
+/** `sessions/.gitignore` with the device folder listed, or null when it already is. */
+export function withDeviceIgnored(gitignore: string): string | null {
+	const entry = `${DEVICE_DIR}/`;
+	const lines = gitignore.split(/\r?\n/).map((l) => l.trim());
+	if (lines.includes(entry) || lines.includes(`/${entry}`)) return null;
+	const head = gitignore.replace(/\s*$/, '');
+	return `${head ? `${head}\n\n` : ''}# fr5a: chats that read encrypted notes stay on this device\n${entry}\n`;
+}
+
 export type TurnRole = 'you' | 'ai' | 'tool';
 
 export interface Turn {

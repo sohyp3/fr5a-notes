@@ -191,6 +191,27 @@
 					onclick={toggleRemember}><span class="knob"></span></button
 				>
 			</div>
+			{#if app.settings.ai}
+				<div class="row">
+					<div class="label">
+						<span class="name">AI can read encrypted notes</span>
+						<span class="desc"
+							>While they're unlocked. A chat that reads one is kept on this device, out of sync,
+							until you sync it (⋯ → Sync this chat); saved to notes, it's encrypted. Hide a note
+							from cloud AI to keep it to providers on your own hardware.</span
+						>
+					</div>
+					<button
+						class="toggle"
+						class:on={app.settings.aiReadsEncrypted}
+						role="switch"
+						aria-checked={app.settings.aiReadsEncrypted}
+						aria-label="AI can read encrypted notes"
+						onclick={() => app.updateSettings({ aiReadsEncrypted: !app.settings.aiReadsEncrypted })}
+						><span class="knob"></span></button
+					>
+				</div>
+			{/if}
 		</section>
 
 		<section class="group">

@@ -110,6 +110,11 @@ export interface Settings {
 	/** Lock encrypted notes after this many idle / background minutes (0 = never). */
 	autoLockMinutes: number;
 	/**
+	 * The AI may read encrypted notes while they're unlocked. Chats that do
+	 * are kept on this device (out of sync) until you sync them yourself.
+	 */
+	aiReadsEncrypted: boolean;
+	/**
 	 * Folders kept out of the sidebar, All Notes, tags and search (e.g. saved AI
 	 * chats). Still on disk and synced; opened from Settings → General. Not the
 	 * same as "hidden from cloud AI".
@@ -128,6 +133,7 @@ const DEFAULT_SETTINGS: Settings = {
 	openIn: 'auto',
 	encryption: false,
 	autoLockMinutes: 15,
+	aiReadsEncrypted: true,
 	hiddenFolders: []
 };
 
@@ -313,10 +319,14 @@ class AppState {
 			? this.folders.filter((f) => !this.hiddenParent(f))
 			: this.folders
 	);
-	/** Notes the AI harness may see: never encrypted ones, whatever the provider. */
-	aiNotes = $derived(this.notes.filter((n) => !n.encrypted));
-	/** The open note, unless it's encrypted (the AI never reads those). */
-	aiActiveId = $derived(this.activeEncrypted ? null : this.activeId);
+	/** The AI may read encrypted notes now: allowed (Settings → Encryption) and unlocked. */
+	aiReadsEncrypted = $derived(!!this.vault?.unlocked && this.settings.aiReadsEncrypted);
+	/** Notes the AI harness may see: encrypted ones only while `aiReadsEncrypted`. */
+	aiNotes = $derived(this.aiReadsEncrypted ? this.notes : this.notes.filter((n) => !n.encrypted));
+	/** The open note or draft is encrypted and the AI may not read it. */
+	aiBlocksActive = $derived(this.activeEncrypted && !this.aiReadsEncrypted);
+	/** The open note, unless the AI may not read it. */
+	aiActiveId = $derived(this.aiBlocksActive ? null : this.activeId);
 
 	/** Notes filtered by the selected folder, tag and search box. */
 	filtered = $derived.by(() => {

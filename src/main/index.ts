@@ -39,6 +39,8 @@ interface StoreSchema {
 	theme?: string;
 	/** AI harness: provider profiles, search provider, privacy rules (no keys). */
 	ai?: unknown;
+	/** models.dev prices of the AI providers in use (a disposable cache). */
+	aiPrices?: unknown;
 	/** safeStorage-encrypted secrets (API keys), base64. */
 	secrets?: Record<string, string>;
 }
@@ -46,7 +48,14 @@ interface StoreSchema {
 const store = new Store<StoreSchema>({ name: 'fr5a' });
 
 /** Renderer-writable keys — anything else on the wire is rejected. */
-const RENDERER_KEYS = new Set<StateKey>(['lastOpenFile', 'sidebar', 'settings', 'theme', 'ai']);
+const RENDERER_KEYS = new Set<StateKey>([
+	'lastOpenFile',
+	'sidebar',
+	'settings',
+	'theme',
+	'ai',
+	'aiPrices'
+]);
 
 const secrets = createSecrets(store);
 // net.fetch goes through Chromium's stack, so system proxy / VPN settings apply.

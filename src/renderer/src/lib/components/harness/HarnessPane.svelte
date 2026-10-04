@@ -55,7 +55,7 @@
 	let usageOpen = $state(false);
 
 	// What this chat cost so far (records priced with today's prices when the provider didn't say).
-	const priced = (id: string) => ai.config.providers.find((p) => p.id === id);
+	const priced = (id: string, model: string) => ai.priced(id, model);
 	const chatTotal = $derived(totalOf(tab?.session.usage ?? [], priced));
 	const chatCost = $derived(
 		chatTotal.unpriced === chatTotal.runs
@@ -63,16 +63,14 @@
 			: `${formatUsd(chatTotal.cost)}${chatTotal.unpriced ? '+' : ''}`
 	);
 	const replyUsage = (u: UsageRecord) =>
-		usageLine(u.input, u.output, recordCost(u, priced(u.provider)));
+		usageLine(u.input, u.output, recordCost(u, priced(u.provider, u.model)));
 
 	// The default (OpenCode Zen) and other cloud providers need a key; say so up front.
-	let keyMissing = $state(false);
-	$effect(() => {
-		const p = provider;
-		void app.view; // re-check after visiting Settings
-		if (!p || p.local) keyMissing = false;
-		else void ai.apiKey(p.id).then((k) => (keyMissing = !k));
-	});
+	const keyMissing = $derived(!!provider && ai.loaded && !ai.usable(provider));
+	// The model picker offers providers that are set up (plus the tab's own, to show it).
+	const pickable = $derived(
+		ai.config.providers.filter((p) => ai.usable(p) || p.id === provider?.id)
+	);
 
 	// Offline: say so before a send fails.
 	let online = $state(typeof navigator === 'undefined' ? true : navigator.onLine);
@@ -267,15 +265,18 @@
 		}
 	}
 
-	function sessionLabel(file: string): string {
-		return file.replace(/\.md$/, '').replace(/^(\d{4}-\d{2}-\d{2})-\d{6}-/, '$1 · ');
+	function sessionLabel(key: string): string {
+		return key
+			.replace(/^device\//, '')
+			.replace(/\.md$/, '')
+			.replace(/^(\d{4}-\d{2}-\d{2})-\d{6}-/, '$1 · ');
 	}
 
 	/** The one output action a skill recommends; Copy otherwise. */
 	const primary = $derived<'insert' | 'new' | 'copy'>(
 		skill?.output === 'insert' ? 'insert' : skill?.output === 'new-note' ? 'new' : 'copy'
 	);
-	const hasNote = $derived((!!app.activeId || app.draft) && !app.activeEncrypted);
+	const hasNote = $derived((!!app.activeId || app.draft) && !app.aiBlocksActive);
 	const ACT_LABEL = { insert: 'Insert', append: 'Append', new: 'New note', copy: 'Copy' } as const;
 
 	const lastAi = $derived.by(() => {
@@ -333,6 +334,20 @@
 		flash('Forked — the original is unchanged');
 	}
 
+	/** A device-only chat (it read encrypted notes) joins the sync, once the user agrees. */
+	async function syncChat(): Promise<void> {
+		if (!tab) return;
+		const ok = await app.confirm({
+			title: 'Sync this chat?',
+			body: 'It read encrypted notes, and a chat is saved as plain text: what it quoted or summed up from them goes to your git remote unencrypted.',
+			confirm: 'Sync it'
+		});
+		if (!ok) return;
+		await tab.allowSync();
+		void h.refreshSessions();
+		flash('This chat syncs from now on');
+	}
+
 	function openSessionMenu(): void {
 		if (sessionMenu) {
 			sessionMenu = null;
@@ -376,6 +391,14 @@
 						action: () => void saveChat()
 					}
 				];
+		if (tab?.deviceOnly)
+			items.push({
+				label: 'Sync this chat',
+				icon: 'push',
+				hint: 'on this device',
+				disabled: !!tab.running,
+				action: () => void syncChat()
+			});
 		items.push(
 			{
 				label: 'Fork conversation',
@@ -497,10 +520,16 @@
 							{:else}
 								<button
 									class="hist-open"
+									title={f.startsWith('device/')
+										? 'Kept on this device: it read encrypted notes'
+										: undefined}
 									onclick={() => {
 										historyOpen = false;
 										void h.openSession(f);
-									}}>{sessionLabel(f)}</button
+									}}
+									>{#if f.startsWith('device/')}<span class="device"
+											><Icon name="lock" size={12} stroke={2} /></span
+										>{/if}{sessionLabel(f)}</button
 								>
 								<button
 									class="icon small"
@@ -538,6 +567,11 @@
 					<span class="pill" title={tab.attached.join(', ')}>+{tab.attached.length} attached</span>
 				{/if}
 				{#if skill}<span class="pill accent">/{skill.name}</span>{/if}
+				{#if tab.deviceOnly}<span
+						class="pill"
+						title="This chat read encrypted notes: it's kept on this device, out of sync. ⋯ → Sync this chat to sync it."
+						><Icon name="lock" size={11} stroke={2} /> device</span
+					>{/if}
 				{#if searchLabel}<span class="pill" title="Web search on"
 						><Icon name="web" size={11} /> web</span
 					>{/if}
@@ -567,8 +601,8 @@
 							onchange={(e) =>
 								(tab.providerId = (e.currentTarget as HTMLSelectElement).value || null)}
 						>
-							{#each ai.config.providers as p (p.id)}
-								<option value={p.id}>{p.name} · {p.model}</option>
+							{#each pickable as p (p.id)}
+								<option value={p.id}>{p.name} · {p.model}{ai.usable(p) ? '' : ' (no key)'}</option>
 							{:else}
 								<option value="">No provider</option>
 							{/each}
@@ -579,14 +613,16 @@
 						<div class="chips">
 							<button
 								class="chip"
-								class:off={!tab.useCurrent || app.activeEncrypted}
+								class:off={!tab.useCurrent || app.aiBlocksActive}
 								aria-pressed={tab.useCurrent}
-								title={app.activeEncrypted
-									? 'The open note is encrypted: the assistant never reads it'
-									: 'Attach the open note'}
+								title={app.aiBlocksActive
+									? 'The open note is encrypted: unlock it (and allow it in Settings → Encryption) for the assistant to read it'
+									: app.activeEncrypted
+										? 'Attach the open note (encrypted: the chat then stays on this device)'
+										: 'Attach the open note'}
 								onclick={() => (tab.useCurrent = !tab.useCurrent)}
 							>
-								{tab.useCurrent && !app.activeEncrypted ? '◉' : '○'} open note{app.activeEncrypted
+								{tab.useCurrent && !app.aiBlocksActive ? '◉' : '○'} open note{app.activeEncrypted
 									? ' (encrypted)'
 									: ''}
 							</button>
@@ -703,8 +739,8 @@
 							{#if e.usage && !e.streaming}
 								<div
 									class="usage"
-									title={e.usage.cost === null && !priced(e.usage.provider)?.local
-										? 'Tokens of this reply (tool steps included). Add a price to the provider in Settings → AI to see the cost.'
+									title={recordCost(e.usage, priced(e.usage.provider, e.usage.model)) === null
+										? 'Tokens of this reply (tool steps included). models.dev lists no price for this model: add one to the provider in Settings → AI to see the cost.'
 										: 'Tokens and cost of this reply, tool steps included'}
 								>
 									{replyUsage(e.usage)}
@@ -1089,6 +1125,15 @@
 	.hist-open:hover,
 	.hist-open:active {
 		background: var(--bg-hover);
+	}
+	.device {
+		display: inline-block;
+		margin-inline-end: 5px;
+		vertical-align: -1px;
+		color: var(--text-muted);
+	}
+	.device :global(.icon) {
+		display: inline-block;
 	}
 	.confirm {
 		flex: 1;

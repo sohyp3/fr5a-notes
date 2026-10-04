@@ -1,6 +1,15 @@
 import { platform } from '../platform';
 import { remapPath } from '../../../../shared/paths';
 import {
+	CATALOG_URL,
+	catalogPrice,
+	endpointKey,
+	pickPrices,
+	pricesStale,
+	type PriceCache
+} from './prices';
+import type { Priced } from './usage';
+import {
 	BUILTIN_PROVIDERS,
 	DEFAULT_AI_CONFIG,
 	LEGACY_SEARCH_KEY_NAME,
@@ -33,8 +42,66 @@ class AiSettings {
 					providers: [...missing, ...providers]
 				};
 			}
+			await this.checkKeys();
 			this.loaded = true;
 		})());
+	}
+
+	/** Providers with an API key saved on this device. */
+	keys = $state<Record<string, boolean>>({});
+
+	async checkKeys(): Promise<void> {
+		const found = await Promise.all(
+			this.config.providers.map(async (p) => [p.id, !!(await this.apiKey(p.id))] as const)
+		);
+		this.keys = Object.fromEntries(found);
+	}
+
+	/** Set up and ready to answer: runs locally or has a key. */
+	usable(p: ProviderProfile): boolean {
+		return p.local || !!this.keys[p.id];
+	}
+
+	// --- prices: the profile's own, else models.dev's for the model --------------
+
+	prices = $state.raw<PriceCache | null>(null);
+	private pricesTried = 0;
+
+	/**
+	 * Fill the price cache for the cloud providers in use that have no price
+	 * of their own. Fetches models.dev at most every few minutes, and only
+	 * when the cache is old or misses an endpoint.
+	 */
+	async loadPrices(): Promise<void> {
+		this.prices ??= await platform.getState<PriceCache>('aiPrices');
+		const wanted = this.config.providers
+			.filter((p) => !p.local && !p.price && this.keys[p.id])
+			.map((p) => endpointKey(p.baseUrl));
+		if (!pricesStale(this.prices, wanted) || Date.now() - this.pricesTried < 10 * 60_000) return;
+		this.pricesTried = Date.now();
+		try {
+			const res = await platform.httpFetch({ url: CATALOG_URL, timeoutMs: 30_000 });
+			if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
+			this.prices = pickPrices(JSON.parse(res.body), wanted);
+			void platform.setState('aiPrices', this.prices);
+		} catch (err) {
+			console.warn('[ai] model prices unavailable', err);
+		}
+	}
+
+	/** How a run on `providerId` / `model` is priced (see usage.ts `priceTokens`). */
+	priced(providerId: string, model?: string): Priced | undefined {
+		const p = this.config.providers.find((x) => x.id === providerId);
+		if (!p || p.local || p.price) return p;
+		const auto = catalogPrice(this.prices, p.baseUrl, model || p.model);
+		return auto ? { price: auto } : p;
+	}
+
+	/** Where `priced` gets its price: set by you, models.dev, local (free), or none. */
+	priceSource(p: ProviderProfile): 'local' | 'own' | 'catalog' | null {
+		if (p.local) return 'local';
+		if (p.price) return 'own';
+		return catalogPrice(this.prices, p.baseUrl, p.model) ? 'catalog' : null;
 	}
 
 	/** Model ids per provider, fetched from its `/models` endpoint (not persisted). */
@@ -113,14 +180,19 @@ class AiSettings {
 					: this.config.defaultProvider
 		});
 		void platform.setSecret(providerKeyName(id), null);
+		const { [id]: _gone, ...keys } = this.keys;
+		void _gone;
+		this.keys = keys;
 	}
 
 	apiKey(providerId: string): Promise<string | null> {
 		return platform.getSecret(providerKeyName(providerId));
 	}
 
-	setApiKey(providerId: string, key: string | null): Promise<void> {
-		return platform.setSecret(providerKeyName(providerId), key);
+	async setApiKey(providerId: string, key: string | null): Promise<void> {
+		await platform.setSecret(providerKeyName(providerId), key);
+		this.keys = { ...this.keys, [providerId]: !!key };
+		if (key) void this.loadPrices();
 	}
 
 	/** The key for a search provider (DuckDuckGo / SearXNG need none). */

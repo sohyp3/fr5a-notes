@@ -23,6 +23,18 @@ const read = (dir: string, file: string) => fs.readFileSync(path.join(dir, file)
 const head = (dir: string) => git(dir, 'rev-parse', 'HEAD').trim();
 const status = (dir: string) => git(dir, 'status', '--porcelain');
 const mergeHead = (dir: string) => fs.existsSync(path.join(dir, '.git', 'MERGE_HEAD'));
+const OLD = Date.UTC(2020, 0, 1);
+const mtime = (dir: string, file: string) => fs.statSync(path.join(dir, file)).mtimeMs;
+/** Backdate a file, as if last edited long ago. */
+const age = (dir: string, file: string, ms = OLD) =>
+	fs.utimesSync(path.join(dir, file), ms / 1000, ms / 1000);
+/** Commit everything with a fixed author date (epoch seconds) and push it. */
+function pushAt(dir: string, seconds: number): void {
+	const env = { ...process.env, GIT_AUTHOR_DATE: `@${seconds} +0000` };
+	execFileSync('git', ['add', '-A'], { cwd: dir });
+	execFileSync('git', ['commit', '--quiet', '-m', 'dated'], { cwd: dir, env });
+	git(dir, 'push', '--quiet');
+}
 
 function clone(name: string): string {
 	const dir = path.join(tmp, name);
@@ -234,6 +246,55 @@ describe('gitSync', () => {
 		expect(read(b, 'note.md')).toBe(contentBefore);
 		expect(mergeHead(b)).toBe(false);
 		expect(status(b)).toBe('');
+	});
+
+	it('keeps note times across a pull; notes new here get their commit time', async () => {
+		age(b, 'note.md');
+		write(a, 'note.md', read(a, 'note.md') + 'from A\n');
+		write(a, 'from-a.md', '# From A\n');
+		pushAt(a, 1600000000);
+		write(b, 'b-only.md', '# B\n'); // a local commit too: a real merge
+		expect(await createGitSync(b).pull()).toEqual({ status: 'ok' });
+
+		expect(read(b, 'note.md')).toContain('from A');
+		expect(mtime(b, 'note.md')).toBe(OLD);
+		expect(mtime(b, 'from-a.md')).toBe(1600000000 * 1000);
+		expect(status(b)).toBe('');
+	});
+
+	it('keeps note times through a conflicted pull and its resolve', async () => {
+		write(a, 'from-a.md', '# From A\n');
+		await makeConflict();
+		age(b, 'note.md');
+		const sync = createGitSync(b);
+		expect((await sync.pull()).status).toBe('conflict');
+		expect(mtime(b, 'from-a.md')).toBe(
+			Number(git(b, 'log', '-1', '--format=%at', 'origin/main')) * 1000
+		);
+		expect(await sync.resolve([{ path: 'note.md', pick: 'theirs' }])).toEqual({ status: 'ok' });
+		expect(read(b, 'note.md')).toContain('FROM A');
+		expect(mtime(b, 'note.md')).toBe(OLD);
+	});
+
+	it('keeps note times through an abort', async () => {
+		await makeConflict();
+		age(b, 'note.md');
+		const sync = createGitSync(b);
+		expect((await sync.pull()).status).toBe('conflict');
+		await sync.abort();
+		expect(read(b, 'note.md')).toContain('FROM B');
+		expect(mtime(b, 'note.md')).toBe(OLD);
+	});
+
+	it("dates a fresh clone by each file's last commit", async () => {
+		write(a, 'later.md', '# Later\n');
+		pushAt(a, 1600000000);
+		const c = clone(`c${n}`);
+		await createGitSync(c).commitTimesAfterClone();
+		expect(mtime(c, 'later.md')).toBe(1600000000 * 1000);
+		expect(mtime(c, 'note.md')).toBe(
+			Number(git(c, 'log', '-1', '--format=%at', '--', 'note.md')) * 1000
+		);
 	});
 
 	it('pull with uncommitted edits loses nothing', async () => {

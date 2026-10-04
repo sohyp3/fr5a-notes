@@ -52,10 +52,12 @@ describe('usage', () => {
 	it('prices a run: reported cost, else the price, else free when local, else unknown', () => {
 		const base = { id: 'p', model: 'm' };
 		const u = { input: 2_000_000, output: 1_000_000 };
-		expect(runRecord({ ...u, cost: 1.5 }, base).cost).toBe(1.5);
-		expect(runRecord(u, { ...base, price: { input: 0.5, output: 2 } }).cost).toBe(3);
-		expect(runRecord(u, { ...base, local: true }).cost).toBe(0);
-		expect(runRecord(u, base).cost).toBeNull();
+		const price = { input: 0.5, output: 2 };
+		expect(runRecord({ ...u, cost: 1.5 }, base, { price }).cost).toBe(1.5);
+		expect(runRecord(u, base, { price }).cost).toBe(3);
+		expect(runRecord(u, base, { local: true }).cost).toBe(0);
+		expect(runRecord(u, base, {}).cost).toBeNull();
+		expect(runRecord(u, base, undefined).cost).toBeNull();
 		// An unpriced record picks up a price set later.
 		expect(
 			recordCost(rec('2026-01-01T00:00:00Z', { cost: null }), { price: { input: 1, output: 1 } })
@@ -84,7 +86,8 @@ describe('usage', () => {
 				},
 				{ file: 'c.md', title: 'Empty', records: [] }
 			],
-			(p) => (p === 'q' ? { price: { input: 10, output: 10 } } : undefined),
+			// Priced per provider + model (models.dev prices differ by model).
+			(p, m) => (p === 'q' && m === 'big' ? { price: { input: 10, output: 10 } } : undefined),
 			now
 		);
 		expect(report.today).toMatchObject({ runs: 1, cost: 0.01 });

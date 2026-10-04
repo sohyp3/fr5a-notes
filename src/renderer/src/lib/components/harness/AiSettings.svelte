@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { getAppState } from '../../stores/app.svelte';
 	import { platform } from '../../platform';
 	import { getAiSettings } from '../../harness/config.svelte';
@@ -22,6 +22,8 @@
 	import { buildFolderTree, type FolderNode } from '../../folders';
 	import { folderPrivacy } from '../../harness/privacy';
 	import { cleanFolder } from '../../../../../shared/paths';
+	import { reducedMotion } from '../../portal';
+	import { catalogPrice } from '../../harness/prices';
 
 	const app = getAppState();
 	const ai = getAiSettings();
@@ -134,8 +136,7 @@
 		}
 	}
 
-	// Per provider: is a key saved, the key being typed, model list loading.
-	let hasKey = $state<Record<string, boolean>>({});
+	// Per provider: the key being typed, model list loading (saved keys: `ai.keys`).
 	let keyInput = $state<Record<string, string>>({});
 	let loadingModels = $state<Record<string, boolean>>({});
 
@@ -150,18 +151,18 @@
 		if (!key) return;
 		await ai.setApiKey(id, key);
 		keyInput[id] = '';
-		hasKey[id] = true;
 		await refreshModels(id);
 	}
 
 	onMount(async () => {
 		await ai.load();
+		await ai.checkKeys();
+		void ai.loadPrices();
 		await refreshSearchKey();
 		// Fetch model lists for providers that can answer (key saved, local, or Zen's public list).
 		await Promise.all(
 			cfg.providers.map(async (p) => {
-				hasKey[p.id] = !!(await ai.apiKey(p.id));
-				if ((hasKey[p.id] || p.local || p.id === OPENCODE_ZEN.id) && !ai.models[p.id])
+				if ((ai.keys[p.id] || p.local || p.id === OPENCODE_ZEN.id) && !ai.models[p.id])
 					await refreshModels(p.id);
 			})
 		);
@@ -190,11 +191,35 @@
 			? {
 					...p,
 					apiKey: '',
-					hasKey: !!(await ai.apiKey(p.id)),
+					hasKey: !!ai.keys[p.id],
 					priceIn: p.price ? String(p.price.input) : '',
 					priceOut: p.price ? String(p.price.output) : ''
 				}
 			: blank();
+		// It opens below the provider list: on a tablet that's off screen.
+		await tick();
+		formEl?.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' });
+	}
+
+	let formEl = $state<HTMLDivElement>();
+	/** models.dev's price for the provider being edited, used while its own fields are empty. */
+	const draftAuto = $derived(draft ? catalogPrice(ai.prices, draft.baseUrl, draft.model) : null);
+
+	/** "$0.15 in · $0.60 out" per 1M tokens, or "Free". */
+	function priceText(input: number, output: number): string {
+		return input || output ? `$${input} in · $${output} out` : 'Free';
+	}
+
+	/** The price line under a provider: what a run costs, and where that comes from. */
+	function priceLine(p: ProviderProfile): string {
+		const source = ai.priceSource(p);
+		const price = ai.priced(p.id, p.model)?.price;
+		if (source === 'local') return 'Free: runs on your hardware';
+		if (price && source === 'own') return `${priceText(price.input, price.output)} (set by you)`;
+		if (price) return `${priceText(price.input, price.output)} (models.dev)`;
+		return p.id === 'openrouter' || p.baseUrl.includes('openrouter.ai')
+			? 'Reported by OpenRouter with each reply'
+			: 'Unknown: models.dev doesn’t list this model. Edit… to set one.';
 	}
 
 	function preset(e: Event): void {
@@ -224,10 +249,7 @@
 			return;
 		}
 		const id = draft.id;
-		if (draft.apiKey.trim()) {
-			await ai.setApiKey(id, draft.apiKey.trim());
-			hasKey[id] = true;
-		}
+		if (draft.apiKey.trim()) await ai.setApiKey(id, draft.apiKey.trim());
 		ai.saveProvider(profileOf(draft));
 		draft = null;
 		void refreshModels(id);
@@ -316,7 +338,7 @@
 					</label>
 					<span class="badges">
 						{#if p.local}<span class="badge">local</span>{/if}
-						{#if !p.local && !hasKey[p.id]}<span class="badge warn">no key</span>{/if}
+						{#if !p.local && !ai.keys[p.id]}<span class="badge warn">no key</span>{/if}
 					</span>
 					<button
 						class="btn icon"
@@ -337,7 +359,7 @@
 									type="password"
 									autocomplete="off"
 									bind:value={keyInput[p.id]}
-									placeholder={hasKey[p.id]
+									placeholder={ai.keys[p.id]
 										? '•••••• saved'
 										: p.local
 											? 'optional'
@@ -381,11 +403,15 @@
 									? `Couldn't list models: ${ai.modelErrors[p.id]}`
 									: models.length
 										? `${models.length} models`
-										: hasKey[p.id] || p.local || p.id === OPENCODE_ZEN.id
+										: ai.keys[p.id] || p.local || p.id === OPENCODE_ZEN.id
 											? 'Loading models…'
 											: 'Save a key to list models'}</span
 							>
 						</label>
+						<div class="field">
+							<span class="small">Price per 1M tokens</span>
+							<span class="desc">{priceLine(p)}</span>
+						</div>
 						<div class="actions">
 							<span class="desc url">{p.baseUrl}</span>
 							<button class="btn" onclick={() => edit(p)}>Edit…</button>
@@ -400,7 +426,7 @@
 	</div>
 
 	{#if draft}
-		<div class="form">
+		<div class="form" bind:this={formEl}>
 			<label class="field">
 				<span class="name">Start from</span>
 				<select onchange={preset}>
@@ -487,7 +513,7 @@
 								class="num"
 								inputmode="decimal"
 								bind:value={draft.priceIn}
-								placeholder="0.27"
+								placeholder={draftAuto ? String(draftAuto.input) : '0.27'}
 							/></label
 						>
 						<label
@@ -495,13 +521,15 @@
 								class="num"
 								inputmode="decimal"
 								bind:value={draft.priceOut}
-								placeholder="1.10"
+								placeholder={draftAuto ? String(draftAuto.output) : '1.10'}
 							/></label
 						>
 					</div>
 					<span class="desc"
-						>From the provider's pricing page; shows what each chat costs. Not needed for
-						OpenRouter, which reports the cost itself. Local providers are free.</span
+						>Empty: models.dev's price for the model{draftAuto
+							? ` (${priceText(draftAuto.input, draftAuto.output)})`
+							: ', when it lists one'}. Shows what each chat costs. Not needed for OpenRouter, which
+						reports the cost itself. Local providers are free.</span
 					>
 				</div>
 			{/if}

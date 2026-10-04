@@ -115,6 +115,19 @@ export function installFakeApi(): void {
 					}
 				]
 			});
+		// "many?" → four wordy questions, more than a short pane fits.
+		if (last.role === 'user' && last.content.includes('many?'))
+			return call('ask_user', {
+				questions: Array.from({ length: 4 }, (_, i) => ({
+					question: `Question ${i + 1}: which of these directions should the next draft of the plan follow, given everything in the note so far?`,
+					header: `Topic ${i + 1}`,
+					options: Array.from({ length: 4 }, (_, k) => ({
+						label: `Option ${k + 1}`,
+						description:
+							'A longer description of what this choice means for the note, how it changes the structure, and what it leaves out.'
+					}))
+				}))
+			});
 		if (last.role === 'user')
 			return call('ask_user', { question: 'Which tone?', options: ['Formal', 'Casual'] });
 		if (last.content.startsWith('User answered:\n')) return say(`Done: ${last.content}`);
@@ -237,7 +250,14 @@ export function installFakeApi(): void {
 			headers: {},
 			body: req.url.endsWith('/models')
 				? JSON.stringify({ data: [{ id: 'big-pickle' }, { id: 'gpt-5-nano' }, { id: 'm' }] })
-				: fakeModel(req.body ?? '{}')
+				: req.url === 'https://models.dev/api.json'
+					? JSON.stringify({
+							deepseek: {
+								api: 'https://api.deepseek.com',
+								models: { 'deepseek-chat': { cost: { input: 0.28, output: 0.42 } } }
+							}
+						})
+					: fakeModel(req.body ?? '{}')
 		}),
 		httpStream: async (_id: string, req: { body?: string }, onChunk: (t: string) => void) => {
 			maybeFail(req.body ?? '');
@@ -255,10 +275,15 @@ export function installFakeApi(): void {
 		writeMeta: async (rel: string, content: string) => {
 			metaFiles[rel] = content;
 		},
-		listMeta: async (dir: string) =>
-			Object.keys(metaFiles)
+		// Like the real ones: files, then sub-folders as `name/` (not recursive).
+		listMeta: async (dir: string) => {
+			const rest = Object.keys(metaFiles)
 				.filter((k) => k.startsWith(`${dir}/`))
-				.map((k) => k.slice(dir.length + 1)),
+				.map((k) => k.slice(dir.length + 1));
+			const files = rest.filter((r) => !r.includes('/'));
+			const dirs = rest.filter((r) => r.includes('/')).map((r) => `${r.split('/')[0]}/`);
+			return [...files, ...new Set(dirs)];
+		},
 		deleteMeta: async (rel: string) => {
 			delete metaFiles[rel];
 		},

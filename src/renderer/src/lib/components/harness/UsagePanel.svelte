@@ -26,12 +26,12 @@
 	let error = $state<string | null>(null);
 	let scrimPressed = false;
 
-	const priced = (id: string) => ai.config.providers.find((p) => p.id === id);
-	const providerName = (id: string) => priced(id)?.name ?? id;
+	const priced = (id: string, model: string) => ai.priced(id, model);
+	const providerName = (id: string) => ai.config.providers.find((p) => p.id === id)?.name ?? id;
 
 	onMount(() => {
-		h.loadUsage()
-			.then((chats) => (report = usageReport(chats, priced)))
+		Promise.all([h.loadUsage(), ai.loadPrices()])
+			.then(([chats]) => (report = usageReport(chats, priced)))
 			.catch((err) => (error = err instanceof Error ? err.message : String(err)));
 		const onKey = (e: KeyboardEvent) => {
 			if (e.key !== 'Escape') return;
@@ -117,7 +117,8 @@
 					<p class="note">
 						{report.all.unpriced}
 						{report.all.unpriced === 1 ? 'run has' : 'runs have'} no price: its tokens count, the cost
-						doesn't. Add a price to the provider in Settings → AI (OpenRouter reports costs itself).
+						doesn't. Neither the provider nor models.dev gave one; add a price to the provider in Settings
+						→ AI.
 					</p>
 				{/if}
 

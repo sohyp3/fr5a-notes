@@ -44,6 +44,11 @@ const DEFAULT_BRANCH = 'main';
 /** Pending-merge bookkeeping (isomorphic-git has no MERGE_HEAD of its own). */
 const MERGE_STATE = 'fr5a-merge.json';
 const FALLBACK_AUTHOR = { name: 'fr5a', email: 'fr5a@localhost' };
+/** How far back to look for the commit that last changed a file new to this device. */
+const TIME_WALK_LIMIT = 200;
+
+/** Repo-relative path → its mtime before a merge; null when it wasn't on disk. */
+type FileTimes = Record<string, number | null>;
 
 interface MergeState {
 	branch: string;
@@ -51,7 +56,12 @@ interface MergeState {
 	theirs: string;
 	/** Conflicted paths not yet resolved. */
 	paths: string[];
+	/** File times from before the merge, put back as it's resolved or aborted. */
+	times?: FileTimes;
 }
+
+/** `fs.promises.utimes` when the fs client has one (Node; a native plugin on Android). */
+type Utimes = (path: string, atime: Date, mtime: Date) => Promise<void>;
 
 /** Map an isomorphic-git / transport failure onto the desktop error codes. */
 export function classify(err: unknown): GitSyncError {
@@ -155,6 +165,92 @@ export function createIsoGitSync({ fs, http, dir, getToken }: IsoGitDeps) {
 		}
 	}
 
+	// --- file times ---------------------------------------------------------
+	// A merge rewrites every file the remote changed, and the fresh mtime would
+	// sort the note to the top of the list as if it had just been edited here.
+	// So a pull keeps each file's time from before it; a file new to this device
+	// gets the time of the last commit that changed it. Skipped when the fs
+	// client can't set times.
+
+	const utimes = (fs.promises as { utimes?: Utimes }).utimes?.bind(fs.promises);
+
+	/** Files that differ between two commits (every file of `b` when `a` is null). */
+	async function changedFiles(a: string | null, b: string): Promise<string[]> {
+		const out: string[] = [];
+		await git.walk({
+			...base,
+			trees: a ? [git.TREE({ ref: a }), git.TREE({ ref: b })] : [git.TREE({ ref: b })],
+			map: async (filepath, entries) => {
+				const [x, y] = a ? entries : [null, entries[0]];
+				const [tx, ty] = [await x?.type(), await y?.type()];
+				// Same blob, or a subtree with nothing changed inside: don't descend.
+				if (tx === ty && (await x?.oid()) === (await y?.oid())) return null;
+				if (tx === 'blob' || ty === 'blob') out.push(filepath);
+			}
+		});
+		return out;
+	}
+
+	async function mtimeOf(filepath: string): Promise<number | null> {
+		try {
+			const st = await fs.promises.stat(`${dir}/${filepath}`);
+			return st.isFile() ? st.mtimeMs : null;
+		} catch {
+			return null;
+		}
+	}
+
+	/** Times of the files a merge of `theirs` into `ours` may rewrite. */
+	async function timesBefore(ours: string | null, theirs: string): Promise<FileTimes> {
+		if (!utimes) return {};
+		const paths = await changedFiles(ours, theirs);
+		const times = await Promise.all(paths.map(mtimeOf));
+		return Object.fromEntries(paths.map((p, i) => [p, times[i]]));
+	}
+
+	/**
+	 * When each path was last changed in `ref`'s first-parent history (author
+	 * time). Paths older than the walk reaches get the oldest commit's time.
+	 */
+	async function commitTimes(paths: string[], ref: string): Promise<Map<string, number>> {
+		const want = new Set(paths);
+		const out = new Map<string, number>();
+		let oid: string | null = ref;
+		let at = 0;
+		for (let i = 0; oid && want.size && i < TIME_WALK_LIMIT; i++) {
+			const { commit } = await git.readCommit({ ...base, oid });
+			const parent: string | null = commit.parent[0] ?? null;
+			at = commit.author.timestamp * 1000;
+			for (const p of await changedFiles(parent, oid)) if (want.delete(p)) out.set(p, at);
+			oid = parent;
+		}
+		if (at) for (const p of want) out.set(p, at);
+		return out;
+	}
+
+	async function setMtime(filepath: string, ms: number): Promise<void> {
+		const t = new Date(ms);
+		await utimes?.(`${dir}/${filepath}`, t, t).catch(() => {});
+	}
+
+	/**
+	 * Put back the times from before a merge (`only`: just these paths); files
+	 * the merge created get their last commit's time from `ref`.
+	 */
+	async function restoreTimes(times: FileTimes, ref: string, only?: string[]): Promise<void> {
+		if (!utimes) return;
+		const fresh: string[] = [];
+		for (const p of only ?? Object.keys(times)) {
+			if (!(p in times)) continue;
+			const now = await mtimeOf(p);
+			const before = times[p];
+			if (now === null) continue;
+			if (before === null) fresh.push(p);
+			else if (now !== before) await setMtime(p, before);
+		}
+		if (fresh.length) for (const [p, at] of await commitTimes(fresh, ref)) await setMtime(p, at);
+	}
+
 	async function conflictsOf(state: MergeState): Promise<ConflictFile[]> {
 		return Promise.all(
 			state.paths.map(async (p) => ({
@@ -227,6 +323,12 @@ export function createIsoGitSync({ fs, http, dir, getToken }: IsoGitDeps) {
 				await rmrf(gitdir);
 				throw classify(err);
 			}
+			// Every file is new here: each gets the time of its last commit.
+			const head = await resolveRef('HEAD');
+			if (head && utimes) {
+				const fresh = (await changedFiles(null, head)).map((p) => [p, null]);
+				await restoreTimes(Object.fromEntries(fresh), head);
+			}
 			return;
 		}
 		await git.init({ ...base, defaultBranch: remoteHead || DEFAULT_BRANCH });
@@ -264,10 +366,12 @@ export function createIsoGitSync({ fs, http, dir, getToken }: IsoGitDeps) {
 		const theirs = await resolveRef(`refs/remotes/${REMOTE}/${branch}`);
 		if (!theirs) return { status: 'ok' };
 		const ours = await resolveRef('HEAD');
+		const times = await timesBefore(ours, theirs);
 		if (!ours) {
 			// Unborn local branch (nothing written yet): adopt the remote branch.
 			await git.writeRef({ ...base, ref: `refs/heads/${branch}`, value: theirs, force: true });
 			await git.checkout({ ...base, ref: branch });
+			await restoreTimes(times, theirs);
 			await setUpstream(branch);
 			return { status: 'ok' };
 		}
@@ -284,8 +388,15 @@ export function createIsoGitSync({ fs, http, dir, getToken }: IsoGitDeps) {
 		} catch (err) {
 			if ((err as { code?: string }).code === Errors.MergeConflictError.code) {
 				const paths = (err as InstanceType<typeof Errors.MergeConflictError>).data.filepaths;
-				const state: MergeState = { branch, ours, theirs, paths };
+				const state: MergeState = { branch, ours, theirs, paths, times };
 				await writeState(state);
+				// Conflicted files get their old time back as each one is resolved.
+				const conflicted = new Set(paths);
+				await restoreTimes(
+					times,
+					theirs,
+					Object.keys(times).filter((p) => !conflicted.has(p))
+				);
 				return { status: 'conflict', files: await conflictsOf(state) };
 			}
 			throw classify(err);
@@ -294,6 +405,7 @@ export function createIsoGitSync({ fs, http, dir, getToken }: IsoGitDeps) {
 		// forced checkout only moves it to the merge result (merge may have
 		// updated the index already, which a plain checkout would take as current).
 		await git.checkout({ ...base, ref: branch, force: true });
+		await restoreTimes(times, theirs);
 		return { status: 'ok' };
 	}
 
@@ -383,6 +495,7 @@ export function createIsoGitSync({ fs, http, dir, getToken }: IsoGitDeps) {
 			} else {
 				await mkdirp(abs.slice(0, abs.lastIndexOf('/')));
 				await fs.promises.writeFile(abs, content, 'utf8');
+				await restoreTimes(state.times ?? {}, state.theirs, [filepath]);
 				await git.add({ ...base, filepath });
 			}
 			pending.delete(filepath);
@@ -420,6 +533,9 @@ export function createIsoGitSync({ fs, http, dir, getToken }: IsoGitDeps) {
 			await git.remove({ ...base, filepath }).catch(() => {});
 			await fs.promises.unlink(`${dir}/${filepath}`).catch(() => {});
 		}
+		// Back to the times from before the pull (files it brought in are gone).
+		const times = Object.entries(state.times ?? {}).filter(([, t]) => t !== null);
+		await restoreTimes(Object.fromEntries(times), state.theirs);
 		await writeState(null);
 	}
 

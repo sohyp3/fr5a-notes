@@ -190,6 +190,7 @@ export async function addRepo(root: string, folder: string, url: string): Promis
 		if (entries.length === 0) {
 			await fs.mkdir(dest, { recursive: true });
 			await setupGit(root, [...withConfig, 'clone', '--quiet', remote, dest]);
+			await createGitSync(dest).commitTimesAfterClone();
 		} else {
 			await setupGit(dest, ['init', '--quiet']);
 			await setupGit(dest, ['symbolic-ref', 'HEAD', `refs/heads/${branch}`]);

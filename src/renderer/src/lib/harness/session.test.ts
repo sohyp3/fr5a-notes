@@ -6,8 +6,10 @@ import {
 	parseSession,
 	serializeSession,
 	sessionFileName,
+	sessionPath,
 	sessionToNote,
 	slugify,
+	withDeviceIgnored,
 	type Session
 } from './session';
 
@@ -37,6 +39,17 @@ describe('session files', () => {
 			'2026-10-01-090507-hello-world.md'
 		);
 		expect(slugify('مرحبا بالعالم')).toBe('مرحبا-بالعالم');
+	});
+
+	it('keeps device-only chats in an ignored folder', () => {
+		expect(sessionPath('a.md', false)).toBe('sessions/a.md');
+		expect(sessionPath('a.md', true)).toBe('sessions/device/a.md');
+		const fresh = withDeviceIgnored('')!;
+		expect(fresh.split('\n')).toContain('device/');
+		expect(withDeviceIgnored(fresh)).toBeNull();
+		expect(withDeviceIgnored('/device/\n')).toBeNull();
+		// Someone else's entries stay.
+		expect(withDeviceIgnored('*.tmp\n')).toMatch(/^\*\.tmp\n\n# fr5a: .*\ndevice\/\n$/);
 	});
 });
 

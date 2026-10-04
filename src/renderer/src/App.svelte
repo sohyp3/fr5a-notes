@@ -239,7 +239,7 @@
 			data-pane={phone ? (overlay ? app.view : app.pane) : undefined}
 			style:--sidebar-w="{app.widths.sidebar}px"
 			style:--list-w="{app.widths.list}px"
-			style:--harness-w="{app.widths.harness}px"
+			style:--harness-w="{fit.ai}px"
 			in:fade={{ duration: 220 * dur }}
 		>
 			<div

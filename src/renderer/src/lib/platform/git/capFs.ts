@@ -1,3 +1,4 @@
+import { registerPlugin } from '@capacitor/core';
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import type { PromiseFsClient } from 'isomorphic-git';
 import { fromBase64, toBase64 } from './capHttp';
@@ -11,6 +12,11 @@ import { fromBase64, toBase64 } from './capHttp';
  */
 
 const DIR = Directory.Data;
+
+/** App-local native plugin (`FileTimesPlugin.java`): Filesystem can't set an mtime. */
+const FileTimes = registerPlugin<{
+	setMtime(opts: { path: string; mtime: number }): Promise<void>;
+}>('FileTimes');
 
 function fsError(code: 'ENOENT' | 'EEXIST' | 'ENOTDIR' | 'ENOTEMPTY', path: string): Error {
 	return Object.assign(new Error(`${code}: ${path}`), { code });
@@ -139,7 +145,12 @@ export function createCapFs(): PromiseFsClient {
 		async symlink(_target: string, path: string): Promise<void> {
 			throw fsError('ENOENT', path);
 		},
-		async chmod() {}
+		async chmod() {},
+		/** Node's signature (seconds or a Date); only the mtime is set. */
+		async utimes(path: string, _atime: number | Date, mtime: number | Date) {
+			const ms = typeof mtime === 'number' ? mtime * 1000 : mtime.getTime();
+			await FileTimes.setMtime({ path: rel(path), mtime: Math.round(ms) });
+		}
 	};
 
 	async function exists(path: string): Promise<boolean> {

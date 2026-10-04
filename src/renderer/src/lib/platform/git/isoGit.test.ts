@@ -100,6 +100,14 @@ const write = (dir: string, file: string, text: string) => {
 };
 const read = (dir: string, file: string) => fs.readFileSync(path.join(dir, file), 'utf8');
 const has = (dir: string, file: string) => fs.existsSync(path.join(dir, file));
+const OLD = Date.UTC(2020, 0, 1);
+const mtime = (dir: string, file: string) => fs.statSync(path.join(dir, file)).mtimeMs;
+/** Backdate a file, as if last edited long ago. */
+const age = (dir: string, file: string, ms = OLD) =>
+	fs.utimesSync(path.join(dir, file), ms / 1000, ms / 1000);
+/** Author time (ms) of the newest commit on `ref`. */
+const tipTime = async (dir: string, ref = 'HEAD') =>
+	(await git.log({ fs, dir, ref, depth: 1 }))[0].commit.author.timestamp * 1000;
 /** Branch tip in the bare remote, via the real git CLI. */
 const remoteLog = () =>
 	execFileSync('git', ['--git-dir', path.join(tmp, 'remote.git'), 'log', '--format=%s', 'main'], {
@@ -210,7 +218,28 @@ describe('isomorphic-git sync', () => {
 		expect(read(b.dir, 'draft.md')).toBe('# Draft on B\n');
 	});
 
-	async function conflicted() {
+	it('keeps note times across a pull; notes new here get their commit time', async () => {
+		const { a, b } = await twoClones();
+		// A clone dates every file by the last commit that changed it.
+		expect(mtime(b.dir, 'a-only.md')).toBe(await tipTime(b.dir));
+		age(b.dir, 'shared.md');
+		age(b.dir, 'a-only.md', OLD + 1000);
+		write(a.dir, 'shared.md', '# Shared\n\none (a)\ntwo\nthree\n');
+		write(a.dir, 'from-a.md', '# From A\n');
+		await a.sync.push();
+		write(b.dir, 'b-only.md', '# B\n'); // a local commit too: a real merge
+		expect(await b.sync.pull()).toEqual({ status: 'ok' });
+
+		expect(read(b.dir, 'shared.md')).toContain('one (a)');
+		expect(mtime(b.dir, 'shared.md')).toBe(OLD);
+		expect(mtime(b.dir, 'a-only.md')).toBe(OLD + 1000);
+		expect(mtime(b.dir, 'from-a.md')).toBe(await tipTime(b.dir, 'refs/remotes/origin/main'));
+		// The new times don't read as edits.
+		await expect(b.sync.push()).resolves.toEqual({ status: 'ok' });
+		expect((await b.sync.changes()) ?? []).toEqual([]);
+	});
+
+	async function conflicted(beforePull?: (dir: string) => void) {
 		const { a, b } = await twoClones();
 		write(a.dir, 'c1.md', 'base\n');
 		write(a.dir, 'c2.md', 'base\n');
@@ -224,9 +253,36 @@ describe('isomorphic-git sync', () => {
 		await a.sync.push();
 		for (const f of ['c1.md', 'c2.md', 'c3.md']) write(b.dir, f, `mine ${f}\n`);
 		fs.rmSync(path.join(b.dir, 'gone.md'));
+		beforePull?.(b.dir);
 		const res = await b.sync.pull();
 		return { a, b, res };
 	}
+
+	const ageConflicted = (dir: string) =>
+		['c1.md', 'c2.md', 'c3.md'].forEach((f, i) => age(dir, f, OLD + i * 1000));
+
+	it('keeps note times through a conflicted pull and its resolve', async () => {
+		const { b } = await conflicted(ageConflicted);
+		expect(mtime(b.dir, 'clean-a.md')).toBe(await tipTime(b.dir, 'refs/remotes/origin/main'));
+		await b.sync.resolve([{ path: 'c1.md', pick: 'mine' }]);
+		expect(mtime(b.dir, 'c1.md')).toBe(OLD);
+		await b.sync.resolve([
+			{ path: 'c2.md', pick: 'theirs' },
+			{ path: 'c3.md', content: 'manual merge\n' },
+			{ path: 'gone.md', pick: 'mine' }
+		]);
+		expect(read(b.dir, 'c2.md')).toBe('theirs c2.md\n');
+		expect(mtime(b.dir, 'c2.md')).toBe(OLD + 1000);
+		expect(mtime(b.dir, 'c3.md')).toBe(OLD + 2000);
+	});
+
+	it('keeps note times through an abort', async () => {
+		const { b } = await conflicted(ageConflicted);
+		await b.sync.abort();
+		expect(read(b.dir, 'c1.md')).toBe('mine c1.md\n');
+		expect(mtime(b.dir, 'c1.md')).toBe(OLD);
+		expect(mtime(b.dir, 'c3.md')).toBe(OLD + 2000);
+	});
 
 	it('lists conflicts in the desktop {status, files:[{path, mine, theirs}]} shape', async () => {
 		const { b, res } = await conflicted();

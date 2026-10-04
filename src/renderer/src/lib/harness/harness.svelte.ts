@@ -9,16 +9,20 @@ import { AbortError, ProviderError, chatCompletion } from './openai';
 import { blockedReason } from './privacy';
 import { prepareWrite, type PreparedWrite } from './apply';
 import {
+	DEVICE_DIR,
 	forkTitle,
 	hashText,
 	notesRead,
 	parseSession,
 	serializeSession,
 	sessionFileName,
+	sessionPath,
 	sessionToNote,
 	SESSIONS_DIR,
+	SESSIONS_IGNORE,
 	sessionUsage,
 	turnsToMessages,
+	withDeviceIgnored,
 	type Session,
 	type Turn
 } from './session';
@@ -44,7 +48,9 @@ import { OPENCODE_ZEN, ZEN_KEY_URL, type ChatMessage, type ProviderProfile } fro
  * Harness runtime: tmux-like tabs, one session each. A run builds the system
  * prompt (skill + attached notes) on-device, drives the agent loop, streams
  * text into the transcript, and pauses for questions / write approvals.
- * Every session is mirrored to `.fr5a/sessions/<file>.md` after each change.
+ * Every session is mirrored to `.fr5a/sessions/<file>.md` after each change;
+ * one that read an encrypted note to `sessions/device/` (never synced, see
+ * session.ts `DEVICE_DIR`) until the user syncs it.
  */
 
 export type Entry =
@@ -95,16 +101,21 @@ export class HarnessTab {
 	attached = $state<string[]>([]);
 	providerId = $state<string | null>(null);
 	skill = $state<string | null>(null);
+	/** It read an encrypted note: saved in `sessions/device/`, out of sync. */
+	deviceOnly = $state(false);
 
 	private answer: ((a: string[]) => void) | null = null;
 	private decide: ((ok: boolean) => void) | null = null;
 	private reject: ((e: Error) => void) | null = null;
 	ctl: AbortController | null = null;
 	private saveTimer: ReturnType<typeof setTimeout> | null = null;
+	/** Session file writes / moves, in order (a move must not race a save). */
+	private writing: Promise<void> = Promise.resolve();
 
-	constructor(session: Session, history: ChatMessage[] = []) {
+	constructor(session: Session, history: ChatMessage[] = [], deviceOnly = false) {
 		this.session = session;
 		this.history = history;
+		this.deviceOnly = deviceOnly;
 		this.skill = session.skill || null;
 		this.providerId = session.provider || null;
 		this.attached = session.notes.filter((n) => n !== getAppState().activeId);
@@ -119,6 +130,11 @@ export class HarnessTab {
 
 	get title(): string {
 		return this.session.title;
+	}
+
+	/** Its entry in a session list: the file name, under `device/` when device-only. */
+	get key(): string {
+		return `${this.deviceOnly ? `${DEVICE_DIR}/` : ''}${this.session.file}`;
 	}
 
 	/** Wait for the user to answer an ask_user call (one answer per question). */
@@ -189,13 +205,46 @@ export class HarnessTab {
 		this.session.turns = turns;
 		this.session.skill = this.skill ?? '';
 		this.session.provider = this.providerId ?? '';
-		await platform
-			.writeMeta(
-				`${SESSIONS_DIR}/${this.session.file}`,
-				serializeSession($state.snapshot(this.session))
-			)
-			.catch((err) => console.error('[harness] session save failed', err));
+		const text = serializeSession($state.snapshot(this.session));
+		// Where it goes is decided when the write runs, after any earlier move.
+		await this.queue(async () => {
+			if (this.deviceOnly) await ensureDeviceIgnored();
+			await platform.writeMeta(sessionPath(this.session.file, this.deviceOnly), text);
+		});
 	}
+
+	/**
+	 * Text from an encrypted note is about to enter the chat: from now on it's
+	 * saved where sync never looks, and the synced copy (saved before) goes.
+	 */
+	keepOnDevice(): void {
+		if (this.deviceOnly) return;
+		this.deviceOnly = true;
+		const file = this.session.file;
+		void this.queue(() => platform.deleteMeta(sessionPath(file, false)));
+	}
+
+	/** "Sync this chat": back to the synced folder, so the next sync carries it. */
+	async allowSync(): Promise<void> {
+		if (!this.deviceOnly) return;
+		const file = this.session.file;
+		this.deviceOnly = false;
+		await this.save();
+		await this.queue(() => platform.deleteMeta(sessionPath(file, true)));
+	}
+
+	private queue(job: () => Promise<void>): Promise<void> {
+		this.writing = this.writing
+			.then(job)
+			.catch((err) => console.error('[harness] session save failed', err));
+		return this.writing;
+	}
+}
+
+/** `sessions/.gitignore` lists the device folder before anything is written there. */
+async function ensureDeviceIgnored(): Promise<void> {
+	const next = withDeviceIgnored((await platform.readMeta(SESSIONS_IGNORE)) ?? '');
+	if (next !== null) await platform.writeMeta(SESSIONS_IGNORE, next);
 }
 
 /** Now, as stored in a session's `created`. */
@@ -259,6 +308,8 @@ class HarnessState {
 			}
 		});
 		await getAiSettings().load();
+		// Prices for providers that don't report a cost (models.dev, cached).
+		void getAiSettings().loadPrices();
 		await this.loadSkills().catch((err) => console.error('[harness] skills', err));
 		await this.refreshSessions();
 		if (!this.tabs.length) this.newTab();
@@ -323,7 +374,8 @@ class HarnessState {
 				usage: undefined
 			},
 			// Plain JSON messages: a deep copy so the two tabs never share one.
-			JSON.parse(JSON.stringify(tab.history)) as ChatMessage[]
+			JSON.parse(JSON.stringify(tab.history)) as ChatMessage[],
+			tab.deviceOnly
 		);
 		// Live entries keep what the files drop (diff cards, retry marks).
 		copy.entries = $state.snapshot(tab.entries) as Entry[];
@@ -364,6 +416,20 @@ class HarnessState {
 		});
 
 		const existing = asNew ? undefined : app.notes.find((n) => n.id === tab.session.saved);
+		const folder = cleanFolder(ai.config.chatsFolder ?? '');
+		// A chat that read encrypted notes is saved encrypted, as is one going into an encrypted folder.
+		const seal =
+			!!app.vault?.hasKey &&
+			(tab.deviceOnly || existing?.encrypted || (!existing && app.folderEncrypted(folder)));
+		if (tab.deviceOnly && !seal) {
+			const ok = await app.confirm({
+				title: 'Save as plain text?',
+				body: 'This chat read encrypted notes, and encryption is off now: the note is saved as plain text and syncs like any other.',
+				confirm: 'Save'
+			});
+			if (!ok) return '';
+		}
+		const body = seal ? await app.vault!.encrypt(text) : text;
 		let id: string;
 		if (existing) {
 			id = existing.id;
@@ -379,11 +445,10 @@ class HarnessState {
 				});
 				if (!ok) return '';
 			}
-			await platform.writeNote(id, text);
+			await platform.writeNote(id, body);
 			if (id === app.activeId) await app.reloadFromDisk();
 		} else {
-			const folder = cleanFolder(ai.config.chatsFolder ?? '');
-			const meta = await platform.createNote(cleanName(session.title) || 'AI chat', folder, text);
+			const meta = await platform.createNote(cleanName(session.title) || 'AI chat', folder, body);
 			id = meta.id;
 		}
 		tab.session.saved = id;
@@ -393,16 +458,18 @@ class HarnessState {
 		return existing ? `Updated ${id}` : `Saved to ${id}`;
 	}
 
-	async openSession(file: string): Promise<void> {
-		const open = this.tabs.findIndex((t) => t.session.file === file);
+	/** Open a session by its list key (`<file>` or `device/<file>`). */
+	async openSession(key: string): Promise<void> {
+		const open = this.tabs.findIndex((t) => t.key === key);
 		if (open !== -1) {
 			this.active = open;
 			return;
 		}
-		const text = await platform.readMeta(`${SESSIONS_DIR}/${file}`);
+		const text = await platform.readMeta(`${SESSIONS_DIR}/${key}`);
 		if (text === null) return;
-		const session = parseSession(file, text);
-		const tab = new HarnessTab(session, turnsToMessages(session.turns));
+		const deviceOnly = key.startsWith(`${DEVICE_DIR}/`);
+		const session = parseSession(key.slice(deviceOnly ? DEVICE_DIR.length + 1 : 0), text);
+		const tab = new HarnessTab(session, turnsToMessages(session.turns), deviceOnly);
 		// Reuse an untouched blank tab rather than piling up empties.
 		if (this.tab && !this.tab.entries.length && !this.tab.running) this.tabs[this.active] = tab;
 		else {
@@ -428,7 +495,7 @@ class HarnessState {
 		);
 		const out = chats.filter((c): c is ChatUsage => c !== null);
 		for (const t of this.tabs) {
-			const live = { file: t.session.file, title: t.title, records: t.session.usage ?? [] };
+			const live = { file: t.key, title: t.title, records: t.session.usage ?? [] };
 			const i = out.findIndex((c) => c.file === live.file);
 			if (i === -1) out.push(live);
 			else out[i] = live;
@@ -436,16 +503,24 @@ class HarnessState {
 		return out;
 	}
 
-	async deleteSession(file: string): Promise<void> {
-		await platform.deleteMeta(`${SESSIONS_DIR}/${file}`);
-		this.sessionFiles = this.sessionFiles.filter((f) => f !== file);
+	async deleteSession(key: string): Promise<void> {
+		await platform.deleteMeta(`${SESSIONS_DIR}/${key}`);
+		this.sessionFiles = this.sessionFiles.filter((f) => f !== key);
 	}
 
 	async refreshSessions(): Promise<void> {
 		this.sessionsLoading = true;
 		try {
-			const entries = await platform.listMeta(SESSIONS_DIR);
-			this.sessionFiles = entries.filter((f) => f.endsWith('.md'));
+			const [synced, device] = await Promise.all([
+				platform.listMeta(SESSIONS_DIR),
+				platform.listMeta(`${SESSIONS_DIR}/${DEVICE_DIR}`).catch(() => [] as string[])
+			]);
+			const md = (f: string) => f.endsWith('.md');
+			// Device-only chats first: there are few, and they're the ones to sync or delete.
+			this.sessionFiles = [
+				...device.filter(md).map((f) => `${DEVICE_DIR}/${f}`),
+				...synced.filter(md)
+			];
 			this.sessionsError = null;
 		} catch (err) {
 			// A missing folder just means no sessions yet.
@@ -472,7 +547,7 @@ class HarnessState {
 	/** Notes that will be inlined on the next send (open note first, folders/tags expanded). */
 	context(tab: HarnessTab) {
 		const app = getAppState();
-		// Encrypted notes never reach a model, local or not (chats are saved as plain text).
+		// Encrypted notes only while unlocked and allowed (`app.aiNotes`); see `keepOnDevice`.
 		const first = tab.useCurrent && app.aiActiveId ? [app.aiActiveId] : [];
 		return expandMentions(tab.attached, app.aiNotes, first, MAX_INLINE_NOTES);
 	}
@@ -496,7 +571,10 @@ class HarnessState {
 			if (why && explicit.includes(id))
 				throw new Error(`${why} Pick a local provider or detach it.`);
 			if (why) skipped.push(id);
-			else notes.push({ id, content });
+			else {
+				if (app.noteMeta(id)?.encrypted) tab.keepOnDevice();
+				notes.push({ id, content });
+			}
 		}
 		// Folder / tag mentions also get an index, so the model can read_note the rest.
 		for (const g of ctx.groups) {
@@ -521,8 +599,10 @@ class HarnessState {
 					.join(' ')
 			});
 		// An unsaved draft is still "the open note".
-		if (tab.useCurrent && !app.activeId && app.draft && !app.draftEncrypted && app.editor)
+		if (tab.useCurrent && !app.activeId && app.draft && !app.aiBlocksActive && app.editor) {
+			if (app.draftEncrypted) tab.keepOnDevice();
 			notes.unshift({ id: '(unsaved draft)', content: docToText(app.editor) });
+		}
 		return notes;
 	}
 
@@ -532,7 +612,7 @@ class HarnessState {
 		let n = estimateTokens(
 			tab.history.map((m) => ('content' in m ? (m.content ?? '') : '')).join('\n')
 		);
-		if (tab.useCurrent && !app.activeEncrypted) n += estimateTokens(app.activeContent);
+		if (tab.useCurrent && !app.aiBlocksActive) n += estimateTokens(app.activeContent);
 		return n;
 	}
 
@@ -623,7 +703,10 @@ class HarnessState {
 					profile,
 					config: ai.config,
 					notes: () => app.aiNotes,
-					readNote: (id) => platform.readNote(id),
+					readNote: (id) => {
+						if (app.noteMeta(id)?.encrypted) tab.keepOnDevice();
+						return platform.readNote(id);
+					},
 					ask: (items) => tab.ask({ items }),
 					proposeWrite: (p) => this.reviewWrite(tab, p),
 					search: search ? (q) => webSearch(platform, search, searchKey, q) : undefined,
@@ -701,7 +784,7 @@ class HarnessState {
 			tab.ctl = null;
 			// Calls that finished cost money even when the run failed or was stopped.
 			if (used) {
-				const record = runRecord(used, profile);
+				const record = runRecord(used, profile, ai.priced(profile.id, profile.model));
 				tab.session.usage = [...(tab.session.usage ?? []), record];
 				for (let i = tab.entries.length - 1; i >= runStart; i--) {
 					const e = tab.entries[i];
