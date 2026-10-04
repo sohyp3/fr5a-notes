@@ -1154,3 +1154,140 @@ test('desktop: a folder can be hidden from the sidebar, shown again, and deleted
 	await expect(page.getByText('AI chats', { exact: true })).toBeVisible();
 	await ctx.close();
 });
+
+test('AI harness: each reply shows its cost; the chat and the Usage window add it up', async ({
+	page
+}) => {
+	await openPlan(page);
+	const harness = await openHarness(page);
+	const input = harness.locator('textarea');
+	await input.fill('cost?');
+	await input.press('Enter');
+	await expect(harness.getByText('Priced reply')).toBeVisible();
+	await expect(harness.locator('.usage')).toHaveText('1.5k in · 50 out · $0.0021');
+	await expect(harness.locator('.chat-cost')).toHaveText('$0.0021');
+
+	// A local model's reply counts its tokens at no cost.
+	await input.fill('md?');
+	await input.press('Enter');
+	await expect(harness.locator('.usage').nth(1)).toHaveText('1.2k in · 34 out · $0');
+
+	// Usage travels with the session file.
+	await expect
+		.poll(() =>
+			page.evaluate(() =>
+				Object.entries((window as unknown as { __meta: Record<string, string> }).__meta)
+					.filter(([k]) => k.startsWith('sessions/'))
+					.map(([, v]) => v)
+					.join('')
+			)
+		)
+		.toMatch(/^usage: \[.*\|1500\|50\|0\.0021.*\|1200\|34\|0"\]$/m);
+
+	await harness.getByRole('button', { name: 'Session actions' }).tap();
+	await page.getByRole('menuitem', { name: /Usage & cost/ }).tap();
+	const usage = page.getByRole('dialog', { name: 'Usage' });
+	await expect(usage.locator('.card').first()).toContainText('$0.0021');
+	await expect(usage.locator('.card').first()).toContainText('2 runs');
+	await expect(usage.getByRole('button', { name: /^cost\?/ })).toContainText('$0.0021');
+	await usage.getByRole('button', { name: 'Close', exact: true }).tap();
+	await expect(usage).toHaveCount(0);
+});
+
+test('desktop: encrypting a folder encrypts its notes, new notes and notes moved in', async ({
+	browser
+}) => {
+	const { ctx, page } = await desktopPage(browser);
+	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
+	await page.getByRole('button', { name: 'Encryption' }).click();
+	await page.getByRole('switch', { name: 'Encrypt notes' }).click();
+	await page.getByLabel('Passphrase', { exact: true }).fill('correct horse');
+	await page.getByLabel('Repeat passphrase').fill('correct horse');
+	await page.getByRole('button', { name: 'Create key' }).click();
+	await expect(page.getByText('Unlocked', { exact: true })).toBeVisible();
+	await page.getByRole('button', { name: 'Close settings' }).click();
+
+	const work = sidebar(page).getByRole('button', { name: /^Work \d+$/ });
+	await work.click({ button: 'right' });
+	await page.getByRole('menuitem', { name: 'Encrypt all notes' }).click();
+	await page.getByRole('alertdialog').getByRole('button', { name: 'Encrypt all' }).click();
+	await expect.poll(() => readFake(page, 'Work/plan.md')).toContain('-----BEGIN PGP MESSAGE-----');
+	await expect(work.locator('.shield')).toBeVisible();
+
+	// A new note in the folder starts encrypted.
+	await work.click();
+	await list(page).getByRole('button', { name: 'New note' }).click();
+	await expect(page.locator('.editor-head')).toContainText('Encrypted');
+	await expect(page.locator('.ProseMirror')).toBeFocused();
+	await page.keyboard.type('Secret plan');
+	await page.keyboard.press('Enter');
+	await page.keyboard.type('hidden body');
+	// The file is named after the title as typed by the first save.
+	const secretId = async () => (await noteIds(page)).find((id) => id.startsWith('Work/Secret'));
+	await expect.poll(secretId).toBeTruthy();
+	const id = (await secretId())!;
+	await expect.poll(() => readFake(page, id)).toContain('-----BEGIN PGP MESSAGE-----');
+	await expect.poll(async () => (await readFake(page, id)).includes('hidden body')).toBe(false);
+
+	// A plain note moved in is encrypted too.
+	await sidebar(page)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	await list(page).getByRole('button', { name: /Hello/ }).dragTo(work);
+	await expect.poll(() => readFake(page, 'Work/hello.md')).toContain('-----BEGIN PGP MESSAGE-----');
+	await ctx.close();
+});
+
+test('desktop: a remembered passphrase unlocks without asking; forgetting deletes it', async ({
+	browser
+}) => {
+	const { ctx, page } = await desktopPage(browser);
+	const secret = () =>
+		page.evaluate(() =>
+			(
+				window as unknown as { api: { getSecret(n: string): Promise<string | null> } }
+			).api.getSecret('pgp:passphrase')
+		);
+	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
+	await page.getByRole('button', { name: 'Encryption' }).click();
+	await page.getByRole('switch', { name: 'Encrypt notes' }).click();
+	await page.getByLabel('Passphrase', { exact: true }).fill('correct horse');
+	await page.getByLabel('Repeat passphrase').fill('correct horse');
+	await page.getByRole('button', { name: 'Create key' }).click();
+
+	// Remember: the passphrase is checked, then kept in secure storage.
+	const remember = page.getByRole('switch', { name: 'Remember passphrase' });
+	await remember.click();
+	const dialog = page.getByRole('dialog', { name: 'Remember the passphrase' });
+	await dialog.getByLabel('Key passphrase').fill('wrong');
+	await dialog.getByRole('button', { name: 'Remember' }).click();
+	await expect(dialog.getByText('Wrong passphrase.')).toBeVisible();
+	await dialog.getByLabel('Key passphrase').fill('correct horse');
+	await dialog.getByRole('button', { name: 'Remember' }).click();
+	await expect(remember).toHaveAttribute('aria-checked', 'true');
+	expect(await secret()).toBe('correct horse');
+
+	// Encrypt a note, lock, and open it again: no prompt.
+	await page.getByRole('button', { name: 'Close settings' }).click();
+	await sidebar(page)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	await list(page).getByRole('button', { name: /Hello/ }).click({ button: 'right' });
+	await page.getByRole('menuitem', { name: 'Encrypt' }).click();
+	await page.getByRole('alertdialog').getByRole('button', { name: 'Encrypt' }).click();
+	await expect.poll(() => readFake(page, 'hello.md')).toContain('-----BEGIN PGP MESSAGE-----');
+	await page.getByRole('button', { name: 'Lock encrypted notes' }).click();
+	await list(page).getByText('hello', { exact: true }).click();
+	await expect(page.locator('.ProseMirror')).toContainText('world');
+	await expect(page.getByRole('dialog', { name: 'Unlock encrypted notes' })).toHaveCount(0);
+
+	// Forget: deleted from the device, and the next unlock asks again.
+	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
+	await remember.click();
+	await expect(remember).toHaveAttribute('aria-checked', 'false');
+	expect(await secret()).toBeNull();
+	await page.getByRole('button', { name: 'Lock now' }).click();
+	await page.getByRole('button', { name: 'Unlock…' }).click();
+	await expect(page.getByRole('dialog', { name: 'Unlock encrypted notes' })).toBeVisible();
+	await ctx.close();
+});

@@ -49,7 +49,7 @@ function scripted(results: Partial<CompletionResult>[]) {
 		seen,
 		complete: async ({ messages }: { messages: ChatMessage[] }) => {
 			seen.push(structuredClone(messages));
-			return { content: '', toolCalls: [], finishReason: 'stop', ...results[i++] };
+			return { content: '', toolCalls: [], finishReason: 'stop', usage: null, ...results[i++] };
 		}
 	};
 }

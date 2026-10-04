@@ -17,6 +17,8 @@
 	const hasChildren = $derived(node.children.length > 0);
 	const selected = $derived(app.selectedFolder === node.path);
 	const hidden = $derived(app.folderHidden(node.path));
+	// Only looked up while encryption is on.
+	const sealed = $derived(!!app.vault && app.folderEncrypted(node.path));
 
 	// --- drop target (mouse drag of a note / folder) ---------------------------
 	let over = $state(false);
@@ -154,6 +156,13 @@
 			/>
 		</svg>
 		<span class="name">{node.name}</span>
+		{#if sealed}
+			<span
+				class="shield"
+				title="Every note here is encrypted; new notes will be too"
+				aria-hidden="true"><Icon name="key" size={11} stroke={2} /></span
+			>
+		{/if}
 		{#if hidden}
 			<span
 				class="shield"

@@ -45,6 +45,22 @@
 				hint: hidden?.via === 'parent' ? `via ${baseOf(hidden.folder) || 'Everything'}` : undefined,
 				action: () => app.toggleFolderHidden(path)
 			});
+		if (app.vault) {
+			if (app.folderHas(path, false))
+				items.push({
+					label: 'Encrypt all notes',
+					icon: 'key',
+					divider: true,
+					action: () => void app.setFolderEncrypted(path, true)
+				});
+			if (app.folderHas(path, true))
+				items.push({
+					label: 'Remove encryption from all',
+					icon: 'key',
+					divider: !app.folderHas(path, false),
+					action: () => void app.setFolderEncrypted(path, false)
+				});
+		}
 		items.push(
 			{
 				label: 'Hide from sidebar',

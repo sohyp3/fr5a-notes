@@ -147,6 +147,33 @@ describe('isomorphic-git sync', () => {
 		expect(bHead.commit.parent).toHaveLength(1);
 	});
 
+	it('push sends the notes as they are now: earlier pulled states never leave', async () => {
+		const { a, b } = await twoClones();
+		write(b.dir, 'secret.md', 'my password is hunter2\n');
+		await b.sync.pull(); // commits the plain text locally
+		write(a.dir, 'from-a.md', '# From A\n');
+		await a.sync.push(); // the remote moves meanwhile
+		write(
+			b.dir,
+			'secret.md',
+			'-----BEGIN PGP MESSAGE-----\nciphertext\n-----END PGP MESSAGE-----\n'
+		);
+		await b.sync.pull(); // merges A's commit
+		expect(await b.sync.push()).toEqual({ status: 'ok' });
+
+		expect(remoteLog()).toHaveLength(3);
+		const gitDir = ['--git-dir', path.join(tmp, 'remote.git')];
+		const show = (spec: string) =>
+			execFileSync('git', [...gitDir, 'show', spec], { encoding: 'utf8' });
+		expect(show('main:secret.md')).toContain('ciphertext');
+		expect(show('main:from-a.md')).toBe('# From A\n');
+		expect(
+			execFileSync('git', [...gitDir, 'log', '-p', 'main'], { encoding: 'utf8' })
+		).not.toContain('hunter2');
+		// B continues from the pushed commit with a clean tree.
+		await expect(b.sync.push()).rejects.toMatchObject({ code: 'nothing-to-push' });
+	});
+
 	it('reports nothing-to-push when already up to date', async () => {
 		const { b } = await twoClones();
 		await expect(b.sync.push()).rejects.toMatchObject({ code: 'nothing-to-push' });
@@ -164,8 +191,10 @@ describe('isomorphic-git sync', () => {
 		expect(await a.sync.pull()).toEqual({ status: 'ok' });
 		expect(read(a.dir, 'shared.md')).toBe('# Shared\n\nONE (a)\ntwo\nTHREE (b)\n');
 		expect(read(a.dir, 'b-only.md')).toBe('# B\n');
-		const [merge] = await git.log({ fs, dir: a.dir, depth: 1 });
-		expect(merge.commit.parent).toHaveLength(2);
+		// B's merge was folded into one commit on top of A's before the push.
+		const [tip] = await git.log({ fs, dir: a.dir, depth: 1 });
+		expect(tip.commit.parent).toHaveLength(1);
+		expect(remoteLog()).toHaveLength(3);
 	});
 
 	it('keeps uncommitted local edits across a pull', async () => {

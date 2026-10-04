@@ -1,4 +1,5 @@
 import { createSseParser } from './sse';
+import { readUsage, type Usage } from './usage';
 import type { ChatMessage, Http, ProviderProfile, ToolCall, ToolDef } from './types';
 
 /**
@@ -12,6 +13,8 @@ export interface CompletionResult {
 	content: string;
 	toolCalls: ToolCall[];
 	finishReason: string | null;
+	/** Tokens (and cost, if the provider says) — null when the provider didn't report. */
+	usage: Usage | null;
 }
 
 export interface CompletionRequest {
@@ -64,6 +67,7 @@ function wireMessages(messages: ChatMessage[]): unknown[] {
 export function createAccumulator(onDelta?: (text: string) => void) {
 	let content = '';
 	let finishReason: string | null = null;
+	let usage: Usage | null = null;
 	const calls: { id: string; name: string; arguments: string }[] = [];
 
 	type Delta = {
@@ -95,7 +99,7 @@ export function createAccumulator(onDelta?: (text: string) => void) {
 		/** One SSE `data:` payload, or a whole non-streamed JSON completion. */
 		push(json: string) {
 			if (json === '[DONE]') return;
-			let obj: { choices?: unknown[]; error?: { message?: string } };
+			let obj: { choices?: unknown[]; error?: { message?: string }; usage?: unknown };
 			try {
 				obj = JSON.parse(json);
 			} catch {
@@ -103,6 +107,9 @@ export function createAccumulator(onDelta?: (text: string) => void) {
 			}
 			if (obj.error) throw new ProviderError(obj.error.message ?? 'Provider error');
 			for (const c of obj.choices ?? []) choice(c as Parameters<typeof choice>[0]);
+			// Streams report usage once, in the last chunk; some repeat a running total.
+			const u = readUsage(obj.usage);
+			if (u) usage = u;
 		},
 		result(): CompletionResult {
 			return {
@@ -110,7 +117,8 @@ export function createAccumulator(onDelta?: (text: string) => void) {
 				toolCalls: calls
 					.filter((c) => c && c.name)
 					.map((c, i) => ({ ...c, id: c.id || `call_${i}` })),
-				finishReason
+				finishReason,
+				usage
 			};
 		}
 	};
@@ -163,10 +171,29 @@ export async function listModels(
 }
 
 let seq = 0;
+/** Endpoints that refused `stream_options`: asked without it from then on. */
+const noStreamOptions = new Set<string>();
 
 export async function chatCompletion(
 	http: Http,
 	req: CompletionRequest
+): Promise<CompletionResult> {
+	const url = completionsUrl(req.profile.baseUrl);
+	try {
+		return await complete(http, req, !noStreamOptions.has(url));
+	} catch (err) {
+		// A strict server rejecting the usage request: retry once without it.
+		if (!(err instanceof ProviderError) || !/stream_options/i.test(err.message)) throw err;
+		if (noStreamOptions.has(url)) throw err;
+		noStreamOptions.add(url);
+		return complete(http, req, false);
+	}
+}
+
+async function complete(
+	http: Http,
+	req: CompletionRequest,
+	askUsage: boolean
 ): Promise<CompletionResult> {
 	const { profile } = req;
 	if (req.signal?.aborted) throw new AbortError();
@@ -180,6 +207,9 @@ export async function chatCompletion(
 		messages: wireMessages(req.messages),
 		stream: true
 	};
+	// Token counts in the last chunk; OpenRouter also puts the cost in it.
+	if (askUsage) body.stream_options = { include_usage: true };
+	if (/openrouter\.ai/i.test(profile.baseUrl)) body.usage = { include: true };
 	if (req.tools?.length && profile.tools) {
 		body.tools = req.tools.map((t) => ({ type: 'function', function: t }));
 	}

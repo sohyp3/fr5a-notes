@@ -134,3 +134,57 @@ describe('listModels', () => {
 		});
 	});
 });
+
+describe('chatCompletion usage', () => {
+	it('asks for usage and reads it from the last chunk (cost from OpenRouter)', async () => {
+		const sent: Record<string, unknown>[] = [];
+		const http: Http = {
+			httpFetch: async (req) => {
+				sent.push(JSON.parse(req.body!));
+				return {
+					status: 200,
+					headers: {},
+					body: sse(
+						{ choices: [{ delta: { content: 'hi' } }] },
+						{ choices: [], usage: { prompt_tokens: 120, completion_tokens: 8, cost: 0.0003 } },
+						'[DONE]'
+					)
+				};
+			}
+		};
+		const r = await chatCompletion(http, {
+			profile: { ...profile, baseUrl: 'https://openrouter.ai/api/v1' },
+			apiKey: 'k',
+			messages: []
+		});
+		expect(r.usage).toEqual({ input: 120, output: 8, cost: 0.0003 });
+		expect(sent[0].stream_options).toEqual({ include_usage: true });
+		expect(sent[0].usage).toEqual({ include: true });
+	});
+
+	it('has no usage when the provider sends none, and drops stream_options if refused', async () => {
+		const sent: Record<string, unknown>[] = [];
+		const http: Http = {
+			httpFetch: async (req) => {
+				const body = JSON.parse(req.body!);
+				sent.push(body);
+				if (body.stream_options)
+					return {
+						status: 400,
+						headers: {},
+						body: '{"error":{"message":"Unknown field stream_options"}}'
+					};
+				return { status: 200, headers: {}, body: sse({ choices: [{ delta: { content: 'ok' } }] }) };
+			}
+		};
+		const p = { ...profile, baseUrl: 'http://strict/v1' };
+		const r = await chatCompletion(http, { profile: p, apiKey: null, messages: [] });
+		expect(r.content).toBe('ok');
+		expect(r.usage).toBeNull();
+		expect(sent.map((b) => 'stream_options' in b)).toEqual([true, false]);
+		// Remembered: the next request goes straight without it.
+		await chatCompletion(http, { profile: p, apiKey: null, messages: [] });
+		expect(sent.map((b) => 'stream_options' in b)).toEqual([true, false, false]);
+		expect('usage' in sent[1]).toBe(false);
+	});
+});

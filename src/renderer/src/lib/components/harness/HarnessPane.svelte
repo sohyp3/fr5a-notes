@@ -9,7 +9,16 @@
 	import { flattenTagTree } from '../../editor/TagSuggest';
 	import { OPENCODE_ZEN, SEARCH_KINDS, ZEN_KEY_URL, type SearchProfile } from '../../harness/types';
 	import { reducedMotion } from '../../portal';
+	import {
+		formatTokens,
+		formatUsd,
+		recordCost,
+		totalOf,
+		usageLine,
+		type UsageRecord
+	} from '../../harness/usage';
 	import Markdown from './Markdown.svelte';
+	import UsagePanel from './UsagePanel.svelte';
 	import QuestionPanel from './QuestionPanel.svelte';
 	import ToolRow from './ToolRow.svelte';
 	import DiffView from '../DiffView.svelte';
@@ -43,6 +52,18 @@
 	let sessionBtn = $state<HTMLButtonElement | null>(null);
 	let sessionMenu = $state<{ x: number; y: number } | null>(null);
 	let saving = $state(false);
+	let usageOpen = $state(false);
+
+	// What this chat cost so far (records priced with today's prices when the provider didn't say).
+	const priced = (id: string) => ai.config.providers.find((p) => p.id === id);
+	const chatTotal = $derived(totalOf(tab?.session.usage ?? [], priced));
+	const chatCost = $derived(
+		chatTotal.unpriced === chatTotal.runs
+			? `${formatTokens(chatTotal.input + chatTotal.output)} tok`
+			: `${formatUsd(chatTotal.cost)}${chatTotal.unpriced ? '+' : ''}`
+	);
+	const replyUsage = (u: UsageRecord) =>
+		usageLine(u.input, u.output, recordCost(u, priced(u.provider)));
 
 	// The default (OpenCode Zen) and other cloud providers need a key; say so up front.
 	let keyMissing = $state(false);
@@ -355,13 +376,21 @@
 						action: () => void saveChat()
 					}
 				];
-		items.push({
-			label: 'Fork conversation',
-			icon: 'fork',
-			divider: true,
-			disabled: empty || !!tab?.running,
-			action: forkChat
-		});
+		items.push(
+			{
+				label: 'Fork conversation',
+				icon: 'fork',
+				divider: true,
+				disabled: empty || !!tab?.running,
+				action: forkChat
+			},
+			{
+				label: 'Usage & cost',
+				icon: 'list',
+				hint: chatTotal.runs ? chatCost : undefined,
+				action: () => (usageOpen = true)
+			}
+		);
 		return items;
 	});
 
@@ -417,7 +446,7 @@
 			bind:this={sessionBtn}
 			class="icon"
 			class:on={!!sessionMenu}
-			title="Save to notes, fork"
+			title="Save to notes, fork, usage"
 			aria-label="Session actions"
 			aria-haspopup="menu"
 			aria-expanded={!!sessionMenu}
@@ -515,6 +544,16 @@
 				<span class="tokens" title="Approximate tokens in history + open note"
 					>~{h.estimate(tab).toLocaleString()}</span
 				>
+				{#if chatTotal.runs}
+					<span
+						class="chat-cost"
+						title="This chat so far: {formatTokens(chatTotal.input)} tokens in, {formatTokens(
+							chatTotal.output
+						)} out{chatTotal.unpriced
+							? ` (${chatTotal.unpriced} ${chatTotal.unpriced === 1 ? 'run' : 'runs'} without a price)`
+							: ''}">{chatCost}</span
+					>
+				{/if}
 				<span class="chev" class:open={ctxOpen}><Icon name="chevron" size={13} /></span>
 			</button>
 			{#if ctxOpen}
@@ -661,6 +700,16 @@
 						<div class="msg ai" class:streaming={e.streaming}>
 							<Markdown text={e.text} />
 							{#if e.streaming}<span class="caret" aria-hidden="true"></span>{/if}
+							{#if e.usage && !e.streaming}
+								<div
+									class="usage"
+									title={e.usage.cost === null && !priced(e.usage.provider)?.local
+										? 'Tokens of this reply (tool steps included). Add a price to the provider in Settings → AI to see the cost.'
+										: 'Tokens and cost of this reply, tool steps included'}
+								>
+									{replyUsage(e.usage)}
+								</div>
+							{/if}
 							{#if !e.streaming && e.text.trim()}
 								<div class="acts" class:show={i === lastAi}>
 									<button
@@ -828,6 +877,10 @@
 			{toast}
 		</div>{/if}
 </section>
+
+{#if usageOpen}
+	<UsagePanel onclose={() => (usageOpen = false)} />
+{/if}
 
 {#if sessionMenu}
 	<ActionMenu
@@ -1103,6 +1156,19 @@
 		color: var(--text-faint);
 		font-family: var(--font-mono);
 		font-size: 10.5px;
+	}
+	.chat-cost {
+		flex: 0 0 auto;
+		color: var(--text-muted);
+		font-family: var(--font-mono);
+		font-size: 10.5px;
+		font-weight: 600;
+	}
+	.usage {
+		margin-top: 6px;
+		font-family: var(--font-mono);
+		font-size: 10.5px;
+		color: var(--text-faint);
 	}
 	.chev {
 		flex: 0 0 auto;

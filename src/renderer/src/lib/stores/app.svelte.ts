@@ -392,9 +392,9 @@ class AppState {
 		await this.refresh();
 
 		// Re-open the note from the previous session, if it still exists.
-		// An encrypted one waits for the user to unlock (no passphrase prompt at launch).
+		// An encrypted one only when already unlocked (no passphrase prompt at launch).
 		const last = await platform.getState<string>('lastOpenFile');
-		if (last && this.notes.some((n) => n.id === last && !n.encrypted)) {
+		if (last && this.notes.some((n) => n.id === last && (!n.encrypted || this.vault?.unlocked))) {
 			await this.openNote(last);
 		}
 
@@ -600,12 +600,14 @@ class AppState {
 		await this.flush(); // persist the outgoing note (or materialise a draft)
 		// New notes land in the folder currently in view ('' = workspace root).
 		this.draftFolder = this.trashOpen ? '' : (this.selectedFolder ?? '');
+		// A folder whose notes are all encrypted keeps new ones encrypted.
+		const sealed = !!this.vault?.hasKey && this.folderEncrypted(this.draftFolder);
 		// No file yet: open an in-memory draft on an empty H1 line. The first
 		// save derives the filename from the typed title.
 		this.view = 'editor';
 		this.pane = 'editor';
 		this.draft = true;
-		this.draftEncrypted = false;
+		this.draftEncrypted = sealed;
 		this.activeId = null;
 		this.activeContent = '# ';
 		this.baseline = { id: null, text: '' };
@@ -1044,7 +1046,7 @@ class AppState {
 			this.openSettings('encryption');
 			return false;
 		}
-		if (v.unlocked) return true;
+		if (v.unlocked || (await v.unlockSaved())) return true;
 		const pass = await this.prompt({
 			title: 'Unlock encrypted notes',
 			label: 'Key passphrase',
@@ -1081,15 +1083,96 @@ class AppState {
 		} else if (!(await this.ensureUnlocked())) return;
 		if (id === this.activeId) await this.flush();
 		try {
-			const text = await platform.readNote(id); // plain as it is, or decrypted
-			if (on) await platform.writeNote(id, await v.encrypt(text));
-			else await hostPlatform.writeNote(id, text);
+			await this.convertNote(id, on, v);
 		} catch (err) {
 			this.notify('error', v.errorText(err));
 			return;
 		}
 		await this.refresh();
 		this.notify('ok', on ? 'Encrypted' : 'Saved as plain text');
+	}
+
+	/** Rewrite a note encrypted (public key only) or as plain text (needs the unlocked key). */
+	private async convertNote(id: string, on: boolean, v: Vault): Promise<void> {
+		const text = await platform.readNote(id); // plain as it is, or decrypted
+		if (on) await platform.writeNote(id, await v.encrypt(text));
+		else await hostPlatform.writeNote(id, text);
+	}
+
+	/** Convert notes one by one; returns how many failed (e.g. encrypted with another key). */
+	private async convertAll(ids: string[], on: boolean, v: Vault): Promise<number> {
+		if (this.activeId && ids.includes(this.activeId)) await this.flush();
+		let failed = 0;
+		for (const id of ids) {
+			try {
+				await this.convertNote(id, on, v);
+			} catch {
+				failed++;
+			}
+		}
+		return failed;
+	}
+
+	/** Notes in folder `path` and below. */
+	private notesUnder(path: string): NoteMeta[] {
+		return path ? this.notes.filter((n) => n.id.startsWith(`${path}/`)) : [];
+	}
+
+	/**
+	 * Every note in the folder (and below) is encrypted. Such a folder stays
+	 * that way: new notes and notes moved into it are encrypted too. It's read
+	 * off the files, so it holds on every device.
+	 */
+	folderEncrypted(path: string): boolean {
+		const notes = this.notesUnder(path);
+		return notes.length > 0 && notes.every((n) => n.encrypted);
+	}
+
+	/** Some note in the folder is (`encrypted`) / isn't (`!encrypted`) encrypted. */
+	folderHas(path: string, encrypted: boolean): boolean {
+		return this.notesUnder(path).some((n) => n.encrypted === encrypted);
+	}
+
+	/** Encrypt every note in a folder (and below), or turn them all back into plain text. */
+	async setFolderEncrypted(path: string, on: boolean): Promise<void> {
+		this.folderMenu = null;
+		const v = this.vault;
+		if (!v) return;
+		if (!v.hasKey) {
+			this.notify('error', 'Create or import a key first.');
+			this.openSettings('encryption');
+			return;
+		}
+		const ids = this.notesUnder(path)
+			.filter((n) => n.encrypted !== on)
+			.map((n) => n.id);
+		if (!ids.length) return;
+		const name = baseOf(path);
+		const count = `${ids.length} ${ids.length === 1 ? 'note' : 'notes'}`;
+		if (!on && !(await this.ensureUnlocked())) return;
+		const ok = await this.confirm(
+			on
+				? {
+						title: `Encrypt everything in “${name}”?`,
+						body: `${count} will be saved and synced as ciphertext that only your key opens, and new notes here will be too. File names stay readable, and versions already pushed to git stay readable in the repository’s history.`,
+						confirm: 'Encrypt all'
+					}
+				: {
+						title: `Remove encryption in “${name}”?`,
+						body: `${count} will be saved as plain text again, readable by anyone with the files or the repository.`,
+						confirm: 'Remove encryption',
+						danger: true
+					}
+		);
+		if (!ok) return;
+		const failed = await this.convertAll(ids, on, v);
+		await this.refresh();
+		if (failed)
+			this.notify(
+				'error',
+				`${failed} of ${count} couldn’t be ${on ? 'encrypted' : 'decrypted'} (encrypted with another key?)`
+			);
+		else this.notify('ok', on ? `Encrypted ${count} in “${name}”` : `${count} saved as plain text`);
 	}
 
 	/** The open draft will be written encrypted from its first save. */
@@ -1265,16 +1348,20 @@ class AppState {
 	private async relocateNote(id: string, to: string): Promise<void> {
 		const note = this.notes.find((n) => n.id === id);
 		if (note && !(await this.keepsPrivacy(note.title, note.aiLocal ? null : id, to))) return;
+		// Into a folder whose notes are all encrypted: this one is encrypted too.
+		const v = this.vault;
+		const seal = !!v?.hasKey && !!note && !note.encrypted && this.folderEncrypted(parentOf(to));
 		if (id === this.activeId) await this.flush();
 		const next = await this.runMove(() => platform.moveNote(id, to));
 		if (next === null) return;
 		this.pathMoved(id, next);
+		const sealed = seal && !(await this.convertAll([next], true, v!));
 		await this.refresh();
 		this.notify(
 			'ok',
 			parentOf(next) === parentOf(id)
 				? `Renamed to ${baseOf(next)}`
-				: `Moved to ${parentOf(next) || 'Notes'}`
+				: `Moved to ${parentOf(next) || 'Notes'}${sealed ? ' and encrypted' : ''}`
 		);
 	}
 
@@ -1282,12 +1369,24 @@ class AppState {
 		// A folder listed itself stays hidden (the setting moves along); only an inherited one can lapse.
 		const self = getAiSettings().config.localOnlyFolders.includes(from);
 		if (!self && !(await this.keepsPrivacy(baseOf(from), from, to))) return;
+		const v = this.vault;
+		const seal = !!v?.hasKey && this.folderEncrypted(parentOf(to));
 		await this.flush();
 		const next = await this.runMove(() => platform.moveFolder(from, to));
 		if (next === null) return;
 		await getAiSettings().folderMoved(from, next);
 		this.pathMoved(from, next);
 		await this.refresh();
+		// Into an encrypted folder: its plain notes are encrypted too.
+		const plain = seal ? this.notesUnder(next).filter((n) => !n.encrypted) : [];
+		if (plain.length) {
+			await this.convertAll(
+				plain.map((n) => n.id),
+				true,
+				v!
+			);
+			await this.refresh();
+		}
 		this.notify(
 			'ok',
 			parentOf(next) === parentOf(from)

@@ -1,4 +1,5 @@
 import type { HttpRequest, HttpResponse } from '../../../../shared/types';
+import type { Price } from './usage';
 
 /** One OpenAI-compatible endpoint: DeepSeek, OpenRouter, opencode, llama.cpp, Ollama /v1… */
 export interface ProviderProfile {
@@ -13,6 +14,8 @@ export interface ProviderProfile {
 	tools: boolean;
 	/** Context window budget in tokens (approx.); history is trimmed to fit. */
 	contextTokens: number;
+	/** USD per 1M tokens, for the cost of chats (used when the provider doesn't report one). */
+	price?: Price;
 }
 
 export type SearchKind = 'duckduckgo' | 'searxng' | 'brave' | 'tavily';

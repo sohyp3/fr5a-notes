@@ -98,6 +98,27 @@
 		}
 	}
 
+	/** On: ask for the passphrase (checked) and keep it; off: delete it from this device. */
+	async function toggleRemember(): Promise<void> {
+		if (!v) return;
+		if (v.remembered) {
+			await v.forgetPassphrase();
+			app.notify('ok', 'Passphrase deleted from this device');
+			return;
+		}
+		const vault = v;
+		const saved = await app.prompt({
+			title: 'Remember the passphrase',
+			label: 'Key passphrase',
+			value: '',
+			confirm: 'Remember',
+			secret: true,
+			check: (p) => (p ? null : 'Enter your passphrase.'),
+			submit: (p) => vault.remember(p)
+		});
+		if (saved !== null) app.notify('ok', 'Passphrase remembered on this device');
+	}
+
 	async function remove(): Promise<void> {
 		const ok = await app.confirm({
 			title: 'Remove the key from this device?',
@@ -151,6 +172,24 @@
 				>
 					{#each AUTO_LOCK as o (o.min)}<option value={o.min}>{o.label}</option>{/each}
 				</select>
+			</div>
+			<div class="row">
+				<div class="label">
+					<span class="name">Remember passphrase</span>
+					<span class="desc"
+						>Kept in the {app.touch ? 'Android Keystore' : 'system keyring'} so notes unlock without typing
+						it, also after an auto-lock. Anyone who can use this device can then read them. Turning it
+						off deletes it from this device.</span
+					>
+				</div>
+				<button
+					class="toggle"
+					class:on={v.remembered}
+					role="switch"
+					aria-checked={v.remembered}
+					aria-label="Remember passphrase"
+					onclick={toggleRemember}><span class="knob"></span></button
+				>
 			</div>
 		</section>
 
@@ -320,6 +359,43 @@
 	}
 	.status.open {
 		color: var(--accent);
+	}
+	.toggle {
+		flex: 0 0 auto;
+		width: 42px;
+		height: 24px;
+		border-radius: 999px;
+		background: var(--bg-active);
+		position: relative;
+		transition: background var(--dur-pane) ease;
+	}
+	:global(html[data-touch]) .toggle {
+		width: 50px;
+		height: 30px;
+	}
+	.toggle.on {
+		background: var(--accent);
+	}
+	.knob {
+		position: absolute;
+		top: 3px;
+		left: 3px;
+		width: 18px;
+		height: 18px;
+		border-radius: 50%;
+		background: #fff;
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+		transition: transform var(--dur-pane) var(--ease-spring);
+	}
+	:global(html[data-touch]) .knob {
+		width: 24px;
+		height: 24px;
+	}
+	.toggle.on .knob {
+		transform: translateX(18px);
+	}
+	:global(html[data-touch]) .toggle.on .knob {
+		transform: translateX(20px);
 	}
 	.form {
 		display: flex;

@@ -18,6 +18,7 @@
 		type SearchKind
 	} from '../../harness/types';
 	import Icon from '../Icon.svelte';
+	import UsagePanel from './UsagePanel.svelte';
 	import { buildFolderTree, type FolderNode } from '../../folders';
 	import { folderPrivacy } from '../../harness/privacy';
 	import { cleanFolder } from '../../../../../shared/paths';
@@ -62,8 +63,15 @@
 		}
 	];
 
-	type Draft = ProviderProfile & { apiKey: string; hasKey: boolean };
+	/** Prices are edited as text: empty = no price. */
+	type Draft = ProviderProfile & {
+		apiKey: string;
+		hasKey: boolean;
+		priceIn: string;
+		priceOut: string;
+	};
 	let draft = $state<Draft | null>(null);
+	let usageOpen = $state(false);
 	/** The one provider row showing its key + model fields. */
 	let expanded = $state<string | null>(null);
 	// --- hidden from cloud AI: folder tree + single notes ---------------------
@@ -170,13 +178,23 @@
 			tools: true,
 			contextTokens: 32000,
 			apiKey: '',
-			hasKey: false
+			hasKey: false,
+			priceIn: '',
+			priceOut: ''
 		};
 	}
 
 	async function edit(p: ProviderProfile | null): Promise<void> {
 		message = null;
-		draft = p ? { ...p, apiKey: '', hasKey: !!(await ai.apiKey(p.id)) } : blank();
+		draft = p
+			? {
+					...p,
+					apiKey: '',
+					hasKey: !!(await ai.apiKey(p.id)),
+					priceIn: p.price ? String(p.price.input) : '',
+					priceOut: p.price ? String(p.price.output) : ''
+				}
+			: blank();
 	}
 
 	function preset(e: Event): void {
@@ -185,6 +203,8 @@
 	}
 
 	function profileOf(d: Draft): ProviderProfile {
+		const price = (v: string) => Math.max(0, Number(v.trim().replace(',', '.')) || 0);
+		const priced = !d.local && (d.priceIn.trim() || d.priceOut.trim());
 		return {
 			id: d.id,
 			name: d.name.trim() || d.model || 'Provider',
@@ -192,7 +212,8 @@
 			model: d.model.trim(),
 			local: d.local,
 			tools: d.tools,
-			contextTokens: Math.max(2048, Number(d.contextTokens) || 32000)
+			contextTokens: Math.max(2048, Number(d.contextTokens) || 32000),
+			...(priced ? { price: { input: price(d.priceIn), output: price(d.priceOut) } } : {})
 		};
 	}
 
@@ -457,6 +478,33 @@
 					bind:value={draft.contextTokens}
 				/></label
 			>
+			{#if !draft.local}
+				<div class="field">
+					<span class="name">Price per 1M tokens (USD, optional)</span>
+					<div class="prices">
+						<label
+							><span class="small">Input</span><input
+								class="num"
+								inputmode="decimal"
+								bind:value={draft.priceIn}
+								placeholder="0.27"
+							/></label
+						>
+						<label
+							><span class="small">Output</span><input
+								class="num"
+								inputmode="decimal"
+								bind:value={draft.priceOut}
+								placeholder="1.10"
+							/></label
+						>
+					</div>
+					<span class="desc"
+						>From the provider's pricing page; shows what each chat costs. Not needed for
+						OpenRouter, which reports the cost itself. Local providers are free.</span
+					>
+				</div>
+			{/if}
 			{#if message}<p class="msg" class:error={message.kind === 'error'}>{message.text}</p>{/if}
 			<div class="actions">
 				<button class="btn" onclick={() => (draft = null)}>Cancel</button>
@@ -646,6 +694,18 @@
 	{/if}
 	{#if packMsg}<p class="msg" class:error={packMsg.kind === 'error'}>{packMsg.text}</p>{/if}
 </section>
+
+<section class="group">
+	<h3>Usage</h3>
+	<div class="row">
+		<div class="label">
+			<span class="name">What your chats cost</span>
+			<span class="desc">Today, this month and all time, per model and per chat.</span>
+		</div>
+		<button class="btn" onclick={() => (usageOpen = true)}>Open…</button>
+	</div>
+</section>
+{#if usageOpen}<UsagePanel onclose={() => (usageOpen = false)} />{/if}
 
 <section class="group">
 	<h3>Advanced</h3>
@@ -917,6 +977,15 @@
 	}
 	.num {
 		width: 80px;
+	}
+	.prices {
+		display: flex;
+		gap: 12px;
+	}
+	.prices label {
+		display: flex;
+		align-items: center;
+		gap: 6px;
 	}
 	.check {
 		display: flex;

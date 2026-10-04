@@ -297,13 +297,38 @@ export function createIsoGitSync({ fs, http, dir, getToken }: IsoGitDeps) {
 		return { status: 'ok' };
 	}
 
-	/** Pull (merge), then push. Stops at a conflict without pushing; never forces. */
+	/**
+	 * Fold the unpushed commits (all the app's own here: sync commits, merges)
+	 * into one on top of the remote branch, so a push sends the notes as they
+	 * are now and an earlier state, like a note before it was encrypted, never
+	 * leaves the device. A soft reset: the branch moves, the index (the merged
+	 * tree after `pull`) is committed again.
+	 */
+	async function squashUnpushed(branch: string, remoteHead: string | null): Promise<void> {
+		const head = await resolveRef('HEAD');
+		if (!remoteHead || !head || head === remoteHead) return;
+		const { commit } = await git.readCommit({ ...base, oid: head });
+		if (commit.parent.length === 1 && commit.parent[0] === remoteHead) return; // already one
+		if (!(await git.isDescendent({ ...base, oid: head, ancestor: remoteHead, depth: -1 }))) return;
+		await git.writeRef({ ...base, ref: `refs/heads/${branch}`, value: remoteHead, force: true });
+		const rows = await git.statusMatrix({ ...base });
+		// Nothing staged differs from the remote: nothing to send.
+		if (rows.every(([, h, , s]) => (h === 1 && s === 1) || (h === 0 && s === 0))) return;
+		await git.commit({
+			...base,
+			message: `sync: ${new Date().toISOString()}`,
+			author: await author()
+		});
+	}
+
+	/** Pull (merge), fold the unpushed commits, then push. Stops at a conflict; never forces. */
 	async function push(): Promise<SyncResult> {
 		const pulled = await pull();
 		if (pulled.status === 'conflict') return pulled;
 		const branch = await currentBranch();
-		const head = await resolveRef('HEAD');
 		const remoteHead = await resolveRef(`refs/remotes/${REMOTE}/${branch}`);
+		await squashUnpushed(branch, remoteHead);
+		const head = await resolveRef('HEAD');
 		if (head === null || head === remoteHead)
 			throw new GitSyncError('nothing-to-push', 'Nothing to push — already up to date.');
 		let res;

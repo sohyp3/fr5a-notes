@@ -17,6 +17,7 @@ import {
 	sessionFileName,
 	sessionToNote,
 	SESSIONS_DIR,
+	sessionUsage,
 	turnsToMessages,
 	type Session,
 	type Turn
@@ -32,6 +33,8 @@ import {
 	type Skill
 } from './skills';
 import { createTools, type WriteProposal } from './tools';
+import { parseFrontmatter, str } from './frontmatter';
+import { addUsage, runRecord, type ChatUsage, type Usage, type UsageRecord } from './usage';
 import { expandMentions, mentionKey, parseMentions, remapKey } from './mentions';
 import { fetchPage, webSearch } from './web';
 import type { QuestionItem } from './questions';
@@ -47,7 +50,8 @@ import { OPENCODE_ZEN, ZEN_KEY_URL, type ChatMessage, type ProviderProfile } fro
 export type Entry =
 	/** `mark`: history length before this message, so Retry can rewind to it. */
 	| { kind: 'you'; text: string; mark?: number }
-	| { kind: 'ai'; text: string; streaming: boolean }
+	/** `usage`: tokens and cost of the run this reply ended (live sessions only). */
+	| { kind: 'ai'; text: string; streaming: boolean; usage?: UsageRecord }
 	| {
 			kind: 'tool';
 			name: string;
@@ -314,7 +318,9 @@ class HarnessState {
 				created: stamp(),
 				turns: tab.turns(),
 				saved: undefined,
-				savedHash: undefined
+				savedHash: undefined,
+				// What the original cost stays with the original.
+				usage: undefined
 			},
 			// Plain JSON messages: a deep copy so the two tabs never share one.
 			JSON.parse(JSON.stringify(tab.history)) as ChatMessage[]
@@ -403,6 +409,31 @@ class HarnessState {
 			this.tabs.push(tab);
 			this.active = this.tabs.length - 1;
 		}
+	}
+
+	/** Usage of every chat (open tabs as they are now), for the Usage window. */
+	async loadUsage(): Promise<ChatUsage[]> {
+		await this.refreshSessions();
+		const chats = await Promise.all(
+			this.sessionFiles.map(async (file): Promise<ChatUsage | null> => {
+				const text = await platform.readMeta(`${SESSIONS_DIR}/${file}`).catch(() => null);
+				if (!text) return null;
+				const { data } = parseFrontmatter(text);
+				return {
+					file,
+					title: str(data.title) || file.replace(/\.md$/, ''),
+					records: sessionUsage(data.usage)
+				};
+			})
+		);
+		const out = chats.filter((c): c is ChatUsage => c !== null);
+		for (const t of this.tabs) {
+			const live = { file: t.session.file, title: t.title, records: t.session.usage ?? [] };
+			const i = out.findIndex((c) => c.file === live.file);
+			if (i === -1) out.push(live);
+			else out[i] = live;
+		}
+		return out;
 	}
 
 	async deleteSession(file: string): Promise<void> {
@@ -539,6 +570,9 @@ class HarnessState {
 		}
 
 		tab.entries.push({ kind: 'you', text: input.trim(), mark: tab.history.length });
+		const runStart = tab.entries.length;
+		/** Tokens of every model call in this run (tool steps included). */
+		let used: Usage | null = null;
 		tab.running = true;
 		tab.ctl = new AbortController();
 		const signal = tab.ctl.signal;
@@ -604,9 +638,11 @@ class HarnessState {
 				tools,
 				maxSteps: ai.config.maxSteps,
 				signal,
-				complete: (req) => {
+				complete: async (req) => {
 					startAi();
-					return chatCompletion(platform, { ...req, profile, apiKey });
+					const res = await chatCompletion(platform, { ...req, profile, apiKey });
+					if (res.usage) used = addUsage(used, res.usage);
+					return res;
 				},
 				onDelta: (t) => {
 					pending += t;
@@ -663,6 +699,18 @@ class HarnessState {
 				if (e.kind === 'tool' && e.result === null) e.result = '(cancelled)';
 			tab.running = false;
 			tab.ctl = null;
+			// Calls that finished cost money even when the run failed or was stopped.
+			if (used) {
+				const record = runRecord(used, profile);
+				tab.session.usage = [...(tab.session.usage ?? []), record];
+				for (let i = tab.entries.length - 1; i >= runStart; i--) {
+					const e = tab.entries[i];
+					if (e.kind === 'ai') {
+						e.usage = record;
+						break;
+					}
+				}
+			}
 			await tab.save();
 			void this.refreshSessions();
 		}

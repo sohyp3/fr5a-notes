@@ -1,4 +1,5 @@
 import { list, parseFrontmatter, str, stringifyFrontmatter } from './frontmatter';
+import { formatRecord, parseRecord, type UsageRecord } from './usage';
 import type { ChatMessage } from './types';
 
 /**
@@ -33,6 +34,8 @@ export interface Session {
 	saved?: string;
 	/** `hashText` of what was last written there, to notice edits made since. */
 	savedHash?: string;
+	/** Tokens and cost, one record per run (see usage.ts). */
+	usage?: UsageRecord[];
 }
 
 const MARK_RE = /^<!-- turn: (you|ai|tool)(?: ([\w.-]+))? -->$/;
@@ -63,7 +66,8 @@ export function serializeSession(s: Session): string {
 		skill: s.skill || undefined,
 		notes: s.notes,
 		saved: s.saved || undefined,
-		savedHash: s.savedHash || undefined
+		savedHash: s.savedHash || undefined,
+		usage: s.usage?.length ? s.usage.map(formatRecord) : undefined
 	});
 	const parts = s.turns.map((t) => {
 		const text =
@@ -98,8 +102,16 @@ export function parseSession(file: string, text: string): Session {
 		skill: str(data.skill),
 		notes: list(data.notes),
 		turns,
-		...(str(data.saved) ? { saved: str(data.saved), savedHash: str(data.savedHash) } : {})
+		...(str(data.saved) ? { saved: str(data.saved), savedHash: str(data.savedHash) } : {}),
+		...(data.usage ? { usage: sessionUsage(data.usage) } : {})
 	};
+}
+
+/** Usage records of a session's frontmatter (`usage: [...]`). */
+export function sessionUsage(v: string | string[] | undefined): UsageRecord[] {
+	return (Array.isArray(v) ? v : v ? [v] : [])
+		.map(parseRecord)
+		.filter((r): r is UsageRecord => r !== null);
 }
 
 /** Short, stable fingerprint of a text (FNV-1a), enough to notice a change. */

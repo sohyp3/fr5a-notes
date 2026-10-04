@@ -79,6 +79,34 @@ describe('gitSync', () => {
 		expect(status(a)).toBe('');
 	});
 
+	it('push sends the notes as they are now: earlier pulled states never leave', async () => {
+		const sync = createGitSync(a);
+		write(a, 'secret.md', 'my password is hunter2\n');
+		await sync.pull(); // commits the plain text locally
+		write(b, 'other.md', '# From B\n');
+		await createGitSync(b).push(); // the remote moves meanwhile
+		write(a, 'secret.md', '-----BEGIN PGP MESSAGE-----\nciphertext\n-----END PGP MESSAGE-----\n');
+		await sync.pull(); // merges B's commit
+		expect(await sync.push()).toEqual({ status: 'ok' });
+
+		// One new commit on top of B's, holding the encrypted state only.
+		expect(git(bare, 'log', '--format=%s', 'main').trim().split('\n')).toHaveLength(3);
+		expect(git(bare, 'rev-list', '--parents', '-n', '1', 'main').trim().split(' ')).toHaveLength(2);
+		expect(git(bare, 'show', 'main:secret.md')).toContain('ciphertext');
+		expect(git(bare, 'show', 'main:other.md')).toBe('# From B\n');
+		expect(git(bare, 'log', '-p', 'main')).not.toContain('hunter2');
+		expect(head(a)).toBe(git(bare, 'rev-parse', 'main').trim());
+	});
+
+	it('keeps commits made by hand as they are', async () => {
+		write(a, 'x.md', 'x\n');
+		git(a, 'add', '-A');
+		git(a, 'commit', '--quiet', '-m', 'my own commit');
+		write(a, 'y.md', 'y\n');
+		await createGitSync(a).push();
+		expect(git(bare, 'log', '--format=%s', 'main')).toContain('my own commit');
+	});
+
 	it('push with nothing new reports nothing-to-push', async () => {
 		await expect(createGitSync(a).push()).rejects.toMatchObject({ code: 'nothing-to-push' });
 	});

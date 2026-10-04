@@ -41,6 +41,31 @@ describe('session files', () => {
 });
 
 describe('saving and forking', () => {
+	it('keeps usage records through a round trip', () => {
+		const used: Session = {
+			...session,
+			usage: [
+				{
+					at: '2026-10-04T10:00:00.000Z',
+					provider: 'or',
+					model: 'deepseek/deepseek-chat',
+					input: 1200,
+					output: 80,
+					cost: 0.0004
+				},
+				{
+					at: '2026-10-04T10:05:00.000Z',
+					provider: 'ol',
+					model: 'qwen3:8b',
+					input: 9,
+					output: 3,
+					cost: null
+				}
+			]
+		};
+		expect(parseSession('x.md', serializeSession(used))).toEqual(used);
+	});
+
 	it('keeps the saved-note link through a round trip', () => {
 		const saved = { ...session, saved: 'AI chats/plan.md', savedHash: hashText('x') };
 		expect(parseSession('x.md', serializeSession(saved))).toEqual(saved);

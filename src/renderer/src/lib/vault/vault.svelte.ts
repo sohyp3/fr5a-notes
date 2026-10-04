@@ -4,6 +4,8 @@ import { wrapNotes } from './wrap';
 
 /** Secure-storage name of the armored private key (still passphrase-protected). */
 const KEY_SECRET = 'pgp:key';
+/** Secure-storage name of the passphrase, when "Remember passphrase" is on. */
+const PASS_SECRET = 'pgp:passphrase';
 
 export interface VaultHooks {
 	/** Before the key goes: save pending edits, close the decrypted note. */
@@ -26,6 +28,8 @@ export class Vault {
 	hasKey = $state(false);
 	/** The private key is in memory: encrypted notes can be read. */
 	unlocked = $state(false);
+	/** The passphrase is kept in secure storage: unlocking needs no typing. */
+	remembered = $state(false);
 	info = $state<pgp.KeyInfo | null>(null);
 
 	#hooks: VaultHooks;
@@ -49,7 +53,37 @@ export class Vault {
 	static async start(hooks: VaultHooks): Promise<Vault> {
 		const v = new Vault(hooks);
 		await v.#use(await hostPlatform.getSecret(KEY_SECRET));
+		v.remembered = (await hostPlatform.getSecret(PASS_SECRET)) !== null;
+		await v.unlockSaved();
 		return v;
+	}
+
+	/** Unlock with the remembered passphrase. False when there is none or it no longer fits. */
+	async unlockSaved(): Promise<boolean> {
+		if (this.#private) return true;
+		if (!this.remembered || !this.#armored) return false;
+		const pass = await hostPlatform.getSecret(PASS_SECRET);
+		return pass !== null && (await this.unlock(pass, false)) === null;
+	}
+
+	/** Keep the passphrase in secure storage (checked against the key first). */
+	async remember(passphrase: string): Promise<string | null> {
+		if (!this.#armored) return 'No key on this device.';
+		try {
+			await pgp.unlockKey(this.#armored, passphrase);
+		} catch (err) {
+			return pgp.pgpError(err);
+		}
+		await hostPlatform.setSecret(PASS_SECRET, passphrase);
+		this.remembered = true;
+		if (!this.#private) await this.unlock(passphrase);
+		return null;
+	}
+
+	/** Delete the remembered passphrase from this device. */
+	async forgetPassphrase(): Promise<void> {
+		await hostPlatform.setSecret(PASS_SECRET, null);
+		this.remembered = false;
 	}
 
 	/** Switch encryption off: forget the key and hand the host's methods back. */
@@ -80,7 +114,7 @@ export class Vault {
 	}
 
 	/** Unlock with the passphrase. Returns why it failed, or null. */
-	async unlock(passphrase: string): Promise<string | null> {
+	async unlock(passphrase: string, typed = true): Promise<string | null> {
 		if (!this.#armored) return 'No key on this device.';
 		try {
 			this.#private = await pgp.unlockKey(this.#armored, passphrase);
@@ -88,6 +122,8 @@ export class Vault {
 			return pgp.pgpError(err);
 		}
 		this.unlocked = true;
+		// Typed after a stale remembered one failed: keep the one that works.
+		if (typed && this.remembered) await hostPlatform.setSecret(PASS_SECRET, passphrase);
 		this.#watchIdle();
 		this.#hooks.changed();
 		return null;
@@ -138,6 +174,7 @@ export class Vault {
 	async removeKey(): Promise<void> {
 		await this.lock();
 		await hostPlatform.setSecret(KEY_SECRET, null);
+		await this.forgetPassphrase();
 		await this.#use(null);
 		this.#hooks.changed();
 	}

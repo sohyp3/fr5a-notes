@@ -5,9 +5,12 @@ import type { ConflictFile, ResolveChoice, SyncErrorCode, SyncResult } from '../
 
 /**
  * Git sync for the workspace, driven through the system `git` CLI (no bundled
- * git library). It never rewrites history: no rebase, no force push, no hard
- * reset — a pull is always commit-then-merge, so local edits end up in a commit
- * before anything from the remote touches the working tree.
+ * git library). It never rewrites pushed history: no rebase, no force push, no
+ * hard reset — a pull is always commit-then-merge, so local edits end up in a
+ * commit before anything from the remote touches the working tree. A push
+ * sends the notes as they are at that moment: the app's own unpushed commits
+ * are folded into one first (`squashUnpushed`), so an earlier state, like a
+ * note before it was encrypted, never leaves the device.
  */
 
 export class GitSyncError extends Error {
@@ -198,13 +201,37 @@ export function createGitSync(root: string) {
 		throw new GitSyncError(classify(msg), msg || 'git merge failed');
 	}
 
-	/** Commit everything, pull (merge), then push. Stops at a conflict without pushing. */
+	/**
+	 * Fold the unpushed commits into one on top of the remote branch, when they
+	 * are all the app's own (`sync: …` commits and merges). Commits made by hand
+	 * keep their history. Nothing is committed when the result equals the remote.
+	 */
+	async function squashUnpushed(remoteHead: string | null): Promise<void> {
+		if (!remoteHead) return;
+		if ((await run(['merge-base', '--is-ancestor', remoteHead, 'HEAD'], true)).code !== 0) return;
+		const subjects = (await run(['log', '--format=%s', `${remoteHead}..HEAD`])).stdout
+			.split('\n')
+			.filter(Boolean);
+		if (subjects.length < 2 || !subjects.every((s) => /^(sync: |Merge )/.test(s))) return;
+		await run(['reset', '--soft', remoteHead]);
+		if ((await run(['diff', '--cached', '--quiet'], true)).code === 0) return;
+		await run([
+			...(await identityArgs()),
+			'commit',
+			'--no-verify',
+			'-m',
+			`sync: ${new Date().toISOString()}`
+		]);
+	}
+
+	/** Commit everything, pull (merge), fold the app's unpushed commits, then push. Stops at a conflict. */
 	async function push(): Promise<SyncResult> {
 		const pulled = await pull();
 		if (pulled.status === 'conflict') return pulled;
 		const { remote, branch } = await upstream();
-		const head = await revParse('HEAD');
 		const remoteHead = await revParse(`refs/remotes/${remote}/${branch}`);
+		await squashUnpushed(remoteHead);
+		const head = await revParse('HEAD');
 		if (head === null || head === remoteHead)
 			throw new GitSyncError('nothing-to-push', 'Nothing to push — already up to date.');
 		const local = await currentBranch();

@@ -56,7 +56,9 @@ export function installFakeApi(): void {
 	const metaFiles: Record<string, string> = {};
 	const secrets: Record<string, string> = {};
 	(window as unknown as { __meta: typeof metaFiles }).__meta = metaFiles;
-	const sse = (obj: unknown) => `data: ${JSON.stringify(obj)}\n\ndata: [DONE]\n\n`;
+	// Every reply reports its tokens in a last chunk, like `stream_options.include_usage`.
+	const sse = (obj: unknown, usage: object = { prompt_tokens: 1200, completion_tokens: 34 }) =>
+		`data: ${JSON.stringify(obj)}\n\ndata: ${JSON.stringify({ choices: [], usage })}\n\ndata: [DONE]\n\n`;
 	const call = (name: string, args: unknown) =>
 		sse({
 			choices: [
@@ -82,6 +84,12 @@ export function installFakeApi(): void {
 			const ids = [...messages[0].content.matchAll(/<note id="([^"]+)">/g)].map((m) => m[1]);
 			return say(`ctx: ${ids.join(' | ')}`);
 		}
+		// "cost?" → the provider reports a cost too (as OpenRouter does).
+		if (last.role === 'user' && last.content.includes('cost?'))
+			return sse(
+				{ choices: [{ delta: { content: 'Priced reply' } }] },
+				{ prompt_tokens: 1500, completion_tokens: 50, cost: 0.0021 }
+			);
 		// "md?" → a Markdown reply, with raw HTML that must stay text.
 		if (last.role === 'user' && last.content.includes('md?'))
 			return say(
