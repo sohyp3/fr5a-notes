@@ -45,6 +45,12 @@ export interface PlatformApi {
 	 * lies inside the folder, or the folder holds a nested git repo.
 	 */
 	moveFolder(path: string, to: string): Promise<string>;
+	/**
+	 * Soft-delete a folder: every file in it goes to the trash at its mirrored
+	 * path (notes restorable one by one), then the folder goes. Refused for a
+	 * folder holding a nested git repo or a locked note.
+	 */
+	deleteFolder(path: string): Promise<void>;
 
 	listFolders(): Promise<string[]>;
 	createFolder(name: string, parent?: string): Promise<string>;

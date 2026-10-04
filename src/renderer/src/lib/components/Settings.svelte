@@ -139,6 +139,27 @@
 								</div>
 							</div>
 						</section>
+						{#if s.hiddenFolders.length}
+							<section class="group">
+								<h3>Hidden folders</h3>
+								<p class="prose">
+									Kept out of the sidebar, All Notes, tags and search. They stay on disk and keep
+									syncing.
+								</p>
+								{#each s.hiddenFolders as f (f)}
+									<div class="row">
+										<div class="label">
+											<span class="name">{f.split('/').pop()}</span>
+											{#if f.includes('/')}<span class="desc path">{f}</span>{/if}
+										</div>
+										<div class="row-actions">
+											<button class="btn" onclick={() => app.openHiddenFolder(f)}>Open</button>
+											<button class="btn" onclick={() => app.setFolderListed(f, true)}>Show</button>
+										</div>
+									</div>
+								{/each}
+							</section>
+						{/if}
 					{:else if section.id === 'appearance'}
 						<section class="group">
 							<h3>Look</h3>
@@ -582,6 +603,11 @@
 		font-size: 13px;
 		line-height: 1.6;
 		color: var(--text-muted);
+	}
+	.row-actions {
+		display: flex;
+		gap: 8px;
+		flex: 0 0 auto;
 	}
 	code {
 		font-family: var(--font-mono);

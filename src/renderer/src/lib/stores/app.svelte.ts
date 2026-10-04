@@ -109,6 +109,12 @@ export interface Settings {
 	encryption: boolean;
 	/** Lock encrypted notes after this many idle / background minutes (0 = never). */
 	autoLockMinutes: number;
+	/**
+	 * Folders kept out of the sidebar, All Notes, tags and search (e.g. saved AI
+	 * chats). Still on disk and synced; opened from Settings → General. Not the
+	 * same as "hidden from cloud AI".
+	 */
+	hiddenFolders: string[];
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -121,7 +127,8 @@ const DEFAULT_SETTINGS: Settings = {
 	ai: true,
 	openIn: 'auto',
 	encryption: false,
-	autoLockMinutes: 15
+	autoLockMinutes: 15,
+	hiddenFolders: []
 };
 
 const clampWidth = (pane: PaneName, px: number) =>
@@ -295,6 +302,17 @@ class AppState {
 			? this.draftEncrypted
 			: !!this.activeId && !!this.noteMeta(this.activeId)?.encrypted;
 	});
+	/** Notes and folders the sidebar shows (hidden folders left out). */
+	listedNotes = $derived(
+		this.settings.hiddenFolders.length
+			? this.notes.filter((n) => !this.hiddenParent(parentOf(n.id)))
+			: this.notes
+	);
+	listedFolders = $derived(
+		this.settings.hiddenFolders.length
+			? this.folders.filter((f) => !this.hiddenParent(f))
+			: this.folders
+	);
 	/** Notes the AI harness may see: never encrypted ones, whatever the provider. */
 	aiNotes = $derived(this.notes.filter((n) => !n.encrypted));
 	/** The open note, unless it's encrypted (the AI never reads those). */
@@ -309,7 +327,11 @@ class AppState {
 				(n) => !q || n.title.toLowerCase().includes(q) || n.snippet.toLowerCase().includes(q)
 			);
 		}
+		// Browsing into a hidden folder (from Settings) shows it; everything else leaves it out.
+		const browsing = this.selectedFolder ? this.hiddenParent(this.selectedFolder) : null;
 		return this.notes.filter((n) => {
+			const hiddenIn = this.hiddenParent(parentOf(n.id));
+			if (hiddenIn && hiddenIn !== browsing) return false;
 			if (this.selectedFolder !== null) {
 				const folder = this.selectedFolder;
 				const dir = n.id.includes('/') ? n.id.slice(0, n.id.lastIndexOf('/')) : '';
@@ -1080,6 +1102,81 @@ class AppState {
 		this.draftEncrypted = !this.draftEncrypted;
 	}
 
+	// --- delete / hide folders ---------------------------------------------------------
+
+	/** Move a folder and everything in it to the trash, after asking. */
+	async deleteFolder(path: string): Promise<void> {
+		this.folderMenu = null;
+		const inside = (id: string) => id === path || id.startsWith(`${path}/`);
+		const count = this.notes.filter((n) => inside(n.id)).length;
+		const ok = await this.confirm({
+			title: `Delete “${baseOf(path)}”?`,
+			body: count
+				? `The folder and its ${count} ${count === 1 ? 'note' : 'notes'} move to the Trash. Notes can be restored from there one by one.`
+				: 'The empty folder is removed.',
+			confirm: 'Move to Trash',
+			danger: true
+		});
+		if (!ok) return;
+		const activeInside = !!this.activeId && inside(this.activeId);
+		if (activeInside) await this.flush();
+		try {
+			await platform.deleteFolder(path);
+		} catch (err) {
+			this.notify('error', err instanceof Error ? err.message : String(err));
+			return;
+		}
+		if (activeInside) {
+			this.cancelPending();
+			this.activeId = null;
+			this.activeContent = '';
+			this.baseline = null;
+			if (this.pane === 'editor') this.pane = 'list';
+			void platform.setState('lastOpenFile', null);
+		}
+		if (this.selectedFolder !== null && inside(this.selectedFolder)) this.selectedFolder = null;
+		const expanded = Object.entries(this.sidebar.folderExpanded).filter(([k]) => !inside(k));
+		if (expanded.length !== Object.keys(this.sidebar.folderExpanded).length) {
+			this.sidebar.folderExpanded = Object.fromEntries(expanded);
+			this.persistSidebar();
+		}
+		if (this.settings.hiddenFolders.some(inside))
+			this.updateSettings({ hiddenFolders: this.settings.hiddenFolders.filter((f) => !inside(f)) });
+		await this.refresh();
+		this.notify('ok', `Moved “${baseOf(path)}” to the Trash`);
+	}
+
+	/** The hidden folder that keeps `path` (a folder, '' = root) out of the lists, or null. */
+	hiddenParent(path: string): string | null {
+		if (!path) return null;
+		return this.settings.hiddenFolders.find((f) => path === f || path.startsWith(`${f}/`)) ?? null;
+	}
+
+	/** Keep a folder out of the sidebar / All Notes, or bring it back. */
+	setFolderListed(path: string, listed: boolean): void {
+		this.folderMenu = null;
+		const rest = this.settings.hiddenFolders.filter((f) => f !== path);
+		this.updateSettings({ hiddenFolders: listed ? rest : [...rest, path].sort() });
+		if (!listed && this.selectedFolder !== null && this.hiddenParent(this.selectedFolder))
+			this.selectedFolder = null;
+		this.notify(
+			'ok',
+			listed
+				? `“${baseOf(path)}” is back in the sidebar`
+				: `“${baseOf(path)}” hidden. Settings → General shows it again.`
+		);
+	}
+
+	/** Open a hidden folder's notes (from Settings): the list shows them while it's selected. */
+	openHiddenFolder(path: string): void {
+		this.view = 'editor';
+		this.trashOpen = false;
+		this.selectedTag = null;
+		this.selectedFolder = path;
+		this.pane = 'list';
+		this.drawerOpen = false;
+	}
+
 	// --- move / rename -----------------------------------------------------------
 
 	openMove(kind: MoveRequest['kind'], path: string): void {
@@ -1252,6 +1349,9 @@ class AppState {
 			this.sidebar.folderExpanded = expanded;
 			this.persistSidebar();
 		}
+		const hidden = this.settings.hiddenFolders;
+		if (hidden.some((f) => remapPath(f, from, to) !== null))
+			this.updateSettings({ hiddenFolders: hidden.map((f) => remapPath(f, from, to) ?? f) });
 		for (const cb of this.moveListeners) cb(from, to);
 	}
 

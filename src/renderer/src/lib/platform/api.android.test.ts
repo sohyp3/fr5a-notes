@@ -71,6 +71,12 @@ vi.mock('@capacitor/filesystem', () => {
 			deleteFile: async ({ path }: { path: string }) => {
 				if (!mem.files.delete(path)) return fail('File does not exist');
 			},
+			rmdir: async ({ path }: { path: string }) => {
+				if (!mem.dirs.has(path)) return fail('Directory does not exist');
+				const under = (p: string) => p === path || p.startsWith(`${path}/`);
+				for (const d of [...mem.dirs]) if (under(d)) mem.dirs.delete(d);
+				for (const f of [...mem.files.keys()]) if (under(f)) mem.files.delete(f);
+			},
 			rename: async ({ from, to }: { from: string; to: string }) => {
 				if (!mem.dirs.has(parent(to))) return fail('Parent directory missing');
 				const f = mem.files.get(from);
@@ -297,6 +303,28 @@ describe('android platform', () => {
 		await expect(api.moveFolder('archive', 'archive/x')).rejects.toThrow('into itself');
 		await api.createFolder('taken');
 		await expect(api.moveFolder('archive', 'taken')).rejects.toThrow('already exists');
+	});
+
+	it('deletes a folder into the trash, refusing locked notes and the root', async () => {
+		seed('work/a.md', '# A');
+		seed('work/deep/b.md', '# B');
+		seed('work/deep/img.png', 'png');
+		seed('c.md', '# C');
+		const api = createAndroidPlatform();
+		await api.deleteFolder('work');
+		expect((await api.listNotes()).map((n) => n.id)).toEqual(['c.md']);
+		expect(await api.listFolders()).toEqual([]);
+		expect((await api.listTrash()).map((t) => t.id).sort()).toEqual([
+			'.fr5a_trash/work/a.md',
+			'.fr5a_trash/work/deep/b.md'
+		]);
+		expect(mem.files.has('notes/.fr5a_trash/work/deep/img.png')).toBe(true);
+
+		seed('keep/l.md', '<!-- locked: true -->\n# L');
+		const again = createAndroidPlatform();
+		await expect(again.deleteFolder('keep')).rejects.toThrow('locked');
+		expect((await again.listNotes()).some((n) => n.id === 'keep/l.md')).toBe(true);
+		await expect(again.deleteFolder('')).rejects.toThrow('root');
 	});
 
 	it('refuses to delete a locked note', async () => {

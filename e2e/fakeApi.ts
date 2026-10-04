@@ -201,6 +201,15 @@ export function installFakeApi(): void {
 			parentDirs(`${to}/x`);
 			return to;
 		},
+		deleteFolder: async (dir: string) => {
+			const inside = (p: string) => p === dir || p.startsWith(`${dir}/`);
+			for (const id of Object.keys(files)) {
+				if (!inside(id)) continue;
+				trash[`.fr5a_trash/${id}`] = files[id];
+				delete files[id];
+			}
+			for (const f of [...folders]) if (inside(f)) folders.delete(f);
+		},
 		restoreNote: async (id: string) => {
 			const to = id.replace('.fr5a_trash/', '');
 			files[to] = trash[id];

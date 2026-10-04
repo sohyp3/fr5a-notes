@@ -1107,3 +1107,50 @@ test('encryption on touch: a note encrypted while locked opens after the passphr
 	await expect(page.locator('.ProseMirror')).toContainText('world');
 	await expect(list(page).getByText('Hello', { exact: true })).toBeAttached();
 });
+
+test('desktop: a folder can be hidden from the sidebar, shown again, and deleted', async ({
+	browser
+}) => {
+	const { ctx, page } = await desktopPage(browser);
+	const work = sidebar(page).getByRole('button', { name: /^Work \d+$/ });
+	await sidebar(page)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	await expect(list(page).getByText('Plan', { exact: true })).toBeVisible();
+
+	// Hidden: out of the tree and All Notes, still on disk.
+	await work.click({ button: 'right' });
+	await page.getByRole('menuitem', { name: 'Hide from sidebar' }).click();
+	await expect(work).toHaveCount(0);
+	await expect(list(page).getByText('Plan', { exact: true })).toHaveCount(0);
+	expect(await noteIds(page)).toContain('Work/plan.md');
+
+	// Settings → General lists it: Open browses it, Show brings it back.
+	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
+	await page.getByRole('button', { name: 'General' }).click();
+	await page.getByRole('button', { name: 'Open', exact: true }).click();
+	await expect(list(page).getByText('Plan', { exact: true })).toBeVisible();
+	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
+	await page.getByRole('button', { name: 'Show', exact: true }).click();
+	await page.getByRole('button', { name: 'Close settings' }).click();
+	await expect(work).toBeVisible();
+
+	// Delete: asks first, then the folder's notes go to the trash.
+	await work.click({ button: 'right' });
+	await page.getByRole('menuitem', { name: 'Move to Trash' }).click();
+	const confirm = page.getByRole('alertdialog');
+	await expect(confirm).toContainText('1 note');
+	await confirm.getByRole('button', { name: 'Move to Trash' }).click();
+	await expect(work).toHaveCount(0);
+	expect(await noteIds(page)).toEqual(['hello.md']);
+	await sidebar(page).getByRole('button', { name: /Trash/ }).click();
+	await expect(list(page).getByText('Plan', { exact: true })).toBeVisible();
+
+	// Saved AI chats: one checkbox in Settings → AI hides their folder.
+	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
+	await page.getByRole('button', { name: 'AI assistant' }).click();
+	await page.getByLabel('Hide saved chats from the sidebar').check();
+	await page.getByRole('button', { name: 'General' }).click();
+	await expect(page.getByText('AI chats', { exact: true })).toBeVisible();
+	await ctx.close();
+});

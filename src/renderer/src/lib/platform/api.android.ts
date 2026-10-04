@@ -28,7 +28,12 @@ import {
 	syncOrder,
 	withNestedIgnored
 } from '../../../../shared/multiSync';
-import { folderMoveError, noteExt, noteMoveError } from '../../../../shared/paths';
+import {
+	folderDeleteError,
+	folderMoveError,
+	noteExt,
+	noteMoveError
+} from '../../../../shared/paths';
 import type { PlatformApi } from './types';
 import { noteSnippet } from '../../../../shared/snippet';
 import { isEncryptedNote } from '../../../../shared/encrypted';
@@ -522,6 +527,41 @@ export function createAndroidPlatform(): PlatformApi {
 			await rebuild();
 			emitChange();
 			return dest;
+		},
+		async deleteFolder(path) {
+			await ready;
+			const from = safeSubdir(path);
+			const err = folderDeleteError(from);
+			if (err) throw new Error(err);
+			const repos = await nestedRepos();
+			if (
+				repos.some((r) => r === from || r.startsWith(`${from}/`)) ||
+				(await exists(join(from, '.git')))
+			)
+				throw new Error(`“${from}” has its own git repo — remove it from Sync first.`);
+			// Every file in it (not only notes), each to its mirrored path in the trash.
+			const files: string[] = [];
+			const collect = async (dir: string): Promise<void> => {
+				for (const entry of await list(dir)) {
+					const id = join(dir, entry.name);
+					if (entry.type === 'directory') await collect(id);
+					else files.push(id);
+				}
+			};
+			await collect(from);
+			for (const id of files) {
+				if (!isNote(id)) continue;
+				const raw = await readRaw(id).catch(() => '');
+				if (LOCKED_RE.test(raw)) throw new Error(`“${id}” is locked — unlock it first.`);
+			}
+			for (const id of files) {
+				const dest = await uniqueId(join(TRASH_DIR, id));
+				await ensureDir(dirname(dest));
+				await Filesystem.rename({ from: rel(id), to: rel(dest), directory: DIR, toDirectory: DIR });
+			}
+			await Filesystem.rmdir({ path: rel(from), directory: DIR, recursive: true });
+			for (const id of [...index.keys()]) if (id.startsWith(`${from}/`)) index.delete(id);
+			emitChange();
 		},
 
 		async listFolders() {

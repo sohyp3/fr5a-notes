@@ -94,4 +94,25 @@ describe('FileService move / rename', () => {
 		await mkdir(path.join(root, 'archive/work/.git'));
 		await expect(svc.moveFolder('archive', 'old')).rejects.toThrow('own git repo');
 	});
+
+	it('deletes a folder into the trash, refusing locked notes, repos and the root', async () => {
+		await writeFile(path.join(root, 'work/deep/img.png'), 'png');
+		await svc.deleteFolder('work');
+		expect(await exists(path.join(root, 'work'))).toBe(false);
+		expect(await exists(path.join(root, '.fr5a_trash/work/deep/b.md'))).toBe(true);
+		expect(await exists(path.join(root, '.fr5a_trash/work/deep/img.png'))).toBe(true);
+		expect([...notes.keys()]).toEqual(['c.md']);
+		expect((await svc.listTrash()).map((n) => n.id).sort()).toEqual([
+			'.fr5a_trash/work/a.md',
+			'.fr5a_trash/work/deep/b.md'
+		]);
+
+		await mkdir(path.join(root, 'keep'));
+		await writeFile(path.join(root, 'keep/l.md'), '<!-- locked: true -->\n# L');
+		await expect(svc.deleteFolder('keep')).rejects.toThrow('locked');
+		expect(await exists(path.join(root, 'keep/l.md'))).toBe(true);
+		await mkdir(path.join(root, 'repo/.git'), { recursive: true });
+		await expect(svc.deleteFolder('repo')).rejects.toThrow('own git repo');
+		await expect(svc.deleteFolder('')).rejects.toThrow('root');
+	});
 });

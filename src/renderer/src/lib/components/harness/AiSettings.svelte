@@ -669,6 +669,24 @@
 				ai.update({ chatsFolder: cleanFolder((e.currentTarget as HTMLInputElement).value) })}
 		/>
 	</div>
+	{#if cfg.chatsFolder}
+		<label class="check">
+			<input
+				type="checkbox"
+				checked={!!app.hiddenParent(cfg.chatsFolder)}
+				disabled={app.hiddenParent(cfg.chatsFolder) !== null &&
+					app.hiddenParent(cfg.chatsFolder) !== cfg.chatsFolder}
+				onchange={(e) => app.setFolderListed(cfg.chatsFolder, !e.currentTarget.checked)}
+			/>
+			<span>
+				<span class="name">Hide saved chats from the sidebar</span>
+				<span class="desc"
+					>Keeps “{cfg.chatsFolder}” out of the sidebar, All Notes, tags and search. Open it from
+					Settings → General.</span
+				>
+			</span>
+		</label>
+	{/if}
 	<div class="row">
 		<label class="label" for="max-steps">
 			<span class="name">Max steps per run</span>

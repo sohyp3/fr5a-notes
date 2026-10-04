@@ -8,8 +8,9 @@
 	import logo from '$lib/assets/logo.png';
 
 	const app = getAppState();
-	const noteCount = $derived(app.notes.length);
-	const folders = $derived(buildFolderTree(app.notes, app.folders));
+	// Hidden folders (Settings → General) stay out of the tree and the All Notes count.
+	const noteCount = $derived(app.listedNotes.length);
+	const folders = $derived(buildFolderTree(app.listedNotes, app.listedFolders));
 	const allSelected = $derived(app.selectedTag === null && app.selectedFolder === null);
 
 	// Inline "new folder" input, revealed by the + button in the Folders header.

@@ -45,6 +45,21 @@
 				hint: hidden?.via === 'parent' ? `via ${baseOf(hidden.folder) || 'Everything'}` : undefined,
 				action: () => app.toggleFolderHidden(path)
 			});
+		items.push(
+			{
+				label: 'Hide from sidebar',
+				icon: 'eye',
+				divider: !app.settings.ai,
+				action: () => app.setFolderListed(path, false)
+			},
+			{
+				label: 'Move to Trash',
+				icon: 'trash',
+				danger: true,
+				divider: true,
+				action: () => void app.deleteFolder(path)
+			}
+		);
 		return items;
 	});
 </script>
