@@ -5,6 +5,8 @@
 	import { wrap } from '../editor/MarkdownShortcuts';
 	import { lift, sink } from '../editor/ListBehavior';
 	import { cycleHeading, insertTag, toggleBullet } from '../editor/formatCommands';
+	import type { IconName } from '../icons';
+	import Icon from './Icon.svelte';
 
 	let { editor }: { editor: Editor } = $props();
 
@@ -32,16 +34,16 @@
 		editor.view.focus();
 	}
 
-	const actions: { label: string; text: string; do: () => void }[] = [
-		{ label: 'Bold', text: 'B', do: () => run(wrap('**')) },
-		{ label: 'Heading', text: 'H', do: () => run(cycleHeading) },
-		{ label: 'List', text: '•', do: () => run(toggleBullet) },
-		{ label: 'Outdent', text: '⇤', do: () => run(lift) },
-		{ label: 'Indent', text: '⇥', do: () => run(sink) },
-		{ label: 'Tag', text: '#', do: () => run(insertTag) },
+	const actions: { label: string; icon: IconName; do: () => void }[] = [
+		{ label: 'Bold', icon: 'bold', do: () => run(wrap('**')) },
+		{ label: 'Heading', icon: 'heading', do: () => run(cycleHeading) },
+		{ label: 'List', icon: 'bullet', do: () => run(toggleBullet) },
+		{ label: 'Outdent', icon: 'outdent', do: () => run(lift) },
+		{ label: 'Indent', icon: 'indent', do: () => run(sink) },
+		{ label: 'Tag', icon: 'tag', do: () => run(insertTag) },
 		{
 			label: 'Undo',
-			text: '↶',
+			icon: 'undo',
 			do: () => {
 				editor.commands.undo();
 				editor.view.focus();
@@ -60,13 +62,12 @@
 		<!-- pointerdown + preventDefault keeps focus (and the keyboard) in the editor. -->
 		<button
 			class="fmt"
-			class:bold={a.label === 'Bold'}
 			aria-label={a.label}
 			title={a.label}
 			onpointerdown={(e) => e.preventDefault()}
 			onclick={a.do}
 		>
-			{a.text}
+			<Icon name={a.icon} size={20} stroke={2} />
 		</button>
 	{/each}
 </div>
@@ -89,14 +90,10 @@
 		max-width: 64px;
 		height: 40px;
 		border-radius: 10px;
-		font-size: 17px;
 		color: var(--text-main);
 		display: grid;
 		place-items: center;
 		touch-action: manipulation;
-	}
-	.fmt.bold {
-		font-weight: 700;
 	}
 	.fmt:active {
 		background: var(--bg-hover);

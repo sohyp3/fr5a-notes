@@ -2,6 +2,7 @@
 	import { slide } from 'svelte/transition';
 	import { getAppState } from '../stores/app.svelte';
 	import type { TagNode } from '../../../../shared/types';
+	import Icon from './Icon.svelte';
 	import Self from './TagTree.svelte';
 
 	let { node, depth = 0 }: { node: TagNode; depth?: number } = $props();
@@ -24,9 +25,7 @@
 			app.toggleTagExpanded(node.path, depth);
 		}}
 	>
-		<svg width="9" height="9" viewBox="0 0 10 10" class:open={expanded}>
-			<path d="M3 2l4 3-4 3z" fill="currentColor" />
-		</svg>
+		<span class="chev" class:open={expanded}><Icon name="chevron" size={12} stroke={2.4} /></span>
 	</button>
 
 	<button class="label" onclick={() => app.selectTag(node.path)}>
@@ -77,10 +76,11 @@
 	.twist.hidden {
 		visibility: hidden;
 	}
-	.twist svg {
+	.chev {
+		display: grid;
 		transition: transform 140ms var(--ease-spring);
 	}
-	.twist svg.open {
+	.chev.open {
 		transform: rotate(90deg);
 	}
 	.label {

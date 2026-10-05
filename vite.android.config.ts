@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import legacy from '@vitejs/plugin-legacy';
+import { buildInfo } from './build-info';
 
 // Oldest WebView we ship to: a Huawei tablet's Chromium 92 (no findLast,
 // structuredClone, Object.hasOwn, color-mix()…).
@@ -12,6 +13,7 @@ const WEBVIEW_TARGET = 'chrome92';
 export default defineConfig({
 	root: 'src/renderer',
 	base: './',
+	define: buildInfo(),
 	resolve: {
 		alias: {
 			$lib: resolve('src/renderer/src/lib')

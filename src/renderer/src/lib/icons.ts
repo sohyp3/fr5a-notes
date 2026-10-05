@@ -1,51 +1,141 @@
 /**
- * Stroke icons (24×24 viewBox, drawn with `currentColor`) shared by menus and
- * toolbars, so a menu item can name its icon instead of inlining an SVG.
+ * Every icon in the app is a Lucide icon (https://lucide.dev), named here so a
+ * menu item or toolbar can say `icon: 'trash'` and `Icon.svelte` draws it.
+ * One import per icon keeps the bundle to the icons actually used.
  */
+import type { Component } from 'svelte';
+import ArrowDown from '@lucide/svelte/icons/arrow-down';
+import ArrowDownToLine from '@lucide/svelte/icons/arrow-down-to-line';
+import ArrowRight from '@lucide/svelte/icons/arrow-right';
+import ArrowUpFromLine from '@lucide/svelte/icons/arrow-up-from-line';
+import Bold from '@lucide/svelte/icons/bold';
+import Check from '@lucide/svelte/icons/check';
+import ChevronLeft from '@lucide/svelte/icons/chevron-left';
+import ChevronRight from '@lucide/svelte/icons/chevron-right';
+import ChevronsDownUp from '@lucide/svelte/icons/chevrons-down-up';
+import Circle from '@lucide/svelte/icons/circle';
+import CircleDot from '@lucide/svelte/icons/circle-dot';
+import Copy from '@lucide/svelte/icons/copy';
+import Diff from '@lucide/svelte/icons/diff';
+import Ellipsis from '@lucide/svelte/icons/ellipsis';
+import Eye from '@lucide/svelte/icons/eye';
+import FileText from '@lucide/svelte/icons/file-text';
+import Folder from '@lucide/svelte/icons/folder';
+import FolderInput from '@lucide/svelte/icons/folder-input';
+import FolderPlus from '@lucide/svelte/icons/folder-plus';
+import GitFork from '@lucide/svelte/icons/git-fork';
+import Globe from '@lucide/svelte/icons/globe';
+import Hash from '@lucide/svelte/icons/hash';
+import Heading from '@lucide/svelte/icons/heading';
+import History from '@lucide/svelte/icons/history';
+import Info from '@lucide/svelte/icons/info';
+import Keyboard from '@lucide/svelte/icons/keyboard';
+import KeyRound from '@lucide/svelte/icons/key-round';
+import LayoutList from '@lucide/svelte/icons/layout-list';
+import List from '@lucide/svelte/icons/list';
+import ListIndentDecrease from '@lucide/svelte/icons/list-indent-decrease';
+import ListIndentIncrease from '@lucide/svelte/icons/list-indent-increase';
+import ListPlus from '@lucide/svelte/icons/list-plus';
+import Lock from '@lucide/svelte/icons/lock';
+import LockOpen from '@lucide/svelte/icons/lock-open';
+import Maximize from '@lucide/svelte/icons/maximize';
+import Menu from '@lucide/svelte/icons/menu';
+import Minimize from '@lucide/svelte/icons/minimize';
+import Moon from '@lucide/svelte/icons/moon';
+import NotebookText from '@lucide/svelte/icons/notebook-text';
+import PanelLeft from '@lucide/svelte/icons/panel-left';
+import Pencil from '@lucide/svelte/icons/pencil';
+import Pilcrow from '@lucide/svelte/icons/pilcrow';
+import Pin from '@lucide/svelte/icons/pin';
+import Plus from '@lucide/svelte/icons/plus';
+import ReceiptText from '@lucide/svelte/icons/receipt-text';
+import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
+import RotateCw from '@lucide/svelte/icons/rotate-cw';
+import Save from '@lucide/svelte/icons/save';
+import Search from '@lucide/svelte/icons/search';
+import Settings from '@lucide/svelte/icons/settings';
+import Shield from '@lucide/svelte/icons/shield';
+import Sparkles from '@lucide/svelte/icons/sparkles';
+import Square from '@lucide/svelte/icons/square';
+import SquarePen from '@lucide/svelte/icons/square-pen';
+import Sun from '@lucide/svelte/icons/sun';
+import Table from '@lucide/svelte/icons/table';
+import TextCursor from '@lucide/svelte/icons/text-cursor';
+import TextCursorInput from '@lucide/svelte/icons/text-cursor-input';
+import Trash2 from '@lucide/svelte/icons/trash-2';
+import Undo2 from '@lucide/svelte/icons/undo-2';
+import X from '@lucide/svelte/icons/x';
+
 export const ICONS = {
-	pin: 'M9 4h6l-1 6 3 3v2H7v-2l3-3-1-6Z M12 15v5',
-	lock: 'M5 13a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z M8 11V8a4 4 0 0 1 8 0v3',
-	unlock:
-		'M5 13a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z M8 11V8a4 4 0 0 1 7-2.6',
-	trash: 'M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13',
-	restore: 'M4 12a8 8 0 1 1 2.3 5.6M4 12V7m0 5h5',
-	diff: 'M8 4v10M3 9h10M13 19h8M6 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM18 4v8',
-	dir: 'M9 5h10M9 5v14M14 5v14M9 5a4 4 0 0 0 0 8',
-	more: 'M5 12h.01M12 12h.01M19 12h.01',
-	pull: 'M12 4v12m0 0-5-5m5 5 5-5M5 20h14',
-	push: 'M12 16V4m0 0L7 9m5-5 5 5M5 20h14',
-	moon: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z',
-	sun: 'M12 16.2a4.2 4.2 0 1 0 0-8.4 4.2 4.2 0 0 0 0 8.4ZM12 2.5V5M12 19v2.5M2.5 12H5M19 12h2.5M5.2 5.2l1.7 1.7M17.1 17.1l1.7 1.7M5.2 18.8l1.7-1.7M17.1 6.9l1.7-1.7',
-	edit: 'M4 20h4L19 9l-4-4L4 16v4ZM13.5 6.5l4 4',
-	eye: 'M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z M12 14.8a2.8 2.8 0 1 0 0-5.6 2.8 2.8 0 0 0 0 5.6Z',
-	check: 'M5 12.5l4.5 4.5L19 7.5',
-	close: 'M6 6l12 12M18 6L6 18',
-	copy: 'M9 9h10v11H9zM5 15V4h10',
-	retry: 'M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4',
-	settings:
-		'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.4 15l1.2 2-2 3.4-2.3-.6a7 7 0 0 1-1.8 1L14 23h-4l-.5-2.2a7 7 0 0 1-1.8-1l-2.3.6-2-3.4 1.2-2a7 7 0 0 1 0-2l-1.2-2 2-3.4 2.3.6a7 7 0 0 1 1.8-1L10 1h4l.5 2.2a7 7 0 0 1 1.8 1l2.3-.6 2 3.4-1.2 2a7 7 0 0 1 0 2Z',
-	note: 'M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h5',
-	insert: 'M12 5v14M5 12h14',
-	append: 'M5 6h14M5 11h14M12 15v6M9 18h6',
-	list: 'M4 6h16M4 12h16M4 18h10',
-	sidebar:
-		'M3 6.5A2.5 2.5 0 0 1 5.5 4h13A2.5 2.5 0 0 1 21 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5zM9 4v16',
-	history: 'M4 12a8 8 0 1 0 2.3-5.6M4 4v4h4M12 8v4l3 2',
-	plus: 'M12 5v14M5 12h14',
-	send: 'M5 12h13M13 6l6 6-6 6',
-	stop: 'M7 7h10v10H7z',
-	web: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z',
-	chevron: 'M9 6l6 6-6 6',
-	down: 'M12 5v14m0 0-6-6m6 6 6-6',
-	back: 'M15 5l-7 7 7 7',
-	shield: 'M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z',
-	key: 'M14.5 13a4.5 4.5 0 1 0-4.2-2.9L3 17.4V21h3.6v-2.2h2.2v-2.2H11l2.2-2.2a4.5 4.5 0 0 0 1.3.6Z M16.5 7.5h.01',
-	folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
-	move: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM9 13h6m-2-2 2 2-2 2',
-	rename: 'M4 8h8M4 12h6M4 16h8M17 5v14M15 5h4M15 19h4',
-	fork: 'M6 7v10M8 5a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM8 19a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM20 7a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM18 9v1a5 5 0 0 1-5 5H6',
-	save: 'M5 4h11l3 3v13H5zM8 4v5h7V4M8 20v-6h8v6',
-	table: 'M4 5h16v14H4zM4 10h16M4 15h16M10 5v14'
-} as const;
+	// note / folder actions
+	pin: Pin,
+	lock: Lock,
+	unlock: LockOpen,
+	trash: Trash2,
+	restore: RotateCcw,
+	diff: Diff,
+	dir: Pilcrow,
+	more: Ellipsis,
+	rename: TextCursorInput,
+	move: FolderInput,
+	note: FileText,
+	notes: NotebookText,
+	newNote: SquarePen,
+	folder: Folder,
+	newFolder: FolderPlus,
+	collapse: ChevronsDownUp,
+	search: Search,
+	// sync / app chrome
+	pull: ArrowDownToLine,
+	push: ArrowUpFromLine,
+	sync: RefreshCw,
+	moon: Moon,
+	sun: Sun,
+	sidebar: PanelLeft,
+	noteList: LayoutList,
+	menu: Menu,
+	zenOn: Maximize,
+	zenOff: Minimize,
+	settings: Settings,
+	keyboard: Keyboard,
+	info: Info,
+	// editing
+	edit: Pencil,
+	eye: Eye,
+	check: Check,
+	close: X,
+	copy: Copy,
+	retry: RotateCw,
+	insert: TextCursor,
+	append: ListPlus,
+	table: Table,
+	bold: Bold,
+	heading: Heading,
+	bullet: List,
+	outdent: ListIndentDecrease,
+	indent: ListIndentIncrease,
+	tag: Hash,
+	undo: Undo2,
+	// AI
+	ai: Sparkles,
+	history: History,
+	plus: Plus,
+	send: ArrowRight,
+	stop: Square,
+	web: Globe,
+	fork: GitFork,
+	save: Save,
+	usage: ReceiptText,
+	on: CircleDot,
+	off: Circle,
+	// arrows
+	chevron: ChevronRight,
+	back: ChevronLeft,
+	down: ArrowDown,
+	// privacy / encryption
+	shield: Shield,
+	key: KeyRound
+} as const satisfies Record<string, Component>;
 
 export type IconName = keyof typeof ICONS;

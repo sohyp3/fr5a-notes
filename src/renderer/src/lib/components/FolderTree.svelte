@@ -130,9 +130,7 @@
 			app.toggleFolderExpanded(node.path, depth);
 		}}
 	>
-		<svg width="9" height="9" viewBox="0 0 10 10" class:open={expanded}>
-			<path d="M3 2l4 3-4 3z" fill="currentColor" />
-		</svg>
+		<span class="chev" class:open={expanded}><Icon name="chevron" size={12} stroke={2.4} /></span>
 	</button>
 
 	<button
@@ -147,14 +145,7 @@
 		ondragstart={(e) => startDrag(e, { kind: 'folder', path: node.path })}
 		ondragend={endDrag}
 	>
-		<svg class="ico" width="14" height="14" viewBox="0 0 24 24" fill="none">
-			<path
-				d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
-				stroke="currentColor"
-				stroke-width="1.7"
-				stroke-linejoin="round"
-			/>
-		</svg>
+		<span class="ico"><Icon name="folder" size={14} /></span>
 		<span class="name">{node.name}</span>
 		{#if sealed}
 			<span
@@ -236,10 +227,11 @@
 	.twist.hidden {
 		visibility: hidden;
 	}
-	.twist svg {
+	.chev {
+		display: grid;
 		transition: transform 140ms var(--ease-spring);
 	}
-	.twist svg.open {
+	.chev.open {
 		transform: rotate(90deg);
 	}
 	.label {
@@ -255,6 +247,7 @@
 	}
 	.ico {
 		flex: 0 0 auto;
+		display: grid;
 		color: var(--text-muted);
 	}
 	.name {

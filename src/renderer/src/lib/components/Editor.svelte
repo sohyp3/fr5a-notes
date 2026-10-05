@@ -324,26 +324,28 @@
 							aria-expanded={!!crumbAt}
 							onclick={openCrumb}
 						>
-							{#if crumb.dir}<span class="cdir">{crumb.dir} /</span>{/if}
+							{#if crumb.dir && !narrow}<span class="cdir">{crumb.dir} /</span>{/if}
 							<span class="cname">{crumb.name}</span>
 							<span class="caret-down" aria-hidden="true"><Icon name="chevron" size={11} /></span>
 						</button>
 					{:else}
 						<span class="cname">{crumb.name}</span>
 					{/if}
+					<!-- Narrow headers keep the file name: badges fold to their icon, and
+					     "Viewing" goes (the Edit button already says it). -->
 					{#if app.activeEncrypted}<span
 							class="state shield"
 							title="Encrypted — saved and synced as ciphertext only your key opens"
-							><Icon name="key" size={10} stroke={2.2} /> Encrypted</span
+							><Icon name="key" size={10} stroke={2.2} />{#if !narrow}Encrypted{/if}</span
 						>{/if}
 					{#if hiddenAi}<span
 							class="state shield"
 							title="Hidden from cloud AI — only local providers can read this note"
-							><Icon name="shield" size={10} stroke={2.2} /> Local AI only</span
+							><Icon name="shield" size={10} stroke={2.2} />{#if !narrow}Local AI only{/if}</span
 						>{/if}
-					{#if locked}<span class="state">Locked</span>{:else if !editable}<span class="state"
-							>Viewing</span
-						>{/if}
+					{#if locked}<span class="state" title="Locked"
+							>{#if narrow}<Icon name="lock" size={10} stroke={2.2} />{:else}Locked{/if}</span
+						>{:else if !editable && !narrow}<span class="state">Viewing</span>{/if}
 				</div>
 			{/if}
 			<div class="editor-actions">
@@ -581,9 +583,6 @@
 		opacity: 1;
 	}
 	.state.shield {
-		display: inline-flex;
-		align-items: center;
-		gap: 3px;
 		color: var(--accent);
 		background: var(--accent-soft);
 	}
@@ -601,6 +600,10 @@
 	}
 	.state {
 		flex: 0 0 auto;
+		align-self: center;
+		display: inline-flex;
+		align-items: center;
+		gap: 3px;
 		margin-inline-start: 4px;
 		padding: 1px 7px;
 		border-radius: 999px;

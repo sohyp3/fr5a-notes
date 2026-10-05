@@ -633,6 +633,38 @@ test('tablet: the AI sheet expands and its scrim closes it', async ({ page }) =>
 	await expect(page.locator('.body')).not.toHaveClass(/harness-open/);
 });
 
+test('tablet: the folders drawer and the AI sheet take turns; the sidebar fills the drawer', async ({
+	page
+}) => {
+	test.skip((await layoutOf(page)) !== 'tablet', 'tablet layout only');
+	await openPlan(page);
+	await openHarness(page);
+	await page.getByRole('button', { name: 'Open folders' }).tap();
+	await expect(page.locator('.body')).not.toHaveClass(/harness-open/);
+	await expect.poll(() => leftEdge(page, '.sidebar-wrap')).toBeGreaterThan(200);
+	// No bare strip between the sidebar and the drawer's edge.
+	expect(await width(page.locator('.sidebar'))).toBeCloseTo(await width(sidebar(page)), 0);
+});
+
+test('AI harness: the prompt mark, a one-line draft and Send share one line', async ({ page }) => {
+	await openPlan(page);
+	const harness = await openHarness(page);
+	await harness.locator('textarea').fill('hello');
+	const mid = (loc: Locator) =>
+		loc.evaluate((el) => {
+			const r = el.getBoundingClientRect();
+			return r.top + r.height / 2;
+		});
+	const send = await mid(harness.getByRole('button', { name: 'Send' }));
+	expect(Math.abs((await mid(harness.locator('textarea'))) - send)).toBeLessThanOrEqual(1);
+	expect(Math.abs((await mid(harness.locator('.ps1'))) - send)).toBeLessThanOrEqual(1);
+});
+
+test('settings show the app version', async ({ page }) => {
+	await openSettings(page);
+	await expect(page.locator('.settings .version')).toHaveText(/^fr5a \d+\.\d+\.\d+/);
+});
+
 test('reduced motion zeroes the motion tokens', async ({ page }) => {
 	const dur = () =>
 		page.evaluate(() =>
@@ -844,6 +876,39 @@ test('desktop: panes resize by dragging their edges; the list toggles', async ({
 	await expect(list(page)).toHaveAttribute('aria-hidden', 'true');
 	await page.keyboard.press('Control+Shift+L');
 	await expect(list(page)).toHaveAttribute('aria-hidden', 'false');
+	await ctx.close();
+});
+
+test('desktop: search clears with its X or Esc; New note stays visible in a narrow list', async ({
+	browser
+}) => {
+	const { ctx, page } = await desktopPage(browser);
+	const search = page.getByRole('textbox', { name: 'Search notes' });
+	const clear = page.getByRole('button', { name: 'Clear search' });
+	await expect(clear).toHaveCount(0);
+	await search.fill('hello');
+	await clear.click();
+	await expect(search).toHaveValue('');
+	await expect(clear).toHaveCount(0);
+	await expect(search).toBeFocused();
+	await search.fill('hello');
+	await search.press('Escape');
+	await expect(search).toHaveValue('');
+
+	// Narrowest list: the search field shrinks, the button keeps its place.
+	const sep = page.getByRole('separator', { name: 'Resize note list' });
+	const b = (await sep.boundingBox())!;
+	await page.mouse.move(b.x, b.y + 200);
+	await page.mouse.down();
+	await page.mouse.move(b.x - 300, b.y + 200, { steps: 6 });
+	await page.mouse.up();
+	await search.fill('a long search for something');
+	const listBox = (await list(page).boundingBox())!;
+	for (const btn of [list(page).getByRole('button', { name: 'New note' }), clear]) {
+		const box = (await btn.boundingBox())!;
+		expect(box.width).toBeGreaterThan(20);
+		expect(box.x + box.width).toBeLessThanOrEqual(listBox.x + listBox.width);
+	}
 	await ctx.close();
 });
 
@@ -1094,6 +1159,17 @@ test('desktop: a narrow window keeps room for the editor beside the AI pane', as
 				.evaluate((el) => el.getBoundingClientRect().right)
 		)
 		.toBeLessThanOrEqual(1024);
+	// Its header buttons too, as the window gets narrower.
+	const right = (name: string) =>
+		page
+			.getByRole('button', { name, exact: true })
+			.evaluate((el) => el.getBoundingClientRect().right);
+	for (const w of [1024, 820, 720]) {
+		await page.setViewportSize({ width: w, height: 640 });
+		for (const name of ['New session', 'Past sessions', 'Close AI pane'])
+			await expect.poll(() => right(name), `${name} at ${w}px`).toBeLessThanOrEqual(w);
+	}
+	await page.setViewportSize({ width: 1024, height: 640 });
 	await page.getByRole('button', { name: 'Close AI pane' }).click();
 	await expect.poll(() => width(sidebar(page))).toBeGreaterThan(150);
 	await ctx.close();

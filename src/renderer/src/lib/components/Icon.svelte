@@ -6,23 +6,15 @@
 		size = 16,
 		stroke = 1.8
 	}: { name: IconName; size?: number; stroke?: number } = $props();
+
+	const Glyph = $derived(ICONS[name]);
 </script>
 
-<svg
-	class="icon"
-	width={size}
-	height={size}
-	viewBox="0 0 24 24"
-	fill="none"
-	aria-hidden="true"
-	stroke="currentColor"
-	stroke-width={name === 'more' ? 3.2 : stroke}
-	stroke-linecap="round"
-	stroke-linejoin="round"><path d={ICONS[name]} /></svg
->
+<Glyph {size} strokeWidth={stroke} class="icon" aria-hidden="true" />
 
 <style>
-	.icon {
+	/* Lucide renders the <svg>, so the class is styled globally. */
+	:global(svg.icon) {
 		flex: 0 0 auto;
 		display: block;
 	}

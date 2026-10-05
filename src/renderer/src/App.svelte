@@ -493,6 +493,10 @@
 	.layout-tablet.drawer-open .sidebar-wrap {
 		transform: none;
 	}
+	/* The sidebar fills the drawer (its desktop width would leave a bare strip). */
+	.layout-tablet .sidebar-wrap > :global(.sidebar) {
+		width: 100%;
+	}
 	.layout-tablet .list-wrap {
 		max-width: 50%;
 	}

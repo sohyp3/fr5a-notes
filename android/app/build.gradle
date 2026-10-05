@@ -2,6 +2,11 @@ apply plugin: 'com.android.application'
 
 // Release signing: android/keystore.properties (git-ignored) points at the keystore.
 def keystorePropsFile = rootProject.file('keystore.properties')
+
+// Version: package.json is the one place to bump it. versionCode packs
+// major.minor.patch (0.4.12 → 412) so every release installs as an upgrade.
+def appVersion = new groovy.json.JsonSlurper().parse(rootProject.file('../package.json')).version
+def appVersionCode = appVersion.tokenize('.-')[0..2].inject(0) { code, part -> code * 100 + part.toInteger() }
 def keystoreProps = new Properties()
 if (keystorePropsFile.exists()) keystorePropsFile.withInputStream { keystoreProps.load(it) }
 
@@ -12,8 +17,8 @@ android {
         applicationId "com.fr5a.notes"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode appVersionCode
+        versionName appVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

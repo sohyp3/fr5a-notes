@@ -414,7 +414,7 @@
 			},
 			{
 				label: 'Usage & cost',
-				icon: 'list',
+				icon: 'usage',
 				hint: chatTotal.runs ? chatCost : undefined,
 				action: () => (usageOpen = true)
 			}
@@ -453,7 +453,9 @@
 						{#if t.running}<span class="dot" aria-label="running"></span>{/if}
 						<span class="idx">{i + 1}</span><span class="ttl">{t.title}</span>
 					</button>
-					<button class="tab-x" aria-label="Close tab" onclick={() => h.closeTab(i)}>×</button>
+					<button class="tab-x" aria-label="Close tab" onclick={() => h.closeTab(i)}
+						><Icon name="close" size={13} stroke={2} /></button
+					>
 				</div>
 			{/each}
 		</div>
@@ -558,8 +560,8 @@
 	{#if tab}
 		<div class="context">
 			<button class="ctx-sum" aria-expanded={ctxOpen} onclick={() => (ctxOpen = !ctxOpen)}>
+				{#if provider?.local}<span class="local" title="Local provider"></span>{/if}
 				<span class="prov">
-					{#if provider?.local}<span class="local" title="Local provider">●</span>{/if}
 					{provider ? `${provider.name} · ${provider.model}` : 'No provider'}
 				</span>
 				{#if ctx}
@@ -627,28 +629,35 @@
 										: 'Attach the open note'}
 								onclick={() => (tab.useCurrent = !tab.useCurrent)}
 							>
-								{tab.useCurrent && !app.aiBlocksActive ? '◉' : '○'} open note{app.activeEncrypted
-									? ' (encrypted)'
-									: ''}
+								<Icon
+									name={tab.useCurrent && !app.aiBlocksActive ? 'on' : 'off'}
+									size={12}
+									stroke={2}
+								/>
+								open note{app.activeEncrypted ? ' (encrypted)' : ''}
 							</button>
 							{#each tab.attached as id (id)}
 								{@const m = fromKey(id)}
 								<span class="chip {m.kind}" title={id}>
+									{#if m.kind === 'dir'}<Icon name="folder" size={12} />{/if}
 									{m.kind === 'tag'
 										? `#${m.value}`
 										: m.kind === 'dir'
-											? `▸ ${m.value || 'all'}/`
+											? `${m.value || 'all'}/`
 											: `@${m.value.split('/').pop()}`}
 									<button
 										aria-label="Detach"
-										onclick={() => (tab.attached = tab.attached.filter((x) => x !== id))}>×</button
+										onclick={() => (tab.attached = tab.attached.filter((x) => x !== id))}
+										><Icon name="close" size={12} stroke={2} /></button
 									>
 								</span>
 							{/each}
 							{#if skill}
 								<span class="chip skill" title={skill.description}>
 									/{skill.name}
-									<button aria-label="Clear skill" onclick={() => (tab.skill = null)}>×</button>
+									<button aria-label="Clear skill" onclick={() => (tab.skill = null)}
+										><Icon name="close" size={12} stroke={2} /></button
+									>
 								</span>
 							{/if}
 						</div>
@@ -885,7 +894,7 @@
 						{/each}
 					</ul>
 				{/if}
-				<span class="ps1" aria-hidden="true">›</span>
+				<span class="ps1" aria-hidden="true"><Icon name="chevron" size={15} stroke={2.6} /></span>
 				<textarea
 					bind:this={inputEl}
 					bind:value={input}
@@ -1021,11 +1030,11 @@
 		animation: pulse 1s ease-in-out infinite;
 	}
 	.tab-x {
+		display: grid;
+		place-items: center;
 		min-width: 24px;
 		min-height: 30px;
 		color: var(--text-faint);
-		font-size: 15px;
-		line-height: 1;
 	}
 	:global(html[data-touch]) .tab-x {
 		min-width: 36px;
@@ -1191,8 +1200,12 @@
 		font-weight: 500;
 	}
 	.local {
-		color: var(--ok);
-		font-size: 9px;
+		flex: 0 0 auto;
+		width: 6px;
+		height: 6px;
+		margin-inline-end: -2px;
+		border-radius: 50%;
+		background: var(--ok);
 	}
 	.pill {
 		flex: 0 0 auto;
@@ -1307,6 +1320,9 @@
 		font-family: var(--font-mono);
 	}
 	.chip button {
+		display: grid;
+		place-items: center;
+		align-self: stretch;
 		color: var(--text-faint);
 		padding: 0 2px;
 	}
@@ -1706,22 +1722,33 @@
 
 	/* --- prompt ------------------------------------------------------------ */
 	.prompt {
+		--row: 30px;
+		--line: 18px;
 		flex: 0 0 auto;
 		position: relative;
 		display: flex;
 		align-items: flex-end;
 		gap: 8px;
-		padding: 8px 10px calc(10px + env(safe-area-inset-bottom, 0px));
+		padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
 		box-shadow: inset 0 1px 0 var(--bg-active);
 	}
+	:global(html[data-touch]) .prompt {
+		--row: 44px;
+		--line: 24px;
+	}
 	.ps1 {
-		padding-bottom: 6px;
-		font-family: var(--font-mono);
-		font-weight: 700;
+		flex: 0 0 auto;
+		display: grid;
+		place-items: center;
+		height: var(--row);
 		color: var(--accent);
 	}
+	/* One line of text, padded to exactly one row: (row − line) / 2 above and below. */
 	textarea {
 		flex: 1;
+		min-width: 0;
+		box-sizing: border-box;
+		min-height: var(--row);
 		resize: none;
 		border: none;
 		outline: none;
@@ -1729,15 +1756,14 @@
 		color: var(--text-strong);
 		font-family: var(--font-mono);
 		font-size: 12.5px;
-		line-height: 1.5;
-		padding: 4px 0;
+		line-height: var(--line);
+		padding: calc((var(--row) - var(--line)) / 2) 0;
 		max-height: 180px;
 	}
 	/* ≥16px on touch: no zoom-on-focus, readable while drafting. */
 	:global(html[data-touch]) textarea {
 		font-size: 16px;
 		font-family: var(--font-editor);
-		padding: 9px 0;
 	}
 	textarea::placeholder {
 		color: var(--text-faint);
@@ -1748,8 +1774,8 @@
 		align-items: center;
 		justify-content: center;
 		gap: 5px;
-		min-width: 30px;
-		height: 30px;
+		min-width: var(--row);
+		height: var(--row);
 		padding: 0 7px;
 		border-radius: 8px;
 		background: var(--accent);
@@ -1761,8 +1787,6 @@
 			transform var(--dur-fast) ease;
 	}
 	:global(html[data-touch]) .send {
-		min-width: 44px;
-		height: 44px;
 		border-radius: 12px;
 	}
 	.send:active:not(:disabled) {

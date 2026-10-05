@@ -2,6 +2,7 @@
 	import { fly } from 'svelte/transition';
 	import { getAppState } from '../stores/app.svelte';
 	import { portal, reducedMotion } from '../portal';
+	import Icon from './Icon.svelte';
 
 	const app = getAppState();
 	const dur = reducedMotion() ? 0 : 1;
@@ -18,7 +19,9 @@
 	>
 		<span>{n.text}</span>
 		{#if n.kind === 'error'}
-			<button aria-label="Dismiss" onclick={() => (app.notice = null)}>×</button>
+			<button aria-label="Dismiss" onclick={() => (app.notice = null)}
+				><Icon name="close" size={15} stroke={2} /></button
+			>
 		{/if}
 	</div>
 {/if}
@@ -48,9 +51,9 @@
 		color: #fff;
 	}
 	button {
+		display: grid;
+		place-items: center;
 		color: inherit;
-		font-size: 17px;
-		line-height: 1;
 		opacity: 0.8;
 	}
 </style>

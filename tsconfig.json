@@ -23,6 +23,7 @@
 		"src/**/*.svelte.ts",
 		"electron.vite.config.ts",
 		"vite.android.config.ts",
+		"build-info.ts",
 		"capacitor.config.ts",
 		"playwright.config.ts",
 		"e2e/**/*.ts",

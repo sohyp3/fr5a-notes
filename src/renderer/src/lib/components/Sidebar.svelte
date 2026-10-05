@@ -5,6 +5,7 @@
 	import { dropFor, endDrag } from '../dnd';
 	import TagTree from './TagTree.svelte';
 	import FolderTree from './FolderTree.svelte';
+	import Icon from './Icon.svelte';
 	import logo from '$lib/assets/logo.png';
 
 	const app = getAppState();
@@ -61,14 +62,7 @@
 		ondragleave={() => (rootOver = false)}
 		ondrop={onRootDrop}
 	>
-		<svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-			<path
-				d="M5 4h14M5 9h14M5 14h9M5 19h9"
-				stroke="currentColor"
-				stroke-width="1.8"
-				stroke-linecap="round"
-			/>
-		</svg>
+		<Icon name="notes" size={16} />
 		<span>All Notes</span>
 		<span class="count">{noteCount}</span>
 	</button>
@@ -80,33 +74,14 @@
 				aria-expanded={app.sidebar.foldersOpen}
 				onclick={() => app.toggleSection('folders')}
 			>
-				<svg
-					class="chev"
-					class:open={app.sidebar.foldersOpen}
-					width="9"
-					height="9"
-					viewBox="0 0 10 10"
+				<span class="chev" class:open={app.sidebar.foldersOpen}
+					><Icon name="chevron" size={11} stroke={2.4} /></span
 				>
-					<path d="M3 2l4 3-4 3z" fill="currentColor" />
-				</svg>
 				<span>Folders</span>
 			</button>
 			<div class="actions">
 				<button class="hdr-btn" title="New folder" aria-label="New folder" onclick={startAdd}>
-					<svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-						<path
-							d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
-							stroke="currentColor"
-							stroke-width="1.7"
-							stroke-linejoin="round"
-						/>
-						<path
-							d="M12 11v4M10 13h4"
-							stroke="currentColor"
-							stroke-width="1.7"
-							stroke-linecap="round"
-						/>
-					</svg>
+					<Icon name="newFolder" size={14} />
 				</button>
 				{#if folders.length > 0 && app.sidebar.foldersOpen}
 					<button
@@ -115,15 +90,7 @@
 						aria-label="Collapse all folders"
 						onclick={() => app.collapseFolders()}
 					>
-						<svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-							<path
-								d="M8 4l4 4 4-4M8 20l4-4 4 4"
-								stroke="currentColor"
-								stroke-width="2"
-								stroke-linecap="round"
-								stroke-linejoin="round"
-							/>
-						</svg>
+						<Icon name="collapse" size={14} />
 					</button>
 				{/if}
 			</div>
@@ -131,14 +98,7 @@
 
 		{#if adding}
 			<div class="new-folder">
-				<svg class="ico" width="14" height="14" viewBox="0 0 24 24" fill="none">
-					<path
-						d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
-						stroke="currentColor"
-						stroke-width="1.7"
-						stroke-linejoin="round"
-					/>
-				</svg>
+				<Icon name="folder" size={14} />
 				<input
 					bind:this={input}
 					bind:value={newName}
@@ -170,15 +130,9 @@
 				aria-expanded={app.sidebar.tagsOpen}
 				onclick={() => app.toggleSection('tags')}
 			>
-				<svg
-					class="chev"
-					class:open={app.sidebar.tagsOpen}
-					width="9"
-					height="9"
-					viewBox="0 0 10 10"
+				<span class="chev" class:open={app.sidebar.tagsOpen}
+					><Icon name="chevron" size={11} stroke={2.4} /></span
 				>
-					<path d="M3 2l4 3-4 3z" fill="currentColor" />
-				</svg>
 				<span>Tags</span>
 			</button>
 		</div>
@@ -202,15 +156,7 @@
 			title="Trash"
 			onclick={() => app.openTrash()}
 		>
-			<svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-				<path
-					d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"
-					stroke="currentColor"
-					stroke-width="1.7"
-					stroke-linecap="round"
-					stroke-linejoin="round"
-				/>
-			</svg>
+			<Icon name="trash" size={16} />
 			<span>Trash</span>
 			{#if app.trashNotes.length}<span class="count">{app.trashNotes.length}</span>{/if}
 		</button>
@@ -221,15 +167,7 @@
 				title="Notes changed since the last sync (git status)"
 				onclick={() => app.showChanges()}
 			>
-				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-					<path
-						d="M8 4v10M3 9h10M13 19h8M6 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM18 4v8"
-						stroke="currentColor"
-						stroke-width="1.7"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-					/>
-				</svg>
+				<Icon name="diff" size={16} />
 				<span>Changes</span>
 				{#if app.changes.length}<span class="count">{app.changes.length}</span>{/if}
 			</button>
@@ -240,14 +178,7 @@
 			title="Settings"
 			onclick={() => app.openSettings()}
 		>
-			<svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-				<circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7" />
-				<path
-					d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
-					stroke="currentColor"
-					stroke-width="1.5"
-				/>
-			</svg>
+			<Icon name="settings" size={16} />
 			<span>Settings</span>
 		</button>
 	</footer>
@@ -330,6 +261,7 @@
 	}
 	.section-toggle .chev {
 		flex: 0 0 auto;
+		display: grid;
 		transition: transform 140ms var(--ease-spring);
 	}
 	.section-toggle .chev.open {
@@ -366,9 +298,6 @@
 		border-radius: 8px;
 		background: var(--bg-hover);
 		color: var(--text-muted);
-	}
-	.new-folder .ico {
-		flex: 0 0 auto;
 	}
 	.new-folder input {
 		flex: 1;
@@ -430,9 +359,6 @@
 	.settings-btn.selected {
 		background: var(--accent-soft);
 		color: var(--accent);
-	}
-	.settings-btn svg {
-		flex: 0 0 auto;
 	}
 	.settings-btn .count {
 		margin-left: auto;

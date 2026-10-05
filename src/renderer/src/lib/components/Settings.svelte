@@ -20,10 +20,10 @@
 		{ id: 'general', label: 'General', icon: 'note', desc: 'Notes folder, opening notes' },
 		{ id: 'appearance', label: 'Appearance', icon: 'sun', desc: 'Theme, accent, fonts' },
 		{ id: 'editor', label: 'Editor', icon: 'edit', desc: 'Ghost syntax, Vim' },
-		{ id: 'sync', label: 'Sync', icon: 'pull', desc: 'Git remotes, changes' },
-		{ id: 'ai', label: 'AI assistant', icon: 'web', desc: 'Providers, web search, skills' },
+		{ id: 'sync', label: 'Sync', icon: 'sync', desc: 'Git remotes, changes' },
+		{ id: 'ai', label: 'AI assistant', icon: 'ai', desc: 'Providers, web search, skills' },
 		{ id: 'encryption', label: 'Encryption', icon: 'key', desc: 'Encrypt notes with your key' },
-		{ id: 'shortcuts', label: 'Shortcuts', icon: 'list', desc: 'Keyboard shortcuts' }
+		{ id: 'shortcuts', label: 'Shortcuts', icon: 'keyboard', desc: 'Keyboard shortcuts' }
 	];
 
 	const shortcuts = $derived(SHORTCUTS.filter((sc) => !sc.feature || s[sc.feature]));
@@ -89,6 +89,13 @@
 						{#if phone}<Icon name="chevron" size={16} />{/if}
 					</button>
 				{/each}
+				<p
+					class="version"
+					title="Version{__APP_COMMIT__ ? ` · built from commit ${__APP_COMMIT__}` : ''}"
+				>
+					fr5a {__APP_VERSION__}{#if __APP_COMMIT__}<span class="commit">· {__APP_COMMIT__}</span
+						>{/if}
+				</p>
 			</nav>
 		{/if}
 
@@ -518,6 +525,20 @@
 	.nav-desc {
 		font-size: 12.5px;
 		color: var(--text-muted);
+	}
+	/* Pinned under the sections; selectable, so it can be copied into a bug report. */
+	.version {
+		margin: auto 0 0;
+		padding: 12px 10px 0;
+		font-size: 11px;
+		color: var(--text-faint);
+		font-variant-numeric: tabular-nums;
+		user-select: text;
+	}
+	.version .commit {
+		margin-inline-start: 0.35em;
+		font-family: var(--font-mono);
+		font-size: 10.5px;
 	}
 
 	/* --- section body ------------------------------------------------------ */

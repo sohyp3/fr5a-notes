@@ -758,6 +758,9 @@ class AppState {
 
 	toggleDrawer(): void {
 		this.drawerOpen = !this.drawerOpen;
+		// Tablets: the drawer and the AI sheet are both overlays: one at a time
+		// (openHarness closes the drawer). The chat stays mounted for next time.
+		if (this.drawerOpen && this.harnessOpen) this.closeHarness();
 	}
 
 	// --- AI harness ----------------------------------------------------------

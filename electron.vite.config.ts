@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { builtinModules } from 'node:module';
 import { defineConfig } from 'electron-vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
+import { buildInfo } from './build-info';
 
 // Node built-ins (with and without the `node:` prefix) must never be bundled.
 const nodeBuiltins = new Set([...builtinModules, ...builtinModules.map((m) => `node:${m}`)]);
@@ -37,6 +38,7 @@ export default defineConfig({
 	},
 	renderer: {
 		root: 'src/renderer',
+		define: buildInfo(),
 		resolve: {
 			alias: {
 				$lib: resolve('src/renderer/src/lib')

@@ -93,7 +93,7 @@
 				aria-expanded={app.drawerOpen}
 				onclick={() => app.toggleDrawer()}
 			>
-				<Icon name="list" size={18} stroke={1.9} />
+				<Icon name="menu" size={18} stroke={1.9} />
 			</button>
 		{:else if phone}
 			{#if app.canGoBack}
@@ -123,24 +123,7 @@
 				aria-pressed={app.listOpen}
 				onclick={() => app.toggleList()}
 			>
-				<svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-					<rect
-						x="3"
-						y="4"
-						width="18"
-						height="16"
-						rx="2.5"
-						stroke="currentColor"
-						stroke-width="1.8"
-					/>
-					<path
-						d="M7 9h5M7 12.5h5M7 16h3"
-						stroke="currentColor"
-						stroke-width="1.8"
-						stroke-linecap="round"
-					/>
-					<line x1="15" y1="4" x2="15" y2="20" stroke="currentColor" stroke-width="1.8" />
-				</svg>
+				<Icon name="noteList" size={17} />
 			</button>
 		{/if}
 	</div>
@@ -169,7 +152,8 @@
 					<button
 						class="dismiss"
 						aria-label="Dismiss sync message"
-						onclick={() => app.showSyncMessage(null)}>×</button
+						onclick={() => app.showSyncMessage(null)}
+						><Icon name="close" size={12} stroke={2} /></button
 					>
 				{/if}
 			</span>
@@ -252,17 +236,7 @@
 					aria-pressed={app.zen}
 					onclick={() => app.toggleZen()}
 				>
-					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-						<path
-							d={app.zen
-								? 'M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5'
-								: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5'}
-							stroke="currentColor"
-							stroke-width="1.8"
-							stroke-linecap="round"
-							stroke-linejoin="round"
-						/>
-					</svg>
+					<Icon name={app.zen ? 'zenOff' : 'zenOn'} size={16} />
 				</button>
 			{/if}
 			<button
@@ -461,8 +435,8 @@
 		color: var(--accent);
 	}
 	.dismiss {
-		font-size: 13px;
-		line-height: 1;
+		display: grid;
+		place-items: center;
 		color: inherit;
 		opacity: 0.7;
 	}
