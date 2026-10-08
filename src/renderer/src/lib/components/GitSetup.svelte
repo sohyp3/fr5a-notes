@@ -81,7 +81,7 @@
 			</button>
 		</div>
 		{#if message}
-			<p class="msg" class:error={message.kind === 'error'}>{message.text}</p>
+			<p class={['msg', { error: message.kind === 'error' }]}>{message.text}</p>
 		{/if}
 	</div>
 </section>

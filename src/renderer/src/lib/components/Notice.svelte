@@ -11,9 +11,8 @@
 {#if app.notice}
 	{@const n = app.notice}
 	<div
-		use:portal
-		class="notice"
-		class:error={n.kind === 'error'}
+		{@attach portal}
+		class={['notice', { error: n.kind === 'error' }]}
 		role={n.kind === 'error' ? 'alert' : 'status'}
 		transition:fly={{ y: 12, duration: 160 * dur }}
 	>

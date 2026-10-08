@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { fade, fly, scale } from 'svelte/transition';
-	import { tick } from 'svelte';
 	import { getAppState } from '../stores/app.svelte';
 	import { reducedMotion } from '../portal';
 
@@ -9,63 +8,65 @@
 	const dur = reducedMotion() ? 0 : 1;
 	const phone = $derived(app.layout === 'phone');
 
-	let value = $state('');
-	let touched = $state(false);
-	/** `submit` running, and the error it returned. */
+	/** The field, fresh for every request; `failed` is the error `submit` returned. */
+	const form = $derived.by(() => {
+		const fresh = $state({
+			value: req?.value ?? '',
+			touched: false,
+			failed: null as string | null
+		});
+		return fresh;
+	});
+	/** `submit` running. */
 	let busy = $state(false);
-	let failed = $state<string | null>(null);
-	let input = $state<HTMLInputElement | null>(null);
 	// The scrim cancels only for a press that started on it (see ConfirmDialog).
 	let scrimPressed = false;
 
-	const error = $derived(req?.check?.(value) ?? failed);
+	const error = $derived(req?.check?.(form.value) ?? form.failed);
 
-	$effect(() => {
-		const r = req;
-		if (!r) return;
-		value = r.value;
-		touched = false;
-		failed = null;
-		void tick().then(() => {
-			input?.focus();
-			if (!r.secret) input?.select();
-		});
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key === 'Escape') {
-				e.preventDefault();
-				e.stopPropagation();
-				cancel();
-			}
-		};
-		window.addEventListener('keydown', onKey, true);
-		return () => window.removeEventListener('keydown', onKey, true);
-	});
+	function onKey(e: KeyboardEvent): void {
+		if (!req || e.key !== 'Escape') return;
+		e.preventDefault();
+		e.stopPropagation();
+		cancel();
+	}
+
+	/** Attachment: focus the field for each request, its text selected unless secret. */
+	function focusField(input: HTMLInputElement): void {
+		if (!req) return;
+		input.focus();
+		if (!req.secret) input.select();
+	}
 
 	async function submit(e?: Event): Promise<void> {
 		e?.preventDefault();
-		touched = true;
 		const r = req;
+		const f = form;
+		f.touched = true;
 		if (error || busy || !r) return;
 		if (r.submit) {
 			busy = true;
-			failed = await r.submit(value);
+			f.failed = await r.submit(f.value);
 			busy = false;
-			if (failed) return;
+			if (f.failed) return;
 		}
-		const out = value;
-		if (r.secret) value = '';
+		const out = f.value;
+		if (r.secret) f.value = '';
 		// Unchanged: nothing to do, same as Cancel.
 		app.answerPrompt(out.trim() === r.value ? null : out);
 	}
 
 	function cancel(): void {
-		if (req?.secret) value = '';
+		if (req?.secret) form.value = '';
 		app.answerPrompt(null);
 	}
 </script>
 
+<!-- Escape cancels. -->
+<svelte:window onkeydowncapture={onKey} />
+
 {#if req}
-	<div class="root" class:sheet={phone}>
+	<div class={['root', { sheet: phone }]}>
 		<button
 			class="scrim"
 			aria-label="Cancel"
@@ -90,22 +91,22 @@
 				<label>
 					<span class="lbl">{req.label}</span>
 					<input
-						bind:this={input}
-						bind:value
+						{@attach focusField}
+						bind:value={form.value}
 						oninput={() => {
-							touched = true;
-							failed = null;
+							form.touched = true;
+							form.failed = null;
 						}}
 						type={req.secret ? 'password' : 'text'}
 						spellcheck="false"
 						autocomplete="off"
 						enterkeyhint="done"
 						dir="auto"
-						aria-invalid={touched && !!error}
+						aria-invalid={form.touched && !!error}
 						aria-describedby="prompt-error"
 					/>
 				</label>
-				<p id="prompt-error" class="err" role="status">{touched && error ? error : ''}</p>
+				<p id="prompt-error" class="err" role="status">{form.touched && error ? error : ''}</p>
 				<div class="actions">
 					<button type="button" class="btn" onclick={cancel}>Cancel</button>
 					<button type="submit" class="btn primary" disabled={!!error || busy} aria-busy={busy}

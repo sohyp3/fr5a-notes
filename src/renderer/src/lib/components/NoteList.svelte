@@ -16,38 +16,41 @@
 	// Breadcrumb crumbs for the active filter, so it's always clear what's showing.
 	// Each ancestor is a jump target; the final crumb is the current scope.
 	interface Crumb {
+		/** The folder / tag path it stands for ('' = All Notes): its key. */
+		path: string;
 		label: string;
 		onclick?: () => void;
 	}
 
 	const crumbs = $derived.by((): Crumb[] => {
-		if (app.trashOpen) return [{ label: 'Trash' }];
+		if (app.trashOpen) return [{ path: '', label: 'Trash' }];
 		if (app.selectedFolder) {
 			const segs = app.selectedFolder.split('/');
 			return [
-				{ label: 'All Notes', onclick: () => app.showAllNotes() },
+				{ path: '', label: 'All Notes', onclick: () => app.showAllNotes() },
 				...segs.map((name, i) => {
 					const path = segs.slice(0, i + 1).join('/');
 					const isLast = i === segs.length - 1;
-					return { label: name, onclick: isLast ? undefined : () => app.selectFolder(path) };
+					return { path, label: name, onclick: isLast ? undefined : () => app.selectFolder(path) };
 				})
 			];
 		}
 		if (app.selectedTag) {
 			const segs = app.selectedTag.split('/');
 			return [
-				{ label: 'All Notes', onclick: () => app.showAllNotes() },
+				{ path: '', label: 'All Notes', onclick: () => app.showAllNotes() },
 				...segs.map((name, i) => {
 					const path = segs.slice(0, i + 1).join('/');
 					const isLast = i === segs.length - 1;
 					return {
+						path,
 						label: `#${name}`,
 						onclick: isLast ? undefined : () => app.selectTag(path)
 					};
 				})
 			];
 		}
-		return [{ label: 'All Notes' }];
+		return [{ path: '', label: 'All Notes' }];
 	});
 </script>
 
@@ -94,13 +97,12 @@
 	</div>
 
 	<nav
-		class="scope"
-		class:trash={app.trashOpen}
+		class={['scope', { trash: app.trashOpen }]}
 		title={app.trashOpen
 			? 'Swipe right to restore · left to delete forever (or right-click / long-press)'
 			: 'Swipe a card right to pin · left to trash (or right-click / long-press)'}
 	>
-		{#each crumbs as crumb, i (i)}
+		{#each crumbs as crumb, i (crumb.path)}
 			{#if i > 0}<span class="sep" aria-hidden="true"
 					><Icon name="chevron" size={11} stroke={2.2} /></span
 				>{/if}

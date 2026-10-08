@@ -154,10 +154,12 @@ const clampWidth = (pane: PaneName, px: number) =>
  */
 class AppState {
 	workspace = $state<string | null>(null);
-	notes = $state<NoteMeta[]>([]);
-	tags = $state<TagNode[]>([]);
+	// Index data is only ever replaced whole (fresh from the host), never
+	// mutated: raw state skips proxying every note.
+	notes = $state.raw<NoteMeta[]>([]);
+	tags = $state.raw<TagNode[]>([]);
 	/** Every workspace sub-directory (incl. empty ones), workspace-relative. */
-	folders = $state<string[]>([]);
+	folders = $state.raw<string[]>([]);
 
 	/** Right-click note menu: screen position + target note, or null when closed. */
 	contextMenu = $state<{ x: number; y: number; note: NoteMeta } | null>(null);
@@ -202,7 +204,7 @@ class AppState {
 	/** When true the note list shows the `.fr5a_trash` contents instead. */
 	trashOpen = $state(false);
 	/** Soft-deleted notes (ids carry the `.fr5a_trash/` prefix). */
-	trashNotes = $state<NoteMeta[]>([]);
+	trashNotes = $state.raw<NoteMeta[]>([]);
 	sidebarOpen = $state(true);
 	/** Note list pane shown (desktop + tablet layouts; persisted). */
 	listOpen = $state(true);
@@ -229,13 +231,13 @@ class AppState {
 	/** Phones: a section is open (else the list of sections). */
 	settingsDrill = $state(false);
 	/** Notes changed since the last commit; null = not a git repo (or not loaded yet). */
-	changes = $state<GitChange[] | null>(null);
+	changes = $state.raw<GitChange[] | null>(null);
 	changesLoading = $state(false);
 	/** Path the Changes view selects first. */
 	changesFocus = $state<string | null>(null);
 	private changesTimer: ReturnType<typeof setTimeout> | null = null;
 	/** Stashes of every repo, newest first (loaded while Changes is open). */
-	stashes = $state<GitStash[]>([]);
+	stashes = $state.raw<GitStash[]>([]);
 	/** A stash / revert is running. */
 	gitBusy = $state(false);
 
@@ -260,7 +262,7 @@ class AppState {
 	theme = $state<'light' | 'dark'>('light');
 
 	/**
-	 * The live TipTap instance (set by Editor.svelte's mount action), so the AI
+	 * The live TipTap instance (set by Editor.svelte's mount attachment), so the AI
 	 * harness can read the buffer / caret and apply approved edits.
 	 */
 	editor = $state.raw<Editor | null>(null);

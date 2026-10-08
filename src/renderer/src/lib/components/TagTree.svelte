@@ -15,17 +15,16 @@
 	const selected = $derived(app.selectedTag === node.path);
 </script>
 
-<div class="tag-row" style="padding-left:{8 + depth * 14}px" class:selected>
+<div class={['tag-row', { selected }]} style:padding-left="{8 + depth * 14}px">
 	<button
-		class="twist"
-		class:hidden={!hasChildren}
+		class={['twist', { hidden: !hasChildren }]}
 		aria-label="Expand"
 		onclick={(e) => {
 			e.stopPropagation();
 			app.toggleTagExpanded(node.path, depth);
 		}}
 	>
-		<span class="chev" class:open={expanded}><Icon name="chevron" size={12} stroke={2.4} /></span>
+		<span class={['chev', { open: expanded }]}><Icon name="chevron" size={12} stroke={2.4} /></span>
 	</button>
 
 	<button class="label" onclick={() => app.selectTag(node.path)}>

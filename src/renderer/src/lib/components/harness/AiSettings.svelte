@@ -106,7 +106,7 @@
 	let searchMsg = $state<{ kind: 'ok' | 'error'; text: string } | null>(null);
 
 	// --- skills: own files + packs cloned from git into .fr5a/skills/<name> ---
-	let skills = $state<Skill[]>([]);
+	let skills = $state.raw<Skill[]>([]);
 	let packUrl = $state('');
 	let installing = $state(false);
 	let packMsg = $state<{ kind: 'ok' | 'error'; text: string } | null>(null);
@@ -322,7 +322,7 @@
 		{#each cfg.providers as p (p.id)}
 			{@const models = ai.models[p.id] ?? []}
 			{@const open = expanded === p.id}
-			<div class="provider" class:open class:is-default={cfg.defaultProvider === p.id}>
+			<div class={['provider', { open, 'is-default': cfg.defaultProvider === p.id }]}>
 				<div class="phead">
 					<label class="pick">
 						<input
@@ -346,7 +346,7 @@
 						aria-label="{open ? 'Hide' : 'Show'} {p.name} details"
 						onclick={() => (expanded = open ? null : p.id)}
 					>
-						<span class="chev" class:open><Icon name="chevron" size={15} /></span>
+						<span class={['chev', { open }]}><Icon name="chevron" size={15} /></span>
 					</button>
 				</div>
 				{#if open}
@@ -394,7 +394,7 @@
 									aria-label="Reload models for {p.name}"
 									disabled={loadingModels[p.id]}
 									onclick={() => refreshModels(p.id)}
-									><span class:spin={loadingModels[p.id]}><Icon name="retry" size={15} /></span
+									><span class={{ spin: loadingModels[p.id] }}><Icon name="retry" size={15} /></span
 									></button
 								>
 							</div>
@@ -533,7 +533,7 @@
 					>
 				</div>
 			{/if}
-			{#if message}<p class="msg" class:error={message.kind === 'error'}>{message.text}</p>{/if}
+			{#if message}<p class={['msg', { error: message.kind === 'error' }]}>{message.text}</p>{/if}
 			<div class="actions">
 				<button class="btn" onclick={() => (draft = null)}>Cancel</button>
 				<button class="btn" disabled={testing || !draft.baseUrl} onclick={test}
@@ -558,8 +558,7 @@
 	</p>
 	<div class="search-kinds" role="radiogroup" aria-label="Web search provider">
 		<button
-			class="kind"
-			class:on={!cfg.search}
+			class={['kind', { on: !cfg.search }]}
 			role="radio"
 			aria-checked={!cfg.search}
 			onclick={() => setSearchKind('')}
@@ -568,8 +567,7 @@
 		</button>
 		{#each SEARCH_KINDS as k (k.kind)}
 			<button
-				class="kind"
-				class:on={cfg.search?.kind === k.kind}
+				class={['kind', { on: cfg.search?.kind === k.kind }]}
 				role="radio"
 				aria-checked={cfg.search?.kind === k.kind}
 				onclick={() => setSearchKind(k.kind)}
@@ -617,7 +615,7 @@
 			{/if}
 			<div class="actions start">
 				<button class="btn" onclick={testSearch}>Test search</button>
-				{#if searchMsg}<p class="msg" class:error={searchMsg.kind === 'error'}>
+				{#if searchMsg}<p class={['msg', { error: searchMsg.kind === 'error' }]}>
 						{searchMsg.text}
 					</p>{/if}
 			</div>
@@ -646,8 +644,7 @@
 		{#each privacyRows as r (r.path)}
 			{@const state = folderPrivacy(r.path, cfg.localOnlyFolders)}
 			<label
-				class="prow"
-				class:on={!!state}
+				class={['prow', { on: !!state }]}
 				style:padding-inline-start="{10 + r.depth * 16}px"
 				title={state?.via === 'parent'
 					? `Hidden because “${state.folder || 'Everything'}” is hidden`
@@ -663,7 +660,7 @@
 				<span class="pname">{r.name}</span>
 				<span class="pcount">{r.count}</span>
 				{#if state}
-					<span class="pstate" class:inherited={state.via === 'parent'}
+					<span class={['pstate', { inherited: state.via === 'parent' }]}
 						>{state.via === 'self' ? 'Hidden' : 'Hidden via parent'}</span
 					>
 				{/if}
@@ -720,7 +717,7 @@
 			>
 		</div>
 	{/if}
-	{#if packMsg}<p class="msg" class:error={packMsg.kind === 'error'}>{packMsg.text}</p>{/if}
+	{#if packMsg}<p class={['msg', { error: packMsg.kind === 'error' }]}>{packMsg.text}</p>{/if}
 </section>
 
 <section class="group">

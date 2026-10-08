@@ -10,7 +10,7 @@
 	// turn a folder that already has notes into its own repo).
 	const app = getAppState();
 	const android = platform.platform === 'android';
-	let repos = $state<SyncRepo[]>([]);
+	let repos = $state.raw<SyncRepo[]>([]);
 	let adding = $state(false);
 	let folder = $state('');
 	let url = $state('');
@@ -77,7 +77,7 @@
 		{#if !android}Uses your system git credentials (SSH keys, or the credential helper your notes
 			repo uses).{/if}
 	</p>
-	{#if message && !adding}<p class="msg after" class:error={message.kind === 'error'}>
+	{#if message && !adding}<p class={['msg after', { error: message.kind === 'error' }]}>
 			{message.text}
 		</p>{/if}
 	{#if platform.syncAddRepo}
@@ -111,7 +111,7 @@
 						<input type="password" bind:value={token} autocomplete="off" />
 					</label>
 				{/if}
-				{#if message}<p class="msg" class:error={message.kind === 'error'}>{message.text}</p>{/if}
+				{#if message}<p class={['msg', { error: message.kind === 'error' }]}>{message.text}</p>{/if}
 				<div class="actions">
 					<button class="btn" onclick={() => (adding = false)}>Cancel</button>
 					<button

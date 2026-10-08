@@ -17,12 +17,10 @@
 	// Inline "new folder" input, revealed by the + button in the Folders header.
 	let adding = $state(false);
 	let newName = $state('');
-	let input = $state<HTMLInputElement | null>(null);
 
 	function startAdd(): void {
 		adding = true;
 		newName = '';
-		queueMicrotask(() => input?.focus());
 	}
 
 	// "All Notes" doubles as the drop target for the workspace root.
@@ -49,9 +47,7 @@
 	<div class="brand"><img src={logo} alt="fr5a" /></div>
 
 	<button
-		class="all-notes"
-		class:selected={allSelected}
-		class:over={rootOver}
+		class={['all-notes', { selected: allSelected, over: rootOver }]}
 		title={rootOver ? 'Move to the top level' : undefined}
 		onclick={() => app.showAllNotes()}
 		ondragover={(e) => {
@@ -74,7 +70,7 @@
 				aria-expanded={app.sidebar.foldersOpen}
 				onclick={() => app.toggleSection('folders')}
 			>
-				<span class="chev" class:open={app.sidebar.foldersOpen}
+				<span class={['chev', { open: app.sidebar.foldersOpen }]}
 					><Icon name="chevron" size={11} stroke={2.4} /></span
 				>
 				<span>Folders</span>
@@ -100,7 +96,7 @@
 			<div class="new-folder">
 				<Icon name="folder" size={14} />
 				<input
-					bind:this={input}
+					{@attach (el) => el.focus()}
 					bind:value={newName}
 					placeholder={app.selectedFolder ? `New in ${app.selectedFolder}` : 'Folder name'}
 					spellcheck="false"
@@ -130,7 +126,7 @@
 				aria-expanded={app.sidebar.tagsOpen}
 				onclick={() => app.toggleSection('tags')}
 			>
-				<span class="chev" class:open={app.sidebar.tagsOpen}
+				<span class={['chev', { open: app.sidebar.tagsOpen }]}
 					><Icon name="chevron" size={11} stroke={2.4} /></span
 				>
 				<span>Tags</span>
@@ -151,8 +147,7 @@
 
 	<footer class="foot">
 		<button
-			class="settings-btn"
-			class:selected={app.trashOpen && app.view === 'editor'}
+			class={['settings-btn', { selected: app.trashOpen && app.view === 'editor' }]}
 			title="Trash"
 			onclick={() => app.openTrash()}
 		>
@@ -162,8 +157,7 @@
 		</button>
 		{#if app.changes !== null}
 			<button
-				class="settings-btn"
-				class:selected={app.view === 'changes'}
+				class={['settings-btn', { selected: app.view === 'changes' }]}
 				title="Notes changed since the last sync (git status)"
 				onclick={() => app.showChanges()}
 			>
@@ -173,8 +167,7 @@
 			</button>
 		{/if}
 		<button
-			class="settings-btn"
-			class:selected={app.view === 'settings'}
+			class={['settings-btn', { selected: app.view === 'settings' }]}
 			title="Settings"
 			onclick={() => app.openSettings()}
 		>

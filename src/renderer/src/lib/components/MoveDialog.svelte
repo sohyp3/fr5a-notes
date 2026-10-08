@@ -20,9 +20,11 @@
 		create?: boolean;
 	}
 
-	let query = $state('');
-	let cursor = $state(0);
-	let input = $state<HTMLInputElement | null>(null);
+	/** The filter typed: empty again for every request. */
+	let query = $derived.by(() => {
+		void req;
+		return '';
+	});
 	let listEl = $state<HTMLDivElement | null>(null);
 	let scrimPressed = false;
 
@@ -64,28 +66,24 @@
 		return hits;
 	});
 
-	$effect(() => {
-		void rows.length;
-		const first = rows.findIndex((r) => r.path !== current || r.create);
-		cursor = Math.max(0, first);
-	});
+	/** Keyboard cursor: back on the first destination whenever the rows change. */
+	const firstDestination = (all: Row[]) => all.findIndex((r) => r.path !== current || r.create);
+	let cursor = $derived(Math.max(0, firstDestination(rows)));
 
-	$effect(() => {
-		const r = req;
-		if (!r) return;
-		query = '';
-		// Touch: don't pop the keyboard just to show the list.
-		if (!app.touch) void tick().then(() => input?.focus());
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key === 'Escape') {
-				e.preventDefault();
-				e.stopPropagation();
-				close();
-			}
-		};
-		window.addEventListener('keydown', onKey, true);
-		return () => window.removeEventListener('keydown', onKey, true);
-	});
+	function onKey(e: KeyboardEvent): void {
+		if (!req || e.key !== 'Escape') return;
+		e.preventDefault();
+		e.stopPropagation();
+		close();
+	}
+
+	/**
+	 * Attachment: focus the filter for each request. Touch: don't pop the
+	 * keyboard just to show the list.
+	 */
+	function focusFilter(input: HTMLInputElement): void {
+		if (req && !app.touch) input.focus();
+	}
 
 	function close(): void {
 		app.moveRequest = null;
@@ -115,8 +113,11 @@
 	}
 </script>
 
+<!-- Escape cancels. -->
+<svelte:window onkeydowncapture={onKey} />
+
 {#if req}
-	<div class="root" class:sheet={phone}>
+	<div class={['root', { sheet: phone }]}>
 		<button
 			class="scrim"
 			aria-label="Cancel"
@@ -139,7 +140,7 @@
 			<div class="inner" in:scale={{ start: 0.96, duration: phone ? 0 : 180 * dur }}>
 				<h2 id="move-title">Move “{subject}”</h2>
 				<input
-					bind:this={input}
+					{@attach focusFilter}
 					bind:value={query}
 					onkeydown={onKeydown}
 					placeholder="Find or create a folder"
@@ -154,8 +155,7 @@
 						{@const here = row.path === current && !row.create}
 						{@const hidden = row.create ? null : app.folderHidden(row.path)}
 						<button
-							class="row"
-							class:cursor={i === cursor}
+							class={['row', { cursor: i === cursor }]}
 							data-cursor={i === cursor ? '' : undefined}
 							role="option"
 							aria-selected={i === cursor}

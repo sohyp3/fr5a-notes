@@ -22,7 +22,7 @@
 	const phone = $derived(app.layout === 'phone');
 	const dur = reducedMotion() ? 0 : 1;
 
-	let report = $state<UsageReport | null>(null);
+	let report = $state.raw<UsageReport | null>(null);
 	let error = $state<string | null>(null);
 	let scrimPressed = false;
 
@@ -33,15 +33,14 @@
 		Promise.all([h.loadUsage(), ai.loadPrices()])
 			.then(([chats]) => (report = usageReport(chats, priced)))
 			.catch((err) => (error = err instanceof Error ? err.message : String(err)));
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key !== 'Escape') return;
-			e.preventDefault();
-			e.stopPropagation();
-			onclose();
-		};
-		window.addEventListener('keydown', onKey, true);
-		return () => window.removeEventListener('keydown', onKey, true);
 	});
+
+	function onKey(e: KeyboardEvent): void {
+		if (e.key !== 'Escape') return;
+		e.preventDefault();
+		e.stopPropagation();
+		onclose();
+	}
 
 	/** "$0.12", "$0.12+" when some runs have no price, "no price" when none do. */
 	function money(t: Totals): string {
@@ -61,6 +60,9 @@
 	}
 </script>
 
+<!-- Escape closes. -->
+<svelte:window onkeydowncapture={onKey} />
+
 {#snippet card(label: string, t: Totals)}
 	<div class="card">
 		<span class="k">{label}</span>
@@ -71,7 +73,7 @@
 	</div>
 {/snippet}
 
-<div use:portal class="root" class:sheet={phone}>
+<div {@attach portal} class={['root', { sheet: phone }]}>
 	<button
 		class="scrim"
 		aria-label="Close usage"

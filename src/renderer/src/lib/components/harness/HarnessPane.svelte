@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { fade, fly, slide } from 'svelte/transition';
+	import { online } from 'svelte/reactivity/window';
 	import { getAppState } from '../../stores/app.svelte';
 	import { getAiSettings } from '../../harness/config.svelte';
 	import { getHarness, type Entry } from '../../harness/harness.svelte';
@@ -43,11 +44,9 @@
 	let inputEl: HTMLTextAreaElement | undefined = $state();
 	let scroller: HTMLDivElement | undefined = $state();
 	let historyOpen = $state(false);
-	let ctxOpen = $state(false);
 	let confirmDelete = $state<string | null>(null);
 	let toast = $state('');
 	let toastTimer: ReturnType<typeof setTimeout> | null = null;
-	let suggestIndex = $state(0);
 	let actMenu = $state<{ at: { x: number; y: number }; entry: Entry; last: boolean } | null>(null);
 	let sessionBtn = $state<HTMLButtonElement | null>(null);
 	let sessionMenu = $state<{ x: number; y: number } | null>(null);
@@ -72,22 +71,10 @@
 		ai.config.providers.filter((p) => ai.usable(p) || p.id === provider?.id)
 	);
 
-	// A question or a change to review needs the room: fold the context details away.
-	$effect(() => {
-		if (tab?.question || tab?.approval) ctxOpen = false;
-	});
-
-	// Offline: say so before a send fails.
-	let online = $state(typeof navigator === 'undefined' ? true : navigator.onLine);
-	$effect(() => {
-		const up = () => (online = true);
-		const down = () => (online = false);
-		window.addEventListener('online', up);
-		window.addEventListener('offline', down);
-		return () => {
-			window.removeEventListener('online', up);
-			window.removeEventListener('offline', down);
-		};
+	/** Context details unfolded; a question or a change to review folds them to make room. */
+	let ctxOpen = $derived.by(() => {
+		void (tab?.question ?? tab?.approval);
+		return false;
 	});
 
 	function flash(text: string): void {
@@ -189,9 +176,10 @@
 		return [];
 	});
 
-	$effect(() => {
-		void suggestions.length;
-		suggestIndex = 0;
+	/** Highlighted suggestion: the first again whenever the list changes. */
+	let suggestIndex = $derived.by(() => {
+		void suggestions;
+		return 0;
 	});
 
 	function pick(s: Suggestion): void {
@@ -243,14 +231,12 @@
 		}
 	}
 
+	/** Attachment: the message box grows with its text, up to 180px. */
 	function autosize(el: HTMLTextAreaElement): void {
+		void input;
 		el.style.height = 'auto';
 		el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
 	}
-	$effect(() => {
-		void input;
-		if (inputEl) autosize(inputEl);
-	});
 
 	// --- transcript -------------------------------------------------------------
 
@@ -267,7 +253,8 @@
 			behavior: reducedMotion() ? 'auto' : 'smooth'
 		});
 	}
-	$effect(() => {
+	/** Attachment: keep the transcript at the bottom as it grows, while pinned. */
+	function follow(el: HTMLDivElement): void {
 		const t = tab;
 		if (!t) return;
 		// Track the length + the last entry's text so streaming keeps us pinned.
@@ -276,8 +263,8 @@
 		void (last && 'text' in last ? last.text : null);
 		void t.question;
 		void t.approval;
-		if (pinned) void tick().then(() => scroller && (scroller.scrollTop = scroller.scrollHeight));
-	});
+		if (pinned) void tick().then(() => (el.scrollTop = el.scrollHeight));
+	}
 
 	async function act(e: Entry, mode: 'insert' | 'append' | 'new' | 'copy'): Promise<void> {
 		if (e.kind !== 'ai') return;
@@ -465,11 +452,11 @@
 	</button>
 {/snippet}
 
-<section class="harness" class:phone aria-label="AI harness">
+<section class={['harness', { phone }]} aria-label="AI harness">
 	<header class="tabs">
 		<div class="tab-strip" role="tablist">
 			{#each h.tabs as t, i (t)}
-				<div class="tab" class:on={i === h.active} role="tab" aria-selected={i === h.active}>
+				<div class={['tab', { on: i === h.active }]} role="tab" aria-selected={i === h.active}>
 					<button class="tab-name" onclick={() => (h.active = i)} title={t.title}>
 						{#if t.running}<span class="dot" aria-label="running"></span>{/if}
 						<span class="idx">{i + 1}</span><span class="ttl">{t.title}</span>
@@ -484,8 +471,7 @@
 			<Icon name="plus" size={17} />
 		</button>
 		<button
-			class="icon"
-			class:on={historyOpen}
+			class={['icon', { on: historyOpen }]}
 			title="Past sessions"
 			aria-label="Past sessions"
 			aria-expanded={historyOpen}
@@ -495,8 +481,7 @@
 		</button>
 		<button
 			bind:this={sessionBtn}
-			class="icon"
-			class:on={!!sessionMenu}
+			class={['icon', { on: !!sessionMenu }]}
 			title="Save to notes, fork, usage"
 			aria-label="Session actions"
 			aria-haspopup="menu"
@@ -517,8 +502,7 @@
 
 	{#if historyOpen}
 		<div
-			class="history"
-			class:sheet={phone}
+			class={['history', { sheet: phone }]}
 			transition:fly={{ y: phone ? 24 : -6, duration: 180 * dur }}
 		>
 			<div class="hist-head">
@@ -616,7 +600,7 @@
 							: ''}">{chatCost}</span
 					>
 				{/if}
-				<span class="chev" class:open={ctxOpen}><Icon name="chevron" size={13} /></span>
+				<span class={['chev', { open: ctxOpen }]}><Icon name="chevron" size={13} /></span>
 			</button>
 			{#if ctxOpen}
 				<div class="ctx-more" transition:slide={{ duration: 160 * dur }}>
@@ -640,8 +624,7 @@
 						<span class="k">Context</span>
 						<div class="chips">
 							<button
-								class="chip"
-								class:off={!tab.useCurrent || app.aiBlocksActive}
+								class={['chip', { off: !tab.useCurrent || app.aiBlocksActive }]}
 								aria-pressed={tab.useCurrent}
 								title={app.aiBlocksActive
 									? 'The open note is encrypted: unlock it (and allow it in Settings → Encryption) for the assistant to read it'
@@ -692,8 +675,7 @@
 					<div class="ctx-row">
 						<span class="k">Web</span>
 						<button
-							class="chip"
-							class:off={!searchLabel}
+							class={['chip', { off: !searchLabel }]}
 							aria-pressed={!!searchLabel}
 							onclick={toggleWeb}
 						>
@@ -720,7 +702,7 @@
 		</div>
 
 		<div class="transcript-wrap">
-			<div class="transcript" bind:this={scroller} onscroll={onScroll}>
+			<div class="transcript" bind:this={scroller} {@attach follow} onscroll={onScroll}>
 				{#if !tab.entries.length}
 					<div class="welcome" in:fade={{ duration: 160 * dur }}>
 						{#if keyMissing && provider}
@@ -775,7 +757,7 @@
 					{#if e.kind === 'you'}
 						<div class="msg you" dir="auto"><span class="pre">{e.text}</span></div>
 					{:else if e.kind === 'ai'}
-						<div class="msg ai" class:streaming={e.streaming}>
+						<div class={['msg ai', { streaming: e.streaming }]}>
 							<Markdown text={e.text} />
 							{#if e.streaming}<span class="caret" aria-hidden="true"></span>{/if}
 							{#if e.usage && !e.streaming}
@@ -789,7 +771,7 @@
 								</div>
 							{/if}
 							{#if !e.streaming && e.text.trim()}
-								<div class="acts" class:show={i === lastAi}>
+								<div class={['acts', { show: i === lastAi }]}>
 									<button
 										class="primary"
 										disabled={primary !== 'copy' && primary !== 'new' && !hasNote}
@@ -828,7 +810,7 @@
 					{:else if e.kind === 'tool'}
 						<ToolRow entry={e} running={tab.running} />
 					{:else if e.kind === 'error'}
-						{@const info = describeError(e.text, e.status, online)}
+						{@const info = describeError(e.text, e.status, online.current)}
 						<div class="note err" role="alert">
 							<div class="err-head">
 								<Icon name="close" size={14} stroke={2.2} />
@@ -870,7 +852,7 @@
 			{/if}
 		</div>
 
-		{#if !online}
+		{#if !online.current}
 			<div class="offline" role="status" transition:slide={{ duration: 160 * dur }}>
 				You're offline — messages will fail until the connection is back.
 			</div>
@@ -912,7 +894,7 @@
 						{#each suggestions as s, k (s.label + s.hint)}
 							<li role="option" aria-selected={k === suggestIndex}>
 								<button
-									class:on={k === suggestIndex}
+									class={{ on: k === suggestIndex }}
 									onmousedown={(ev) => ev.preventDefault()}
 									onclick={() => pick(s)}
 								>
@@ -925,6 +907,7 @@
 				<span class="ps1" aria-hidden="true"><Icon name="chevron" size={15} stroke={2.6} /></span>
 				<textarea
 					bind:this={inputEl}
+					{@attach autosize}
 					bind:value={input}
 					rows="1"
 					dir="auto"

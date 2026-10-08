@@ -13,7 +13,7 @@
 		type ConflictPick
 	} from '../sync';
 
-	let files = $state<ConflictFile[]>([]);
+	let files = $state.raw<ConflictFile[]>([]);
 	let drafts = $state<Record<string, ConflictDraft>>({});
 	let loading = $state(true);
 	let working = $state(false);
@@ -88,20 +88,20 @@
 						<button
 							role="radio"
 							aria-checked={d.pick === 'mine'}
-							class:on={d.pick === 'mine'}
+							class={{ on: d.pick === 'mine' }}
 							onclick={() => setPick(file.path, 'mine')}>Keep mine</button
 						>
 						<button
 							role="radio"
 							aria-checked={d.pick === 'theirs'}
-							class:on={d.pick === 'theirs'}
+							class={{ on: d.pick === 'theirs' }}
 							onclick={() => setPick(file.path, 'theirs')}>Keep theirs</button
 						>
 						{#if !sealed(file)}
 							<button
 								role="radio"
 								aria-checked={d.pick === 'manual'}
-								class:on={d.pick === 'manual'}
+								class={{ on: d.pick === 'manual' }}
 								onclick={() => setPick(file.path, 'manual')}>Edit manually</button
 							>
 						{/if}
@@ -116,11 +116,11 @@
 						bind:value={drafts[file.path].manual}></textarea>
 				{:else}
 					<div class="sides">
-						<div class="side" class:chosen={d.pick === 'mine'}>
+						<div class={['side', { chosen: d.pick === 'mine' }]}>
 							<span class="label">Mine</span>
 							<pre>{show(file.mine)}</pre>
 						</div>
-						<div class="side" class:chosen={d.pick === 'theirs'}>
+						<div class={['side', { chosen: d.pick === 'theirs' }]}>
 							<span class="label">Theirs</span>
 							<pre>{show(file.theirs)}</pre>
 						</div>

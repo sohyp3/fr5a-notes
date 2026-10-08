@@ -1,7 +1,8 @@
 <script lang="ts">
 	import type { Editor } from '@tiptap/core';
 	import type { Command } from '@tiptap/pm/state';
-	import { onMount } from 'svelte';
+	import { createSubscriber } from 'svelte/reactivity';
+	import { on } from 'svelte/events';
 	import { wrap } from '../editor/MarkdownShortcuts';
 	import { lift, sink } from '../editor/ListBehavior';
 	import { cycleHeading, insertTag, toggleBullet } from '../editor/formatCommands';
@@ -23,23 +24,22 @@
 	let insertBtn = $state<HTMLButtonElement | null>(null);
 	let insertAt = $state<{ x: number; y: number } | null>(null);
 
+	const viewport = window.visualViewport;
+	const viewportMoved = createSubscriber((update) => {
+		if (!viewport) return;
+		const offResize = on(viewport, 'resize', update);
+		const offScroll = on(viewport, 'scroll', update);
+		return () => {
+			offResize();
+			offScroll();
+		};
+	});
 	// Height the on-screen keyboard covers when the WebView doesn't resize for it
 	// (overlay keyboards); 0 when the layout already shrank (adjustResize).
-	let keyboard = $state(0);
-
-	onMount(() => {
-		const vv = window.visualViewport;
-		if (!vv) return;
-		const update = () => {
-			keyboard = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
-		};
-		update();
-		vv.addEventListener('resize', update);
-		vv.addEventListener('scroll', update);
-		return () => {
-			vv.removeEventListener('resize', update);
-			vv.removeEventListener('scroll', update);
-		};
+	const keyboard = $derived.by(() => {
+		viewportMoved();
+		if (!viewport) return 0;
+		return Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop));
 	});
 
 	function run(cmd: Command): void {
@@ -99,8 +99,7 @@
 	{#if insert.length}
 		<button
 			bind:this={insertBtn}
-			class="fmt"
-			class:on={!!insertAt}
+			class={['fmt', { on: !!insertAt }]}
 			aria-label="Insert"
 			title="Insert image or table"
 			aria-haspopup="menu"

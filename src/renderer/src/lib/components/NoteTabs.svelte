@@ -9,7 +9,6 @@
 
 	const app = getAppState();
 	const current = $derived(app.tabIndex);
-	let strip = $state<HTMLDivElement | null>(null);
 
 	function title(id: string | null): string {
 		if (id === null) return 'New note';
@@ -22,15 +21,15 @@
 		);
 	}
 
-	// Keep the current tab in sight. Not scrollIntoView: that can shift the whole UI.
-	$effect(() => {
-		const el = strip?.children[current] as HTMLElement | undefined;
-		if (!strip || !el) return;
+	/** Attachment: keep the current tab in sight. Not scrollIntoView: that can shift the whole UI. */
+	function keepInSight(strip: HTMLDivElement): void {
+		const el = strip.children[current] as HTMLElement | undefined;
+		if (!el) return;
 		const { offsetLeft: x, offsetWidth: w } = el;
 		if (x < strip.scrollLeft) strip.scrollLeft = x;
 		else if (x + w > strip.scrollLeft + strip.clientWidth)
 			strip.scrollLeft = x + w - strip.clientWidth;
-	});
+	}
 
 	function onAux(e: MouseEvent, i: number): void {
 		if (e.button !== 1) return;
@@ -40,10 +39,10 @@
 </script>
 
 <div class="note-tabs">
-	<div class="strip" role="tablist" aria-label="Open notes" bind:this={strip}>
+	<div class="strip" role="tablist" aria-label="Open notes" {@attach keepInSight}>
 		{#each app.tabs as id, i (id ?? '\u0000draft')}
 			{@const meta = id === null ? undefined : app.noteMeta(id)}
-			<div class="tab" class:on={i === current}>
+			<div class={['tab', { on: i === current }]}>
 				<button
 					class="name"
 					role="tab"

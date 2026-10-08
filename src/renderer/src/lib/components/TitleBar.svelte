@@ -82,12 +82,11 @@
 	]);
 </script>
 
-<header class="titlebar" class:mac={isMac} class:touch={app.touch} class:phone>
+<header class={['titlebar', { mac: isMac, touch: app.touch, phone }]}>
 	<div class="left no-drag">
 		{#if app.layout === 'tablet'}
 			<button
-				class="icon-btn"
-				class:on={app.drawerOpen}
+				class={['icon-btn', { on: app.drawerOpen }]}
 				title="Folders"
 				aria-label="Open folders"
 				aria-expanded={app.drawerOpen}
@@ -103,8 +102,7 @@
 			{/if}
 		{:else}
 			<button
-				class="icon-btn"
-				class:on={app.sidebarOpen && !app.zen}
+				class={['icon-btn', { on: app.sidebarOpen && !app.zen }]}
 				title="Toggle sidebar"
 				aria-label="Toggle sidebar"
 				aria-pressed={app.sidebarOpen}
@@ -116,8 +114,7 @@
 		{#if !phone}
 			<!-- The note list can be hidden on any wide layout, landscape tablets included. -->
 			<button
-				class="icon-btn"
-				class:on={app.listOpen && !app.zen}
+				class={['icon-btn', { on: app.listOpen && !app.zen }]}
 				title="Toggle note list (Mod+Shift+L)"
 				aria-label="Toggle note list"
 				aria-pressed={app.listOpen}
@@ -141,9 +138,10 @@
 			<span class="sync-msg" role="status">{app.syncing === 'pull' ? 'pulling…' : 'pushing…'}</span>
 		{:else if app.syncMessage}
 			<span
-				class="sync-msg no-drag"
-				class:error={app.syncMessage.kind === 'error'}
-				class:conflict={app.syncMessage.kind === 'conflict'}
+				class={[
+					'sync-msg no-drag',
+					{ error: app.syncMessage.kind === 'error', conflict: app.syncMessage.kind === 'conflict' }
+				]}
 				role={app.syncMessage.kind === 'ok' ? 'status' : 'alert'}
 				title={app.syncMessage.text}
 			>
@@ -164,9 +162,7 @@
 		{#if phone}
 			<button
 				bind:this={moreBtn}
-				class="icon-btn"
-				class:on={!!moreAt}
-				class:busy={app.syncing !== null}
+				class={['icon-btn', { on: !!moreAt, busy: app.syncing !== null }]}
 				title="More"
 				aria-label="More"
 				aria-haspopup="menu"
@@ -179,8 +175,7 @@
 		{:else}
 			{#if app.workspace}
 				<button
-					class="icon-btn"
-					class:busy={app.syncing === 'pull'}
+					class={['icon-btn', { busy: app.syncing === 'pull' }]}
 					title="Pull (git)"
 					aria-label="Pull"
 					aria-busy={app.syncing === 'pull'}
@@ -190,8 +185,7 @@
 					<Icon name="pull" size={16} />
 				</button>
 				<button
-					class="icon-btn"
-					class:busy={app.syncing === 'push'}
+					class={['icon-btn', { busy: app.syncing === 'push' }]}
 					title="Push (git)"
 					aria-label="Push"
 					aria-busy={app.syncing === 'push'}
@@ -202,8 +196,7 @@
 				</button>
 				{#if app.changes !== null}
 					<button
-						class="icon-btn changes"
-						class:on={app.view === 'changes'}
+						class={['icon-btn changes', { on: app.view === 'changes' }]}
 						title="Changes since the last sync (git status)"
 						aria-label="Changes"
 						onclick={() => (app.view === 'changes' ? app.setView('editor') : app.showChanges())}
@@ -215,8 +208,7 @@
 			{/if}
 			{#if app.vault?.hasKey}
 				<button
-					class="icon-btn"
-					class:on={app.vault.unlocked}
+					class={['icon-btn', { on: app.vault.unlocked }]}
 					title={app.vault.unlocked
 						? 'Encrypted notes are unlocked — lock them (Mod+Shift+K)'
 						: 'Unlock encrypted notes'}
@@ -229,8 +221,7 @@
 			{#if app.layout === 'tablet' && (app.activeId || app.draft)}
 				<!-- Desktop uses Mod+\; touch has no shortcut, so offer a button. -->
 				<button
-					class="icon-btn"
-					class:on={app.zen}
+					class={['icon-btn', { on: app.zen }]}
 					title="Zen mode"
 					aria-label="Toggle zen mode"
 					aria-pressed={app.zen}

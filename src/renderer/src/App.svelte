@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { fade, fly } from 'svelte/transition';
 	import { Spring } from 'svelte/motion';
+	import { MediaQuery } from 'svelte/reactivity';
+	import { innerWidth } from 'svelte/reactivity/window';
 	import { getAppState, PANE_WIDTHS, type Pane, type PaneName } from './lib/stores/app.svelte';
 	import TitleBar from './lib/components/TitleBar.svelte';
 	import Sidebar from './lib/components/Sidebar.svelte';
@@ -46,7 +48,13 @@
 	const showSidebar = $derived(app.sidebarOpen && !app.zen);
 	const showList = $derived(app.listOpen && !app.zen);
 
-	let winW = $state(window.innerWidth);
+	// Layout follows width + input type: touch devices (Android, coarse pointer)
+	// get phone / tablet layouts; mouse windows stay desktop at any width.
+	const coarse = new MediaQuery('pointer: coarse');
+	const touch = $derived(platform.platform === 'android' || coarse.current);
+	const winW = $derived(innerWidth.current ?? window.innerWidth);
+	$effect(() => app.setLayout(layoutFor(winW, touch), touch));
+
 	/**
 	 * Desktop widths actually used. With the AI pane open on a narrow window (a
 	 * landscape tablet) the editor keeps EDITOR_MIN: the sidebar steps aside
@@ -212,40 +220,26 @@
 		}
 	}
 
-	// Layout follows width + input type: touch devices (Android, coarse pointer)
-	// get phone / tablet layouts; mouse windows stay desktop at any width.
-	$effect(() => {
-		const coarse = matchMedia('(pointer: coarse)');
-		const update = () => {
-			const touch = platform.platform === 'android' || coarse.matches;
-			winW = window.innerWidth;
-			app.setLayout(layoutFor(window.innerWidth, touch), touch);
-		};
-		update();
-		window.addEventListener('resize', update);
-		coarse.addEventListener('change', update);
-		return () => {
-			window.removeEventListener('resize', update);
-			coarse.removeEventListener('change', update);
-		};
-	});
-
 	app.init();
 </script>
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="app" class:zen={app.zen} class:resizing={app.resizing}>
+<div class={['app', { zen: app.zen, resizing: app.resizing }]}>
 	<TitleBar />
 	<!-- The body renders only once init() has restored the workspace, settings
 	     and last-open note, then fades in — no flash from empty to full. -->
 	{#if app.booted}
 		<div
-			class="body layout-{app.layout}"
-			class:drawer-open={app.drawerOpen}
-			class:harness-open={app.harnessOpen}
-			class:sheet-expanded={app.sheetExpanded}
-			class:overlay
+			class={[
+				`body layout-${app.layout}`,
+				{
+					'drawer-open': app.drawerOpen,
+					'harness-open': app.harnessOpen,
+					'sheet-expanded': app.sheetExpanded,
+					overlay
+				}
+			]}
 			data-layout={app.layout}
 			data-pane={phone ? (overlay ? app.view : app.pane) : undefined}
 			style:--sidebar-w="{app.widths.sidebar}px"
@@ -345,8 +339,7 @@
 			{/if}
 			<div
 				bind:this={sheetEl}
-				class="harness-wrap"
-				class:dragging={sheetH !== null}
+				class={['harness-wrap', { dragging: sheetH !== null }]}
 				data-pos={pos('harness')}
 				style:width={desktop ? `${harnessWidth.current}px` : null}
 				style:height={tablet && sheetH !== null ? `${sheetH}px` : null}

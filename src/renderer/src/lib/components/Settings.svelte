@@ -45,12 +45,18 @@
 </script>
 
 {#snippet toggle(on: boolean, label: string, flip: () => void)}
-	<button class="toggle" class:on role="switch" aria-checked={on} aria-label={label} onclick={flip}>
+	<button
+		class={['toggle', { on }]}
+		role="switch"
+		aria-checked={on}
+		aria-label={label}
+		onclick={flip}
+	>
 		<span class="knob"></span>
 	</button>
 {/snippet}
 
-<div class="settings" class:phone>
+<div class={['settings', { phone }]}>
 	<header class="head">
 		{#if phone && app.settingsDrill}
 			<button
@@ -73,11 +79,10 @@
 
 	<div class="frame">
 		{#if !phone || showIndex}
-			<nav class="nav" class:index={showIndex} aria-label="Settings sections">
+			<nav class={['nav', { index: showIndex }]} aria-label="Settings sections">
 				{#each SECTIONS as sec (sec.id)}
 					<button
-						class="nav-item"
-						class:on={!phone && sec.id === app.settingsSection}
+						class={['nav-item', { on: !phone && sec.id === app.settingsSection }]}
 						aria-current={!phone && sec.id === app.settingsSection ? 'page' : undefined}
 						onclick={() => go(sec.id)}
 					>
@@ -136,8 +141,7 @@
 								<div class="segmented" role="radiogroup" aria-label="Open notes in">
 									{#each OPEN_IN as o (o.id)}
 										<button
-											class="seg"
-											class:on={s.openIn === o.id}
+											class={['seg', { on: s.openIn === o.id }]}
 											role="radio"
 											aria-checked={s.openIn === o.id}
 											onclick={() => app.updateSettings({ openIn: o.id })}>{o.label}</button
@@ -178,8 +182,7 @@
 								<div class="segmented" role="radiogroup" aria-label="Theme">
 									{#each ['light', 'dark'] as const as t (t)}
 										<button
-											class="seg"
-											class:on={app.theme === t}
+											class={['seg', { on: app.theme === t }]}
 											role="radio"
 											aria-checked={app.theme === t}
 											onclick={() => app.setTheme(t)}>{t === 'light' ? 'Light' : 'Dark'}</button
@@ -195,13 +198,12 @@
 								<div class="swatches" role="radiogroup" aria-label="Accent color">
 									{#each ACCENTS as a (a.id)}
 										<button
-											class="swatch"
-											class:on={s.accent === a.id}
+											class={['swatch', { on: s.accent === a.id }]}
 											role="radio"
 											aria-checked={s.accent === a.id}
 											aria-label={a.label}
 											title={a.label}
-											style="--sw:{app.theme === 'dark' ? a.dark : a.light}"
+											style:--sw={app.theme === 'dark' ? a.dark : a.light}
 											onclick={() => app.updateSettings({ accent: a.id })}
 										></button>
 									{/each}

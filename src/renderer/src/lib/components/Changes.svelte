@@ -35,27 +35,25 @@
 
 	const rows = $derived((app.changes ?? []).map(rowOf));
 	const stashKey = (s: GitStash) => `${s.repo}\0${s.id}`;
-	let selected = $state<string | null>(null);
-	/** A stash shown in the detail pane instead of a changed note. */
-	let selectedStash = $state<string | null>(null);
-	// On a phone the list and the diff take turns on screen.
-	let showDiff = $state(false);
-
-	// Pick the requested note (from the editor / AI), else the first change.
-	$effect(() => {
-		const focus = app.changesFocus;
-		if (focus && rows.some((r) => r.path === focus)) {
-			selected = focus;
-			selectedStash = null;
-			showDiff = true;
-		} else if (!selected || !rows.some((r) => r.path === selected)) {
-			selected = rows[0]?.path ?? null;
-		}
-		if (selectedStash && !app.stashes.some((s) => stashKey(s) === selectedStash))
-			selectedStash = null;
+	/** What was last picked: a changed note, or a stash shown instead of one. */
+	let picked = $state<string | null>(null);
+	let pickedStash = $state<string | null>(null);
+	/** The note requested from the editor / AI, while it has changes. */
+	const focused = $derived(rows.some((r) => r.path === app.changesFocus) ? app.changesFocus : null);
+	// The requested note, else the pick, else the first change.
+	const selected = $derived(
+		focused ?? (rows.some((r) => r.path === picked) ? picked : (rows[0]?.path ?? null))
+	);
+	const selectedStash = $derived.by(() => {
+		if (focused) return null;
+		if (app.stashes.some((s) => stashKey(s) === pickedStash)) return pickedStash;
 		// Nothing changed: show the newest stash.
-		if (!selected && !selectedStash && app.stashes.length) selectedStash = stashKey(app.stashes[0]);
+		return !selected && app.stashes.length ? stashKey(app.stashes[0]) : null;
 	});
+	// On a phone the list and the diff take turns on screen: the diff once picked
+	// (or opened on a requested note), the list after Back.
+	let diffOpen = $state<boolean | null>(null);
+	const showDiff = $derived(diffOpen ?? !!focused);
 
 	const current = $derived(selectedStash ? null : (rows.find((r) => r.path === selected) ?? null));
 	const currentStash = $derived(app.stashes.find((s) => stashKey(s) === selectedStash) ?? null);
@@ -96,15 +94,15 @@
 	}
 
 	function pick(path: string): void {
-		selected = path;
-		selectedStash = null;
-		showDiff = true;
+		picked = path;
+		pickedStash = null;
+		diffOpen = true;
 		app.changesFocus = null;
 	}
 
 	function pickStash(s: GitStash): void {
-		selectedStash = stashKey(s);
-		showDiff = true;
+		pickedStash = stashKey(s);
+		diffOpen = true;
 		app.changesFocus = null;
 	}
 
@@ -121,7 +119,7 @@
 	}
 
 	/** Notes the stash form is about to set aside (null = form closed). */
-	let stashing = $state<string[] | null>(null);
+	let stashing = $state.raw<string[] | null>(null);
 	let stashMessage = $state('');
 
 	/** Default stash message: the notes' names. */
@@ -144,8 +142,8 @@
 		const err = await app.stashChanges(paths, message);
 		say(err, `Stashed ${count(paths)} as “${message}”.`);
 		if (!err && app.stashes[0]) {
-			selectedStash = stashKey(app.stashes[0]);
-			showDiff = false;
+			pickedStash = stashKey(app.stashes[0]);
+			diffOpen = false;
 		}
 	}
 
@@ -159,13 +157,13 @@
 		});
 		if (!ok) return;
 		say(await app.revertChanges(paths), `Reverted ${count(paths)}.`);
-		showDiff = false;
+		diffOpen = false;
 	}
 
 	async function apply(s: GitStash, drop: boolean): Promise<void> {
 		const err = await app.applyStash(s, drop);
 		say(err, drop ? `Restored “${s.message}”.` : `Applied “${s.message}”; the stash is kept.`);
-		if (!err && drop) showDiff = false;
+		if (!err && drop) diffOpen = false;
 	}
 
 	async function drop(s: GitStash): Promise<void> {
@@ -177,15 +175,16 @@
 		});
 		if (!ok) return;
 		say(await app.dropStash(s), `Dropped “${s.message}”.`);
-		showDiff = false;
+		diffOpen = false;
 	}
 
+	/** Attachment: focus the stash message field when the form opens. */
 	function focusOnMount(node: HTMLElement): void {
 		node.focus();
 	}
 </script>
 
-<div class="changes" class:phone={app.layout === 'phone'} class:show-diff={showDiff}>
+<div class={['changes', { phone: app.layout === 'phone', 'show-diff': showDiff }]}>
 	<header class="head">
 		<div class="titles">
 			<h1>Changes</h1>
@@ -203,8 +202,7 @@
 			</p>
 		</div>
 		<button
-			class="icon-btn"
-			class:spin={app.changesLoading || app.gitBusy}
+			class={['icon-btn', { spin: app.changesLoading || app.gitBusy }]}
 			title="Refresh"
 			aria-label="Refresh changes"
 			onclick={() => {
@@ -238,7 +236,7 @@
 				bind:value={stashMessage}
 				placeholder={names(stashing)}
 				autocomplete="off"
-				use:focusOnMount
+				{@attach focusOnMount}
 				onkeydown={(e) => {
 					if (e.key === 'Escape') {
 						e.stopPropagation();
@@ -253,8 +251,7 @@
 		</form>
 	{:else if notice}
 		<div
-			class="bar notice"
-			class:error={notice.kind === 'error'}
+			class={['bar notice', { error: notice.kind === 'error' }]}
 			role={notice.kind === 'error' ? 'alert' : 'status'}
 			transition:fade={{ duration: 120 }}
 		>
@@ -318,8 +315,7 @@
 							{@const p = split(r.path)}
 							<li>
 								<button
-									class="file"
-									class:on={!selectedStash && r.path === selected}
+									class={['file', { on: !selectedStash && r.path === selected }]}
 									onclick={() => pick(r.path)}
 								>
 									<span class="badge {r.status}" title={r.status}>{STATUS[r.status]}</span>
@@ -344,8 +340,7 @@
 						{#each app.stashes as s (stashKey(s))}
 							<li>
 								<button
-									class="file"
-									class:on={stashKey(s) === selectedStash}
+									class={['file', { on: stashKey(s) === selectedStash }]}
 									onclick={() => pickStash(s)}
 								>
 									<span class="badge stash" title="stash"><Icon name="history" size={13} /></span>
@@ -371,7 +366,7 @@
 								<button
 									class="icon-btn"
 									aria-label="All changes"
-									onclick={() => (showDiff = false)}
+									onclick={() => (diffOpen = false)}
 								>
 									<Icon name="back" size={17} />
 								</button>
@@ -435,7 +430,7 @@
 								<button
 									class="icon-btn"
 									aria-label="All changes"
-									onclick={() => (showDiff = false)}
+									onclick={() => (diffOpen = false)}
 								>
 									<Icon name="back" size={17} />
 								</button>

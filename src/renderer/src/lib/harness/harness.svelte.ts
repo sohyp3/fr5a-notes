@@ -310,9 +310,9 @@ export function parseInput(input: string): {
 class HarnessState {
 	tabs = $state<HarnessTab[]>([]);
 	active = $state(0);
-	skills = $state<Skill[]>([]);
+	skills = $state.raw<Skill[]>([]);
 	/** Recent session files, newest first. */
-	sessionFiles = $state<string[]>([]);
+	sessionFiles = $state.raw<string[]>([]);
 	sessionsLoading = $state(false);
 	sessionsError = $state<string | null>(null);
 	ready = $state(false);

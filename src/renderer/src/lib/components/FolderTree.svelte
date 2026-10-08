@@ -113,24 +113,21 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-	class="folder-row"
-	style="padding-left:{8 + depth * 14}px"
-	class:selected
-	class:over
+	class={['folder-row', { selected, over }]}
+	style:padding-left="{8 + depth * 14}px"
 	ondragover={onDragOver}
 	ondragleave={onDragLeave}
 	ondrop={onDrop}
 >
 	<button
-		class="twist"
-		class:hidden={!hasChildren}
+		class={['twist', { hidden: !hasChildren }]}
 		aria-label="Expand"
 		onclick={(e) => {
 			e.stopPropagation();
 			app.toggleFolderExpanded(node.path, depth);
 		}}
 	>
-		<span class="chev" class:open={expanded}><Icon name="chevron" size={12} stroke={2.4} /></span>
+		<span class={['chev', { open: expanded }]}><Icon name="chevron" size={12} stroke={2.4} /></span>
 	</button>
 
 	<button
@@ -156,8 +153,7 @@
 		{/if}
 		{#if hidden}
 			<span
-				class="shield"
-				class:inherited={hidden.via === 'parent'}
+				class={['shield', { inherited: hidden.via === 'parent' }]}
 				title={hidden.via === 'self'
 					? 'Hidden from cloud AI — only local providers can read these notes'
 					: `Hidden from cloud AI (inside “${hidden.folder || 'Everything'}”)`}

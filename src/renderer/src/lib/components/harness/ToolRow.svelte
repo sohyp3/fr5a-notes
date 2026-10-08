@@ -93,7 +93,7 @@
 		{:else}
 			<span class="args" dir="auto">{summary}</span>
 		{/if}
-		<span class="chev" class:open><Icon name="chevron" size={13} /></span>
+		<span class={['chev', { open }]}><Icon name="chevron" size={13} /></span>
 	</button>
 	{#if open}
 		<div class="details" transition:slide={{ duration: 160 * dur }}>

@@ -141,7 +141,7 @@
 					<span class="name">{v.info?.userId || 'PGP key'}</span>
 					<span class="desc mono" title={v.info?.fingerprint}>{keyId}</span>
 				</div>
-				<span class="status" class:open={v.unlocked}>
+				<span class={['status', { open: v.unlocked }]}>
 					<Icon name={v.unlocked ? 'unlock' : 'lock'} size={13} stroke={2} />
 					{v.unlocked ? 'Unlocked' : 'Locked'}
 				</span>
@@ -183,8 +183,7 @@
 					>
 				</div>
 				<button
-					class="toggle"
-					class:on={v.remembered}
+					class={['toggle', { on: v.remembered }]}
 					role="switch"
 					aria-checked={v.remembered}
 					aria-label="Remember passphrase"
@@ -202,8 +201,7 @@
 						>
 					</div>
 					<button
-						class="toggle"
-						class:on={app.settings.aiReadsEncrypted}
+						class={['toggle', { on: app.settings.aiReadsEncrypted }]}
 						role="switch"
 						aria-checked={app.settings.aiReadsEncrypted}
 						aria-label="AI can read encrypted notes"

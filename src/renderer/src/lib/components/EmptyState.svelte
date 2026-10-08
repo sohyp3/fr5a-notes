@@ -21,7 +21,7 @@
 	const dur = reducedMotion() ? 0 : 1;
 </script>
 
-<div class="empty-state" class:compact class:small>
+<div class={['empty-state', { compact, small }]}>
 	<img
 		class="mascot"
 		{src}

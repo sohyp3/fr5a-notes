@@ -1,35 +1,28 @@
 <script lang="ts">
 	import { fade, fly, scale } from 'svelte/transition';
-	import { tick } from 'svelte';
 	import { getAppState } from '../stores/app.svelte';
 	import { reducedMotion } from '../portal';
 
 	const app = getAppState();
 	const req = $derived(app.confirmRequest);
 	const dur = reducedMotion() ? 0 : 1;
-	let cancelBtn = $state<HTMLButtonElement | null>(null);
 	// The scrim cancels only for a press that started on it: the tap that
 	// opened the dialog can still deliver its click here (a "ghost click").
 	let scrimPressed = false;
 
-	// Focus the safe choice first; Escape cancels.
-	$effect(() => {
-		if (!req) return;
-		void tick().then(() => cancelBtn?.focus());
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key === 'Escape') {
-				e.preventDefault();
-				e.stopPropagation();
-				app.answerConfirm(false);
-			}
-		};
-		window.addEventListener('keydown', onKey, true);
-		return () => window.removeEventListener('keydown', onKey, true);
-	});
+	function onKey(e: KeyboardEvent): void {
+		if (!req || e.key !== 'Escape') return;
+		e.preventDefault();
+		e.stopPropagation();
+		app.answerConfirm(false);
+	}
 </script>
 
+<!-- Escape cancels. -->
+<svelte:window onkeydowncapture={onKey} />
+
 {#if req}
-	<div class="root" class:sheet={app.layout === 'phone'}>
+	<div class={['root', { sheet: app.layout === 'phone' }]}>
 		<button
 			class="scrim"
 			aria-label="Cancel"
@@ -55,12 +48,12 @@
 				<h2 id="confirm-title">{req.title}</h2>
 				{#if req.body}<p>{req.body}</p>{/if}
 				<div class="actions">
-					<button bind:this={cancelBtn} class="btn" onclick={() => app.answerConfirm(false)}
+					<!-- The safe choice has focus first. -->
+					<button {@attach (b) => b.focus()} class="btn" onclick={() => app.answerConfirm(false)}
 						>Cancel</button
 					>
 					<button
-						class="btn primary"
-						class:danger={req.danger}
+						class={['btn primary', { danger: req.danger }]}
 						onclick={() => app.answerConfirm(true)}>{req.confirm}</button
 					>
 				</div>

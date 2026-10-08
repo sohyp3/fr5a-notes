@@ -19,7 +19,7 @@
 	const LOCK_PX = 8; // movement before deciding horizontal vs vertical
 	const OVERSHOOT = 56; // rubber-band room past the open position
 
-	let el = $state<HTMLDivElement | null>(null);
+	let el: HTMLDivElement | null = null;
 	let cardWidth = $state(280);
 	const offset = new Spring(0, { stiffness: 0.2, damping: 0.8 });
 	const active = $derived(note.id === app.activeId);
@@ -311,8 +311,7 @@
 </script>
 
 <div
-	class="swipe"
-	class:open
+	class={['swipe', { open }]}
 	role="listitem"
 	bind:this={el}
 	bind:clientWidth={cardWidth}
@@ -321,8 +320,7 @@
 	{#if side === 'right'}
 		<!-- Revealed by swiping right: pin / unpin, or restore from trash. -->
 		<button
-			class="action right"
-			class:restore={trash}
+			class={['action right', { restore: trash }]}
 			style:width="{Math.max(ACTION_W, offset.current)}px"
 			tabindex={open ? 0 : -1}
 			aria-hidden={!open}
@@ -338,9 +336,7 @@
 	{:else if side === 'left'}
 		<!-- Revealed by swiping left: trash, delete forever, or "locked". -->
 		<button
-			class="action left"
-			class:danger={trash}
-			class:locked={leftLocked}
+			class={['action left', { danger: trash, locked: leftLocked }]}
 			style:width="{Math.max(ACTION_W, -offset.current)}px"
 			tabindex={open ? 0 : -1}
 			aria-hidden={!open}
@@ -356,9 +352,7 @@
 	{/if}
 
 	<button
-		class="card"
-		class:active
-		class:readonly={trash}
+		class={['card', { active, readonly: trash }]}
 		style:transform="translateX({offset.current}px)"
 		onclick={onClick}
 		onauxclick={onAuxClick}

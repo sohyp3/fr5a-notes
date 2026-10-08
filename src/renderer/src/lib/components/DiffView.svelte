@@ -32,7 +32,7 @@
 	});
 </script>
 
-<div class="diff" class:numbers role="table" aria-label="Changes">
+<div class={['diff', { numbers }]} role="table" aria-label="Changes">
 	{#each rows as { line, a, b }, k (k)}
 		{#if line.op === 'gap'}
 			<div class="gap" role="row">

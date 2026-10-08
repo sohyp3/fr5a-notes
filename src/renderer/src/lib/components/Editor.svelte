@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { fly, fade } from 'svelte/transition';
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { Editor } from '@tiptap/core';
 	import Document from '@tiptap/extension-document';
 	import Paragraph from '@tiptap/extension-paragraph';
@@ -131,33 +131,37 @@
 		});
 	}
 
-	/** Svelte action: owns one TipTap instance for the lifetime of the node. */
-	function mount(node: HTMLElement, content: string) {
-		dir = detectDir(content) ?? 'ltr';
-		vimMode = 'normal';
-		const ed = buildEditor(node, content);
+	/**
+	 * Attachment: owns one TipTap instance for the lifetime of the node. Untracked:
+	 * only the `{#key}` above recreates it, never a change to what it read.
+	 */
+	function mount(node: HTMLElement): () => void {
+		const ed = untrack(() => {
+			const content = app.activeContent;
+			dir = detectDir(content) ?? 'ltr';
+			vimMode = 'normal';
+			return buildEditor(node, content);
+		});
 		editor = ed;
 		app.editor = ed;
-		return {
-			destroy() {
-				app.flush();
-				ed.destroy();
-				// Only clear the shared ref if it still points at *this* instance —
-				// during a keyed swap the next editor may already have claimed it.
-				if (editor === ed) editor = undefined;
-				if (app.editor === ed) app.editor = null;
-			}
+		return () => {
+			app.flush();
+			ed.destroy();
+			// Only clear the shared ref if it still points at *this* instance —
+			// during a keyed swap the next editor may already have claimed it.
+			if (editor === ed) editor = undefined;
+			if (app.editor === ed) app.editor = null;
 		};
 	}
 
-	// View ⇄ edit without remounting (keeps undo history, scroll and caret).
-	$effect(() => {
+	/** Attachment: view ⇄ edit without remounting (keeps undo history, scroll and caret). */
+	function followEditable(): void {
 		const on = editable;
 		if (editor && !editor.isDestroyed && editor.isEditable !== on) {
 			editor.setEditable(on, false);
 			if (!on) (document.activeElement as HTMLElement | null)?.blur();
 		}
-	});
+	}
 
 	/**
 	 * Enter edit mode with the caret where the user looked (a double-tap
@@ -361,10 +365,7 @@
 </script>
 
 <section
-	class="editor-pane"
-	class:is-rtl={dir === 'rtl'}
-	class:compact
-	class:viewing={!editable}
+	class={['editor-pane', { 'is-rtl': dir === 'rtl', compact, viewing: !editable }]}
 	data-mode={editable ? 'edit' : 'view'}
 >
 	{#if app.settings.tabs && app.workspace && app.tabs.length}
@@ -396,14 +397,13 @@
 			</EmptyState>
 		</div>
 	{:else}
-		<header class="editor-head" class:scrolled bind:clientWidth={headW}>
+		<header class={['editor-head', { scrolled }]} bind:clientWidth={headW}>
 			{#if !compact}
 				<div class="crumb">
 					{#if fileItems.length}
 						<button
 							bind:this={crumbBtn}
-							class="crumb-btn"
-							class:on={!!crumbAt}
+							class={['crumb-btn', { on: !!crumbAt }]}
 							title="{app.activeId ?? 'New note'} — {activeMeta ? 'rename or move' : 'encryption'}"
 							aria-label="File: {app.activeId ?? 'New note'}. {activeMeta
 								? 'Rename or move'
@@ -440,8 +440,7 @@
 				{#if editable && !app.touch}
 					<button
 						bind:this={insertBtn}
-						class="act icon"
-						class:on={!!insertAt || !!tableAt}
+						class={['act icon', { on: !!insertAt || !!tableAt }]}
 						title="Insert image, table or highlight"
 						aria-label="Insert"
 						aria-haspopup="menu"
@@ -477,8 +476,7 @@
 				{/if}
 				{#if app.settings.ai}
 					<button
-						class="act ai"
-						class:on={app.harnessOpen}
+						class={['act ai', { on: app.harnessOpen }]}
 						title="AI harness (Mod+J)"
 						aria-label="Toggle AI harness"
 						onclick={() => app.toggleHarness()}
@@ -487,8 +485,7 @@
 					</button>
 				{/if}
 				<button
-					class="act icon pin"
-					class:on={activeMeta?.pinned}
+					class={['act icon pin', { on: activeMeta?.pinned }]}
 					title={activeMeta?.pinned ? 'Unpin note' : 'Pin note'}
 					aria-label="Toggle pin"
 					aria-pressed={!!activeMeta?.pinned}
@@ -499,8 +496,7 @@
 				{#if narrow}
 					<button
 						bind:this={moreBtn}
-						class="act icon"
-						class:on={!!moreAt}
+						class={['act icon', { on: !!moreAt }]}
 						title="More"
 						aria-label="More actions"
 						aria-haspopup="menu"
@@ -520,8 +516,7 @@
 						{dir === 'rtl' ? 'RTL' : 'LTR'}
 					</button>
 					<button
-						class="act icon lock"
-						class:on={locked}
+						class={['act icon lock', { on: locked }]}
 						title={locked ? 'Unlock note' : 'Lock note'}
 						aria-label="Toggle lock"
 						aria-pressed={locked}
@@ -530,8 +525,7 @@
 						<Icon name={locked ? 'lock' : 'unlock'} size={16} stroke={1.7} />
 					</button>
 					<button
-						class="act icon"
-						class:dot={!!change}
+						class={['act icon', { dot: !!change }]}
 						title={change ? 'Changed since the last sync — show diff' : 'Changes'}
 						aria-label="Show changes"
 						onclick={() => app.showChanges(app.activeId)}
@@ -563,15 +557,19 @@
 					ondblclick={onDoubleClick}
 					in:fly={{ y: 12, duration: 190 * dur }}
 				>
-					<div class="mount" style="direction:{dir}" use:mount={app.activeContent}></div>
+					<div class="mount" style:direction={dir} {@attach mount} {@attach followEditable}></div>
 				</div>
 			{/key}
 
 			{#if vimOn && editable}
 				<div
-					class="vim-badge"
-					class:insert={vimMode === 'insert'}
-					class:visual={vimMode === 'visual' || vimMode === 'visual-line'}
+					class={[
+						'vim-badge',
+						{
+							insert: vimMode === 'insert',
+							visual: vimMode === 'visual' || vimMode === 'visual-line'
+						}
+					]}
 				>
 					{vimMode === 'visual-line' ? 'V-LINE' : vimMode.toUpperCase()}
 				</div>

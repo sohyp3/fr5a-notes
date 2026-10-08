@@ -1,15 +1,13 @@
+import type { Attachment } from 'svelte/attachments';
+
 /**
- * Svelte action: move the node to <body>, so fixed-position menus and sheets
+ * Attachment: move the node to <body>, so fixed-position menus and sheets
  * escape transformed / overflow-hidden ancestors (the sliding phone panes).
  */
-export function portal(node: HTMLElement): { destroy(): void } {
+export const portal: Attachment<HTMLElement> = (node) => {
 	document.body.appendChild(node);
-	return {
-		destroy() {
-			node.remove();
-		}
-	};
-}
+	return () => node.remove();
+};
 
 /** Short vibration on Android (no-op elsewhere): confirms a gesture locked in. */
 export function haptic(ms = 10): void {

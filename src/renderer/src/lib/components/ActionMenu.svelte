@@ -17,6 +17,7 @@
 <script lang="ts">
 	import { fade, fly } from 'svelte/transition';
 	import { tick } from 'svelte';
+	import type { Attachment } from 'svelte/attachments';
 	import Icon from './Icon.svelte';
 	import { portal, reducedMotion } from '../portal';
 	import { getAppState } from '../stores/app.svelte';
@@ -71,39 +72,40 @@
 		buttons[(next + buttons.length) % buttons.length]?.focus();
 	}
 
-	$effect(() => {
+	function outside(e: PointerEvent): void {
+		const t = e.target as Node;
+		if (el && !el.contains(t) && !trigger?.contains(t)) onclose();
+	}
+
+	function wheel(): void {
+		if (!sheet) onclose();
+	}
+
+	/** Focus the first item once the menu is on screen (after the portal moved it). */
+	const focusFirst: Attachment<HTMLElement> = (node) => {
 		void tick().then(() =>
-			el
-				?.querySelector<HTMLButtonElement>('[role=menuitem]:not(:disabled)')
+			node
+				.querySelector<HTMLButtonElement>('[role=menuitem]:not(:disabled)')
 				?.focus({ preventScroll: true })
 		);
-		const outside = (e: PointerEvent) => {
-			const t = e.target as Node;
-			if (el && !el.contains(t) && !trigger?.contains(t)) onclose();
-		};
-		const wheel = () => !sheet && onclose();
-		// Android back closes the menu (not the pane under it).
-		const undismiss = getAppState().onDismiss(() => onclose());
-		window.addEventListener('pointerdown', outside, true);
-		window.addEventListener('keydown', onKey, true);
-		window.addEventListener('resize', onclose);
-		window.addEventListener('wheel', wheel, true);
-		return () => {
-			undismiss();
-			window.removeEventListener('pointerdown', outside, true);
-			window.removeEventListener('keydown', onKey, true);
-			window.removeEventListener('resize', onclose);
-			window.removeEventListener('wheel', wheel, true);
-		};
-	});
+	};
+
+	// Android back closes the menu (not the pane under it).
+	$effect(() => getAppState().onDismiss(() => onclose()));
 </script>
+
+<svelte:window
+	onpointerdowncapture={outside}
+	onkeydowncapture={onKey}
+	onresize={onclose}
+	onwheelcapture={wheel}
+/>
 
 {#snippet rows()}
 	{#each items as item (item.label)}
 		{#if item.divider}<div class="sep" role="separator"></div>{/if}
 		<button
-			class="item"
-			class:danger={item.danger}
+			class={['item', { danger: item.danger }]}
 			role="menuitem"
 			disabled={item.disabled}
 			onclick={() => run(item)}
@@ -116,10 +118,11 @@
 {/snippet}
 
 {#if sheet}
-	<div use:portal class="sheet-root">
+	<div {@attach portal} class="sheet-root">
 		<div class="scrim" transition:fade={{ duration: 180 * dur }}></div>
 		<div
 			bind:this={el}
+			{@attach focusFirst}
 			class="sheet"
 			role="menu"
 			aria-label={label}
@@ -134,7 +137,8 @@
 	</div>
 {:else}
 	<div
-		use:portal
+		{@attach portal}
+		{@attach focusFirst}
 		bind:this={el}
 		bind:offsetWidth={w}
 		bind:offsetHeight={h}

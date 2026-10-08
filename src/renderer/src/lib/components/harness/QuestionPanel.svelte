@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { fly } from 'svelte/transition';
-	import { tick } from 'svelte';
 	import type { Question } from '../../harness/harness.svelte';
 	import Icon from '../Icon.svelte';
 	import { reducedMotion } from '../../portal';
@@ -16,29 +15,31 @@
 	const items = $derived(question.items);
 	const dur = reducedMotion() ? 0 : 1;
 
-	let step = $state(0);
-	/** Picked option labels, per question. */
-	let picked = $state<string[][]>([]);
-	/** Typed "other" answers, per question. */
-	let other = $state<string[]>([]);
-	let otherEl = $state<HTMLInputElement | null>(null);
-	let root = $state<HTMLDivElement | null>(null);
-
-	// A new ask_user call starts the form over.
-	$effect(() => {
-		const n = question.items.length;
-		step = 0;
-		picked = Array.from({ length: n }, () => []);
-		other = Array.from({ length: n }, () => '');
-		void tick().then(() => root?.focus({ preventScroll: true }));
+	/** The answers so far: a new ask_user call starts the form over. */
+	const form = $derived.by(() => {
+		const fresh = $state({
+			step: 0,
+			/** Picked option labels, per question. */
+			picked: items.map((): string[] => []),
+			/** Typed "other" answers, per question. */
+			other: items.map(() => '')
+		});
+		return fresh;
 	});
+	let otherEl = $state<HTMLInputElement | null>(null);
 
-	const item = $derived(items[step]);
-	const last = $derived(step === items.length - 1);
+	/** Attachment: focus the panel for each new question, so its keys work at once. */
+	function focusPanel(node: HTMLElement): void {
+		void items;
+		node.focus({ preventScroll: true });
+	}
+
+	const item = $derived(items[form.step]);
+	const last = $derived(form.step === items.length - 1);
 
 	function answerOf(i: number): string {
-		const typed = (other[i] ?? '').trim();
-		return [...(picked[i] ?? []), ...(typed ? [typed] : [])].join(', ');
+		const typed = (form.other[i] ?? '').trim();
+		return [...(form.picked[i] ?? []), ...(typed ? [typed] : [])].join(', ');
 	}
 	const answered = (i: number) => answerOf(i).length > 0;
 
@@ -48,31 +49,31 @@
 
 	function next(): void {
 		if (last) submit();
-		else step++;
+		else form.step++;
 	}
 
 	function choose(label: string): void {
-		const i = step;
+		const i = form.step;
 		if (item.multiSelect) {
-			const cur = picked[i];
-			picked[i] = cur.includes(label) ? cur.filter((x) => x !== label) : [...cur, label];
+			const cur = form.picked[i];
+			form.picked[i] = cur.includes(label) ? cur.filter((x) => x !== label) : [...cur, label];
 			return;
 		}
-		picked[i] = [label];
-		other[i] = '';
+		form.picked[i] = [label];
+		form.other[i] = '';
 		// A single pick moves straight on (and a lone question is answered).
 		setTimeout(next, items.length === 1 ? 0 : 140 * dur);
 	}
 
 	function typed(e: Event): void {
 		const v = (e.currentTarget as HTMLInputElement).value;
-		other[step] = v;
-		if (!item.multiSelect && v.trim()) picked[step] = [];
+		form.other[form.step] = v;
+		if (!item.multiSelect && v.trim()) form.picked[form.step] = [];
 	}
 
 	function onKey(e: KeyboardEvent): void {
 		if (e.target instanceof HTMLInputElement) {
-			if (e.key === 'Enter' && answered(step)) {
+			if (e.key === 'Enter' && answered(form.step)) {
 				e.preventDefault();
 				next();
 			}
@@ -85,7 +86,7 @@
 		} else if (n === item.options.length + 1) {
 			e.preventDefault();
 			otherEl?.focus();
-		} else if (e.key === 'Enter' && answered(step)) {
+		} else if (e.key === 'Enter' && answered(form.step)) {
 			e.preventDefault();
 			next();
 		} else if (e.key === 'Escape') {
@@ -98,7 +99,7 @@
 <!-- Number keys pick options, Enter goes on, Esc stops: shortcuts over real buttons. -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
-	bind:this={root}
+	{@attach focusPanel}
 	class="qpanel"
 	role="group"
 	aria-label="Question from the AI"
@@ -108,18 +109,19 @@
 >
 	{#if items.length > 1}
 		<div class="steps" role="tablist" aria-label="Questions">
-			{#each items as q, i (i)}
+			{#each items as q, i (q)}
 				<button
-					class="stepper"
-					class:on={i === step}
-					class:done={answered(i)}
+					class={['stepper', { on: i === form.step, done: answered(i) }]}
 					role="tab"
-					aria-selected={i === step}
-					onclick={() => (step = i)}
+					aria-selected={i === form.step}
+					onclick={() => (form.step = i)}
 				>
 					<span class="dot"
-						>{#if answered(i) && i !== step}<Icon name="check" size={11} stroke={2.6} />{:else}{i +
-								1}{/if}</span
+						>{#if answered(i) && i !== form.step}<Icon
+								name="check"
+								size={11}
+								stroke={2.6}
+							/>{:else}{i + 1}{/if}</span
 					>
 					<span class="slabel">{q.header || `Question ${i + 1}`}</span>
 				</button>
@@ -127,30 +129,35 @@
 		</div>
 	{/if}
 
-	{#key step}
+	{#key form.step}
 		<div class="qbody" in:fly={{ x: 12, duration: 160 * dur }}>
 			<h3 class="q" dir="auto">{item.question}</h3>
 			{#if item.multiSelect}<p class="hint">Pick all that apply</p>{/if}
 
 			<div class="opts">
 				{#each item.options as o, k (o.label)}
-					{@const on = picked[step]?.includes(o.label)}
-					<button class="opt" class:on aria-pressed={on} dir="auto" onclick={() => choose(o.label)}>
+					{@const on = form.picked[form.step]?.includes(o.label)}
+					<button
+						class={['opt', { on }]}
+						aria-pressed={on}
+						dir="auto"
+						onclick={() => choose(o.label)}
+					>
 						<span class="key" aria-hidden="true">{k + 1}</span>
 						<span class="otext">
 							<span class="olabel">{o.label}</span>
 							{#if o.description}<span class="odesc">{o.description}</span>{/if}
 						</span>
-						<span class="mark" class:multi={item.multiSelect} aria-hidden="true">
+						<span class={['mark', { multi: item.multiSelect }]} aria-hidden="true">
 							{#if on}<Icon name="check" size={13} stroke={2.6} />{/if}
 						</span>
 					</button>
 				{/each}
-				<label class="opt other" class:on={!!other[step]?.trim()}>
+				<label class={['opt other', { on: !!form.other[form.step]?.trim() }]}>
 					<span class="key" aria-hidden="true">{item.options.length + 1}</span>
 					<input
 						bind:this={otherEl}
-						value={other[step] ?? ''}
+						value={form.other[form.step] ?? ''}
 						oninput={typed}
 						dir="auto"
 						placeholder={item.options.length ? 'Something else… (type it)' : 'Type your answer…'}
@@ -164,11 +171,11 @@
 	<div class="qfoot">
 		<button class="ghost" onclick={onstop} title="Stop the run (Esc)">Stop</button>
 		<span class="spacer"></span>
-		{#if step > 0}
-			<button class="ghost" onclick={() => step--}>Back</button>
+		{#if form.step > 0}
+			<button class="ghost" onclick={() => form.step--}>Back</button>
 		{/if}
-		{#if items.length > 1 || item.multiSelect || !item.options.length || other[step]?.trim()}
-			<button class="primary" disabled={!answered(step)} onclick={next}>
+		{#if items.length > 1 || item.multiSelect || !item.options.length || form.other[form.step]?.trim()}
+			<button class="primary" disabled={!answered(form.step)} onclick={next}>
 				{last ? (items.length > 1 ? 'Submit answers' : 'Send') : 'Next'}
 			</button>
 		{/if}

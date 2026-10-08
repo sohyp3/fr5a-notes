@@ -56,9 +56,7 @@
 <!-- A focusable separator is the ARIA "splitter" pattern (arrow keys resize). -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
 <div
-	class="resizer"
-	class:active
-	class:start={edge === 'start'}
+	class={['resizer', { active, start: edge === 'start' }]}
 	role="separator"
 	aria-orientation="vertical"
 	aria-label={label}

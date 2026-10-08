@@ -24,7 +24,7 @@
 	let cols = $state(3);
 	let rows = $state(3);
 	let el = $state<HTMLDivElement | null>(null);
-	let grid = $state<HTMLDivElement | null>(null);
+	let grid: HTMLDivElement | null = null;
 	let w = $state(240);
 	let h = $state(0);
 	const dur = reducedMotion() ? 0 : 1;
@@ -68,43 +68,41 @@
 			?.focus({ preventScroll: true });
 	}
 
-	$effect(() => {
-		void focusCorner();
-		const outside = (e: PointerEvent) => {
-			const t = e.target as Node;
-			if (el && !el.contains(t) && !trigger?.contains(t)) onclose();
-		};
-		const key = (e: KeyboardEvent) => {
-			if (e.key !== 'Escape') return;
-			e.preventDefault();
-			e.stopPropagation();
-			onclose();
-		};
-		const undismiss = getAppState().onDismiss(() => onclose());
-		window.addEventListener('pointerdown', outside, true);
-		window.addEventListener('keydown', key, true);
-		window.addEventListener('resize', onclose);
-		return () => {
-			undismiss();
-			window.removeEventListener('pointerdown', outside, true);
-			window.removeEventListener('keydown', key, true);
-			window.removeEventListener('resize', onclose);
-		};
-	});
+	function outside(e: PointerEvent): void {
+		const t = e.target as Node;
+		if (el && !el.contains(t) && !trigger?.contains(t)) onclose();
+	}
+
+	function onKey(e: KeyboardEvent): void {
+		if (e.key !== 'Escape') return;
+		e.preventDefault();
+		e.stopPropagation();
+		onclose();
+	}
+
+	// Android back closes the picker (not the pane under it).
+	$effect(() => getAppState().onDismiss(() => onclose()));
 </script>
+
+<svelte:window onpointerdowncapture={outside} onkeydowncapture={onKey} onresize={onclose} />
 
 {#snippet body()}
 	<div class="head">
 		<span class="title">Insert table</span>
 		<span class="size" aria-live="polite">{label}</span>
 	</div>
-	<div bind:this={grid} class="grid" style:--cols={max.cols} role="group" aria-label="Table size">
+	<div
+		bind:this={grid}
+		{@attach () => void focusCorner()}
+		class="grid"
+		style:--cols={max.cols}
+		role="group"
+		aria-label="Table size"
+	>
 		{#each { length: max.rows }, r (r)}
 			{#each { length: max.cols }, c (c)}
 				<button
-					class="cell"
-					class:on={c < cols && r < rows}
-					class:hdr={r === 0}
+					class={['cell', { on: c < cols && r < rows, hdr: r === 0 }]}
 					data-cell="{c}:{r}"
 					tabindex={c === cols - 1 && r === rows - 1 ? 0 : -1}
 					aria-label="{c + 1} {c ? 'columns' : 'column'} × {r + 1} {r ? 'rows' : 'row'}"
@@ -128,7 +126,7 @@
 {/snippet}
 
 {#if sheet}
-	<div use:portal class="sheet-root">
+	<div {@attach portal} class="sheet-root">
 		<div class="scrim" transition:fade={{ duration: 180 * dur }}></div>
 		<div
 			bind:this={el}
@@ -145,7 +143,7 @@
 	</div>
 {:else}
 	<div
-		use:portal
+		{@attach portal}
 		bind:this={el}
 		bind:offsetWidth={w}
 		bind:offsetHeight={h}
