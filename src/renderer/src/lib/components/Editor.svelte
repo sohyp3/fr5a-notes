@@ -29,6 +29,7 @@
 	import FormatToolbar from './FormatToolbar.svelte';
 	import ActionMenu, { type MenuItem } from './ActionMenu.svelte';
 	import TablePicker from './TablePicker.svelte';
+	import NoteTabs from './NoteTabs.svelte';
 	import Icon from './Icon.svelte';
 	import { platform } from '../platform';
 	import { reducedMotion } from '../portal';
@@ -366,6 +367,9 @@
 	class:viewing={!editable}
 	data-mode={editable ? 'edit' : 'view'}
 >
+	{#if app.settings.tabs && app.workspace && app.tabs.length}
+		<NoteTabs />
+	{/if}
 	{#if !app.workspace}
 		<div class="placeholder-screen" in:fade={{ duration: 150 * dur }}>
 			<EmptyState

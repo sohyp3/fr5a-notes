@@ -577,7 +577,7 @@ class HarnessState {
 		const app = getAppState();
 		// Encrypted notes only while unlocked and allowed (`app.aiNotes`); see `keepOnDevice`.
 		const first = tab.useCurrent && app.aiActiveId ? [app.aiActiveId] : [];
-		return expandMentions(tab.attached, app.aiNotes, first, MAX_INLINE_NOTES);
+		return expandMentions(tab.attached, app.aiNotes, first, MAX_INLINE_NOTES, app.tabIds);
 	}
 
 	private async gatherNotes(tab: HarnessTab, profile: ProviderProfile): Promise<AttachedNote[]> {

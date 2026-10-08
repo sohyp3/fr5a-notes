@@ -273,7 +273,7 @@
 		app.openContextMenu(e.clientX, e.clientY, note);
 	}
 
-	function onClick(): void {
+	function onClick(e: MouseEvent): void {
 		// The release after a long-press or a swipe must not also open the note.
 		if (longPressed || swallowClick) {
 			longPressed = false;
@@ -284,7 +284,15 @@
 			close();
 			return;
 		}
-		if (!trash) app.openNote(note.id);
+		// Tabs on: Mod+click opens the note in a tab of its own.
+		if (!trash) app.openNote(note.id, app.settings.tabs && (e.ctrlKey || e.metaKey));
+	}
+
+	/** Tabs on: a middle-click opens the note in a new tab. */
+	function onAuxClick(e: MouseEvent): void {
+		if (e.button !== 1 || trash || !app.settings.tabs) return;
+		e.preventDefault();
+		void app.openNote(note.id, true);
 	}
 
 	function relTime(ms: number): string {
@@ -353,6 +361,7 @@
 		class:readonly={trash}
 		style:transform="translateX({offset.current}px)"
 		onclick={onClick}
+		onauxclick={onAuxClick}
 		oncontextmenu={onContextMenu}
 		draggable={!app.touch && !trash}
 		ondragstart={(e) => startDrag(e, { kind: 'note', path: note.id })}

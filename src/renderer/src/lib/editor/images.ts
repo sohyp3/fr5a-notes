@@ -1,5 +1,7 @@
 import { isImagePath } from '../../../../shared/paths';
 import { codeLines } from './blocks';
+import { findHighlights } from './highlights';
+import { findTables } from './tables';
 
 /**
  * Images in the line-per-paragraph editor: a line holding only `![alt](src)`
@@ -150,4 +152,65 @@ export function assetName(original: string, type: string, now = new Date()): str
 /** The Markdown line for an image. */
 export function imageLine(alt: string, link: string): string {
 	return `![${alt.replace(/[[\]\n]/g, '')}](${link})`;
+}
+
+// --- moving a picture ------------------------------------------------------------
+
+const COMMENT_RE = /^\s*<!--.*-->\s*$/;
+
+/**
+ * Where a dragged picture may land: `out[k]` says whether lines can go in
+ * before line `k` (`k = lines.length`: at the end) without splitting fenced
+ * code, a table, an image from its size comment or a highlight comment from
+ * the line it marks, or going above the note's leading metadata comments.
+ */
+export function dropGaps(lines: string[]): boolean[] {
+	const out = new Array<boolean>(lines.length + 1).fill(true);
+	for (let k = 0; k < lines.length && COMMENT_RE.test(lines[k]); k++) out[k] = false;
+	const code = codeLines(lines);
+	const tables = findTables(lines);
+	for (let k = 1; k < lines.length; k++) {
+		if (code[k - 1] && code[k]) out[k] = false;
+		if (tables.has(k) && tables.get(k)!.role !== 'head') out[k] = false;
+	}
+	for (let k = 0; k < lines.length; k++)
+		if (!code[k] && parseSize(lines[k]) !== null) out[k] = false;
+	for (const h of findHighlights(lines)) {
+		out[Math.max(h.comment, h.target)] = false;
+		// A comment marking the line above would mark a line put in below it.
+		if (h.target < h.comment) out[h.comment + 1] = false;
+	}
+	return out;
+}
+
+export interface LineMove {
+	/** Lines taken out: `[from, to)`. */
+	cut: [number, number];
+	/** The lines go in before this one (numbered as before the cut). */
+	at: number;
+	insert: string[];
+	/** Where the moved block starts in `insert` (after a padding line). */
+	offset: number;
+}
+
+/**
+ * Moving lines `from..to` (an image and its size comment) to gap `gap` (see
+ * `dropGaps`); null when they'd stay where they are. A blank line left doubled
+ * behind goes with them, and a blank line keeps them apart from a table (other
+ * Markdown tools would read the line as a row).
+ */
+export function moveLines(lines: string[], from: number, to: number, gap: number): LineMove | null {
+	if (gap >= from && gap <= to + 1) return null;
+	const blank = (i: number) => i >= 0 && i < lines.length && !lines[i].trim();
+	const end = blank(from - 1) && blank(to + 1) ? to + 2 : to + 1;
+	const tables = findTables(lines);
+	const above = gap === end ? from - 1 : gap - 1;
+	const before = tables.has(above) ? [''] : [];
+	const after = tables.get(gap)?.role === 'head' ? [''] : [];
+	return {
+		cut: [from, end],
+		at: gap,
+		insert: [...before, ...lines.slice(from, to + 1), ...after],
+		offset: before.length
+	};
 }

@@ -145,25 +145,46 @@
 						insert: insert({ kind: 'tag', value: t })
 					}));
 			}
+			const folders = (q: string, max: number) =>
+				app.folders
+					.filter((f) => f.toLowerCase().includes(q))
+					.slice(0, max)
+					.map((f) => ({
+						label: `${f}/`,
+						hint: `folder · ${app.aiNotes.filter((n) => n.id.startsWith(`${f}/`)).length} notes`,
+						insert: insert({ kind: 'dir', value: f })
+					}));
+			// @/… → folders only (every note in one, recursive)
+			if (raw.startsWith('/')) return folders(raw.slice(1).toLowerCase(), 8);
 			const q = raw.toLowerCase();
-			const folders = app.folders
-				.filter((f) => f.toLowerCase().includes(q))
-				.slice(0, 4)
-				.map((f) => ({
-					label: `${f}/`,
-					hint: `folder · ${app.aiNotes.filter((n) => n.id.startsWith(`${f}/`)).length} notes`,
-					insert: insert({ kind: 'dir', value: f })
-				}));
+			const dirs = folders(q, 4);
+			// @tabs: every note open in a tab, read when the message is sent.
+			const open = app.settings.tabs ? app.tabIds.length : 0;
+			const tabs =
+				open && 'tabs'.startsWith(q)
+					? [
+							{
+								label: '@tabs',
+								hint: `all ${open} open ${open === 1 ? 'tab' : 'tabs'}`,
+								insert: insert({ kind: 'tabs', value: '' })
+							}
+						]
+					: [];
 			const notes = app.aiNotes
 				.filter((n) => n.id.toLowerCase().includes(q) || n.title.toLowerCase().includes(q))
-				.slice(0, 8 - folders.length)
+				.slice(0, 8 - dirs.length)
 				.map((n) => ({
 					label: n.title,
 					hint: n.id,
 					insert: insert({ kind: 'note', value: n.id })
 				}));
-			const tagHint = raw ? [] : [{ label: '#tag', hint: 'type @# for tags', insert: `${head}@#` }];
-			return [...folders, ...notes, ...tagHint];
+			const hints = raw
+				? []
+				: [
+						{ label: '/folder', hint: 'type @/ for folders', insert: `${head}@/` },
+						{ label: '#tag', hint: 'type @# for tags', insert: `${head}@#` }
+					];
+			return [...tabs, ...dirs, ...notes, ...hints];
 		}
 		return [];
 	});
@@ -626,7 +647,9 @@
 									? 'The open note is encrypted: unlock it (and allow it in Settings → Encryption) for the assistant to read it'
 									: app.activeEncrypted
 										? 'Attach the open note (encrypted: the chat then stays on this device)'
-										: 'Attach the open note'}
+										: app.settings.tabs
+											? 'Attach the note in the current tab'
+											: 'Attach the open note'}
 								onclick={() => (tab.useCurrent = !tab.useCurrent)}
 							>
 								<Icon
@@ -634,7 +657,9 @@
 									size={12}
 									stroke={2}
 								/>
-								open note{app.activeEncrypted ? ' (encrypted)' : ''}
+								{app.settings.tabs ? 'current tab' : 'open note'}{app.activeEncrypted
+									? ' (encrypted)'
+									: ''}
 							</button>
 							{#each tab.attached as id (id)}
 								{@const m = fromKey(id)}
@@ -644,7 +669,9 @@
 										? `#${m.value}`
 										: m.kind === 'dir'
 											? `${m.value || 'all'}/`
-											: `@${m.value.split('/').pop()}`}
+											: m.kind === 'tabs'
+												? 'all tabs'
+												: `@${m.value.split('/').pop()}`}
 									<button
 										aria-label="Detach"
 										onclick={() => (tab.attached = tab.attached.filter((x) => x !== id))}
@@ -723,7 +750,8 @@
 								title="Ask about {ctx?.ids.length ? 'this note' : 'your notes'}"
 							/>
 							<p class="muted">
-								<kbd>/</kbd> skills · <kbd>@</kbd> note · <kbd>@folder/</kbd> · <kbd>@#tag</kbd>
+								<kbd>/</kbd> skills · <kbd>@</kbd> note · <kbd>@/</kbd> folder · <kbd>@#</kbd> tag
+								{#if app.settings.tabs}· <kbd>@tabs</kbd> open tabs{/if}
 								{#if !searchLabel}
 									· <button class="link" onclick={toggleWeb}>turn on web search</button>
 								{/if}

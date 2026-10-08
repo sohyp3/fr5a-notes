@@ -108,6 +108,8 @@ export interface Settings {
 	ai: boolean;
 	/** Open notes in view or edit mode. */
 	openIn: OpenIn;
+	/** Note tabs above the editor: New note opens a tab, a list click opens in the current one. */
+	tabs: boolean;
 	/** Encrypted notes. Off: no crypto code loaded, no key in memory, no buttons. */
 	encryption: boolean;
 	/** Lock encrypted notes after this many idle / background minutes (0 = never). */
@@ -135,6 +137,7 @@ const DEFAULT_SETTINGS: Settings = {
 	accent: DEFAULT_ACCENT,
 	ai: true,
 	openIn: 'auto',
+	tabs: false,
 	encryption: false,
 	autoLockMinutes: 15,
 	aiReadsEncrypted: true,
@@ -174,6 +177,11 @@ class AppState {
 	draftEncrypted = $state(false);
 	/** Encryption (key, lock, note I/O wrapper) while switched on; null when off. */
 	vault = $state.raw<Vault | null>(null);
+	/**
+	 * Open note tabs (Settings → Editor; empty while off): note ids, and null
+	 * for the draft. The open note is the current tab; see `placeTab`.
+	 */
+	tabs = $state<(string | null)[]>([]);
 	/**
 	 * Keys the editor component. Bumped when a *different* buffer should mount
 	 * (open/create) — deliberately NOT when a draft materialises into a file, so
@@ -405,6 +413,10 @@ class AppState {
 		if (this.settings.ai) void getAiSettings().load();
 		await this.refresh();
 
+		if (this.settings.tabs) {
+			const tabs = (await platform.getState<string[]>('tabs')) ?? [];
+			this.tabs = tabs.filter((id) => this.notes.some((n) => n.id === id));
+		}
 		// Re-open the note from the previous session, if it still exists.
 		// An encrypted one only when already unlocked (no passphrase prompt at launch).
 		const last = await platform.getState<string>('lastOpenFile');
@@ -563,6 +575,10 @@ class AppState {
 			this.activeId = null;
 			this.activeContent = '';
 		}
+		// Tabs of notes gone from disk close (mid-move, `pathMoved` re-points them instead).
+		const gone = (t: string | null) =>
+			t !== null && t !== this.activeId && !notes.some((n) => n.id === t);
+		if (!this.moving && this.tabs.some(gone)) this.setTabs(this.tabs.filter((t) => !gone(t)));
 		this.scheduleChanges();
 	}
 
@@ -574,12 +590,14 @@ class AppState {
 			this.activeContent = '';
 			this.draft = false;
 			this.selectedTag = null;
+			this.setTabs([]);
 			void platform.setState('lastOpenFile', null);
 			await this.refresh();
 		}
 	}
 
-	async openNote(id: string): Promise<void> {
+	/** Open a note: in its tab when it has one, else the current tab (`newTab`: a tab of its own). */
+	async openNote(id: string, newTab = false): Promise<void> {
 		this.swipeOpen = null;
 		if (id === this.activeId) {
 			this.view = 'editor';
@@ -587,6 +605,7 @@ class AppState {
 			return;
 		}
 		if (this.noteMeta(id)?.encrypted && !(await this.ensureUnlocked())) return;
+		const slot = this.tabIndex;
 		await this.flush(); // persist any pending edits before switching
 		// Load the body BEFORE flipping activeId. The editor is keyed on
 		// editorSession, so its content must already be in place when the new
@@ -607,10 +626,12 @@ class AppState {
 		this.baseline = { id, text: content.replace(/\r\n?/g, '\n') };
 		this.editing = this.defaultEditing();
 		this.editorSession++;
+		this.placeTab(id, slot, newTab);
 		void platform.setState('lastOpenFile', id);
 	}
 
 	async createNote(): Promise<void> {
+		const slot = this.tabIndex;
 		await this.flush(); // persist the outgoing note (or materialise a draft)
 		// New notes land in the folder currently in view ('' = workspace root).
 		this.draftFolder = this.trashOpen ? '' : (this.selectedFolder ?? '');
@@ -628,6 +649,85 @@ class AppState {
 		// A new note is for writing: always open it editable.
 		this.editing = true;
 		this.editorSession++;
+		this.placeTab(null, slot, true);
+	}
+
+	// --- tabs (Settings → Editor) --------------------------------------------------
+
+	/** The open note's tab, -1 for none. */
+	get tabIndex(): number {
+		if (this.draft) return this.tabs.indexOf(null);
+		return this.activeId ? this.tabs.indexOf(this.activeId) : -1;
+	}
+
+	/** Ids of the notes open in tabs (the draft has none yet). */
+	get tabIds(): string[] {
+		return this.tabs.filter((t): t is string => t !== null);
+	}
+
+	private setTabs(tabs: (string | null)[]): void {
+		this.tabs = tabs;
+		void platform.setState('tabs', this.tabIds);
+	}
+
+	/**
+	 * Give the note just opened (null: the draft) a tab: its own when it has
+	 * one, else the one that was current (`slot`), else — `fresh`, or no tab
+	 * was current — a new one after it.
+	 */
+	private placeTab(id: string | null, slot: number, fresh: boolean): void {
+		if (!this.settings.tabs) return;
+		const tabs = [...this.tabs];
+		if (!tabs.includes(id)) {
+			if (slot >= 0 && !fresh) tabs[slot] = id;
+			else tabs.splice(slot >= 0 ? slot + 1 : tabs.length, 0, id);
+		}
+		// A draft left blank was dropped on the way out: so is its tab.
+		this.setTabs(tabs.filter((t) => t !== null || this.draft));
+	}
+
+	/** Close tab `i`; closing the current one opens its neighbour. */
+	async closeTab(i: number): Promise<void> {
+		if (i !== this.tabIndex) {
+			this.setTabs(this.tabs.filter((_, k) => k !== i));
+			return;
+		}
+		await this.flush(); // a draft with text becomes a note (and keeps its place)
+		const at = this.tabIndex;
+		const rest = this.tabs.filter((_, k) => k !== at);
+		this.setTabs(rest);
+		const next = rest[Math.min(at, rest.length - 1)];
+		const closing = this.activeId;
+		if (next) await this.openNote(next);
+		// Nothing left, or the next one stayed shut (a locked note): no note open.
+		if (!next || this.activeId === closing) this.closeEditor();
+	}
+
+	/** Step to the next (`1`) / previous (`-1`) tab, round the ends. */
+	cycleTab(step: 1 | -1): void {
+		const ids = this.tabs;
+		if (ids.length < 2) return;
+		const next = ids[(Math.max(this.tabIndex, 0) + step + ids.length) % ids.length];
+		if (next) void this.openNote(next);
+	}
+
+	/** Turning tabs on starts with the open note's; off forgets them. */
+	private tabsToggled(on: boolean): void {
+		if (!on) this.setTabs([]);
+		else if (this.draft || this.activeId) this.setTabs([this.draft ? null : this.activeId]);
+	}
+
+	/** No note open: an empty editor (and the phone back on the list). */
+	private closeEditor(): void {
+		this.cancelPending();
+		this.activeId = null;
+		this.activeContent = '';
+		this.baseline = null;
+		this.draft = false;
+		this.draftEncrypted = false;
+		if (this.pane === 'editor') this.pane = 'list';
+		this.editorSession++;
+		void platform.setState('lastOpenFile', null);
 	}
 
 	// --- view / edit mode ------------------------------------------------------
@@ -665,15 +765,21 @@ class AppState {
 	async deleteNote(id: string): Promise<void> {
 		// Locked notes are protected — the caller must unlock first.
 		if (this.notes.find((n) => n.id === id)?.locked) return;
-		if (id === this.activeId) {
+		const active = id === this.activeId;
+		if (active) {
 			this.cancelPending();
 			if (this.pane === 'editor') this.pane = 'list';
 			this.activeId = null;
 			this.activeContent = '';
 			void platform.setState('lastOpenFile', null);
 		}
+		const tab = this.tabs.indexOf(id);
+		if (tab >= 0) this.setTabs(this.tabs.filter((t) => t !== id));
 		await platform.deleteNote(id);
 		await this.refresh();
+		// Its neighbour tab takes over, as when closing it (phones go back to the list).
+		const next = this.tabs[Math.min(tab, this.tabs.length - 1)];
+		if (active && tab >= 0 && next && this.layout !== 'phone') await this.openNote(next);
 	}
 
 	// --- trash operations --------------------------------------------------
@@ -1033,15 +1139,7 @@ class AppState {
 		await this.flush();
 		if (!this.activeEncrypted) return;
 		// A new editor instance: the decrypted text and its undo history go with the old one.
-		this.cancelPending();
-		this.activeId = null;
-		this.activeContent = '';
-		this.baseline = null;
-		this.draft = false;
-		this.draftEncrypted = false;
-		if (this.pane === 'editor') this.pane = 'list';
-		this.editorSession++;
-		void platform.setState('lastOpenFile', null);
+		this.closeEditor();
 	}
 
 	/** Titles, tags and diffs of encrypted notes read differently now. */
@@ -1452,6 +1550,8 @@ class AppState {
 			void platform.setState('lastOpenFile', active);
 		}
 		if (this.pending) this.pending.id = remapPath(this.pending.id, from, to) ?? this.pending.id;
+		if (this.tabs.some((t) => t !== null && remapPath(t, from, to) !== null))
+			this.setTabs(this.tabs.map((t) => (t === null ? t : (remapPath(t, from, to) ?? t))));
 		if (this.selectedFolder)
 			this.selectedFolder = remapPath(this.selectedFolder, from, to) ?? this.selectedFolder;
 		const expanded: Record<string, boolean> = {};
@@ -1615,6 +1715,7 @@ class AppState {
 		if (patch.encryption !== undefined)
 			void (patch.encryption ? this.startVault() : this.stopVault());
 		if (patch.autoLockMinutes !== undefined) this.vault?.rearm();
+		if (patch.tabs !== undefined) this.tabsToggled(patch.tabs);
 		localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
 		void platform.setState('settings', $state.snapshot(this.settings));
 		this.applyFonts();
@@ -1708,6 +1809,7 @@ class AppState {
 		this.activeId = meta.id;
 		this.activeContent = content;
 		this.saving = false;
+		if (this.tabs.includes(null)) this.setTabs(this.tabs.map((t) => t ?? meta.id));
 		void platform.setState('lastOpenFile', meta.id);
 		await this.refresh();
 	}

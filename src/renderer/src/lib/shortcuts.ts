@@ -7,12 +7,14 @@ export interface Shortcut {
 	keys: string[];
 	desc: string;
 	/** Listed only while this setting is on. */
-	feature?: 'encryption' | 'highlights';
+	feature?: 'encryption' | 'highlights' | 'tabs';
 }
 
 export const SHORTCUTS: Shortcut[] = [
 	{ keys: ['Mod', '/'], desc: 'Toggle this shortcuts cheat sheet' },
 	{ keys: ['Mod', 'N'], desc: 'New note' },
+	{ keys: ['Mod', 'W'], desc: 'Close the current tab', feature: 'tabs' },
+	{ keys: ['Ctrl', 'Tab'], desc: 'Next tab  ·  ⇧ previous', feature: 'tabs' },
 	{ keys: ['Mod', '\\'], desc: 'Toggle Zen mode' },
 	{ keys: ['Mod', 'J'], desc: 'Toggle the AI harness pane' },
 	{ keys: ['Mod', '⇧', 'L'], desc: 'Show / hide the note list' },

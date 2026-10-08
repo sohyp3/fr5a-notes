@@ -60,6 +60,22 @@ describe('mentions', () => {
 		});
 	});
 
+	it('@tabs stands for the notes open in tabs when sent', () => {
+		expect(parseMentions('compare @tabs, and @"tabs"')).toEqual([
+			{ kind: 'tabs', value: '' },
+			{ kind: 'note', value: 'tabs' }
+		]);
+		for (const m of parseMentions('@tabs @"tabs"')) {
+			expect(fromKey(mentionKey(m))).toEqual(m);
+			expect(parseMentions(mentionText(m))).toEqual([m]);
+		}
+		const e = expandMentions(['@tabs'], notes, ['a.md'], 25, ['a.md', 'gone.md', 'Workshop/y.md']);
+		expect(e.ids).toEqual(['a.md', 'Workshop/y.md']);
+		expect(e.groups).toEqual([{ key: '@tabs', ids: ['a.md', 'Workshop/y.md'] }]);
+		expect(expandMentions(['@tabs'], notes).missing).toEqual(['@tabs']);
+		expect(remapKey('@tabs', 'tabs', 'x')).toBe('@tabs');
+	});
+
 	it('follows moved notes and folders', () => {
 		expect(remapKey('Work/plan.md', 'Work', 'Archive/Work')).toBe('Archive/Work/plan.md');
 		expect(remapKey('@Work/', 'Work', 'Old')).toBe('@Old/');

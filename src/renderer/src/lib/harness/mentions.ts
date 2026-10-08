@@ -6,11 +6,15 @@ import { remapPath } from '../../../../shared/paths';
  *   @drafts/post.md   a note (id or exact title; quote ids with spaces: @"My note.md")
  *   @Work/            every note in a folder (recursive)
  *   @#research        every note tagged #research (or #research/…)
- * A mention is stored by its canonical key (`a.md`, `@Work/`, `#research`) in
- * the tab and in the session frontmatter.
+ *   @tabs             every note open in a tab (Settings → Editor → Tabs) when sent
+ * A mention is stored by its canonical key (`a.md`, `@Work/`, `#research`,
+ * `@tabs`) in the tab and in the session frontmatter. A note called "tabs"
+ * is `@"tabs"`.
  */
 
-export type MentionKind = 'note' | 'dir' | 'tag';
+export type MentionKind = 'note' | 'dir' | 'tag' | 'tabs';
+
+const TABS = '@tabs';
 
 export interface Mention {
 	kind: MentionKind;
@@ -30,17 +34,20 @@ export function classify(raw: string): Mention | null {
 export function parseMentions(text: string): Mention[] {
 	const out: Mention[] = [];
 	for (const m of text.matchAll(TOKEN_RE)) {
-		const mention = classify(m[1] ?? m[2].replace(/[,;:!?)]+$/, ''));
+		const raw = m[1] ?? m[2].replace(/[,;:!?)]+$/, '');
+		const mention = m[1] === undefined && raw === 'tabs' ? fromKey(TABS) : classify(raw);
 		if (mention) out.push(mention);
 	}
 	return out;
 }
 
 export function mentionKey(m: Mention): string {
+	if (m.kind === 'tabs') return TABS;
 	return m.kind === 'dir' ? `@${m.value}/` : m.kind === 'tag' ? `#${m.value}` : m.value;
 }
 
 export function fromKey(key: string): Mention {
+	if (key === TABS) return { kind: 'tabs', value: '' };
 	if (key.startsWith('#')) return { kind: 'tag', value: key.slice(1) };
 	if (key.startsWith('@') && key.endsWith('/')) return { kind: 'dir', value: key.slice(1, -1) };
 	return { kind: 'note', value: key };
@@ -49,19 +56,24 @@ export function fromKey(key: string): Mention {
 /** A stored mention key after a note / folder moved from `from` to `to` (tags never move). */
 export function remapKey(key: string, from: string, to: string): string {
 	const m = fromKey(key);
-	if (m.kind === 'tag') return key;
+	if (m.kind === 'tag' || m.kind === 'tabs') return key;
 	const next = remapPath(m.value, from, to);
 	return next === null ? key : mentionKey({ ...m, value: next });
 }
 
 /** How a mention is typed back into the input (quoted when it has spaces). */
 export function mentionText(m: Mention): string {
+	if (m.kind === 'tabs') return TABS;
 	const body = m.kind === 'dir' ? `${m.value}/` : m.kind === 'tag' ? `#${m.value}` : m.value;
-	return /\s/.test(body) ? `@"${body}"` : `@${body}`;
+	return /\s/.test(body) || (m.kind === 'note' && body === 'tabs') ? `@"${body}"` : `@${body}`;
 }
 
-/** Note ids a mention stands for (a note mention may match by id or title). */
-export function resolveMention(m: Mention, notes: NoteMeta[]): string[] {
+/**
+ * Note ids a mention stands for (a note mention may match by id or title).
+ * `tabs`: the ids open in tabs, of those in `notes`.
+ */
+export function resolveMention(m: Mention, notes: NoteMeta[], tabs: string[] = []): string[] {
+	if (m.kind === 'tabs') return tabs.filter((id) => notes.some((n) => n.id === id));
 	if (m.kind === 'note') {
 		const hit = notes.find((n) => n.id === m.value) ?? notes.find((n) => n.title === m.value);
 		return hit ? [hit.id] : [];
@@ -94,7 +106,8 @@ export function expandMentions(
 	keys: string[],
 	notes: NoteMeta[],
 	first: string[] = [],
-	cap = 25
+	cap = 25,
+	tabs: string[] = []
 ): Expanded {
 	const ids: string[] = [];
 	const groups: Expanded['groups'] = [];
@@ -108,7 +121,7 @@ export function expandMentions(
 	first.forEach(add);
 	for (const key of keys) {
 		const m = fromKey(key);
-		const hit = resolveMention(m, notes);
+		const hit = resolveMention(m, notes, tabs);
 		if (!hit.length) missing.push(key);
 		if (m.kind !== 'note') groups.push({ key, ids: hit });
 		hit.forEach(add);

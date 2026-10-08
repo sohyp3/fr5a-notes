@@ -574,6 +574,51 @@ button.scrim {
 .md-image.resizing {
 	cursor: nwse-resize;
 }
+/* Moving: drag the picture (touch: long-press first); a line shows where it lands. */
+.md-image {
+	-webkit-user-select: none;
+	user-select: none;
+	-webkit-touch-callout: none;
+}
+.md-image.moving {
+	opacity: 0.35;
+}
+.md-image-ghost {
+	position: fixed;
+	top: 0;
+	left: 0;
+	z-index: 1000;
+	width: 120px;
+	pointer-events: none;
+	opacity: 0.9;
+	border-radius: 6px;
+	box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+	line-height: 0;
+}
+.md-image-ghost img {
+	display: block;
+	width: 100%;
+	height: auto;
+	border-radius: 6px;
+}
+.md-image-ghost .md-image-frame {
+	display: flex;
+	width: 100%;
+}
+.md-image-drop {
+	position: fixed;
+	top: 0;
+	left: 0;
+	z-index: 1000;
+	height: 2px;
+	border-radius: 1px;
+	background: var(--accent);
+	pointer-events: none;
+}
+html.md-image-dragging,
+html.md-image-dragging * {
+	cursor: grabbing !important;
+}
 .md-image-frame.md-image-missing {
 	display: inline-flex;
 	flex-direction: column;

@@ -343,6 +343,9 @@ test('AI harness: @folder/ mention inlines the folder', async ({ page }) => {
 	await page.getByRole('button', { name: 'Toggle AI harness' }).tap();
 	const harness = page.getByRole('region', { name: 'AI harness' });
 	const input = harness.locator('textarea');
+	// @/ lists folders only.
+	await input.fill('@/');
+	await expect(harness.locator('.suggest [role=option]')).toHaveText([/Work\//]);
 	await input.fill('@Wo');
 	// Folder suggestions come first; Enter picks the highlighted one.
 	await expect(harness.locator('.suggest [role=option]').first()).toContainText('Work/');
@@ -355,6 +358,28 @@ test('AI harness: @folder/ mention inlines the folder', async ({ page }) => {
 	await expect(harness.locator('.ctx-sum')).toContainText('+1 attached');
 	await harness.locator('.ctx-sum').tap();
 	await expect(harness.locator('.chip.dir')).toHaveText(/Work\//);
+});
+
+test('tabs on touch: a tab per new note, tap to switch, × to close', async ({ page }) => {
+	await openSettings(page);
+	await page
+		.getByRole('navigation', { name: 'Settings sections' })
+		.getByRole('button', { name: /Editor/ })
+		.tap();
+	await page.getByRole('switch', { name: 'Tabs' }).tap();
+	await page.getByRole('button', { name: 'Close settings' }).tap();
+	await openPlan(page);
+	const tabs = page.getByRole('tablist', { name: 'Open notes' }).getByRole('tab');
+	await expect(tabs).toHaveText(['Plan']);
+	await page.getByRole('button', { name: 'New note in a new tab' }).tap();
+	await expect(tabs).toHaveText(['Plan', 'New note']);
+	await page.keyboard.type('Second');
+	await expect(tabs).toHaveText(['Plan', 'Second']);
+	await tabs.first().tap();
+	await expect(page.locator('.ProseMirror')).toContainText('first line');
+	await page.getByRole('button', { name: 'Close Plan' }).tap();
+	await expect(tabs).toHaveText(['Second']);
+	await expect(page.locator('.ProseMirror')).toContainText('Second');
 });
 
 test('AI off: no button, no pane', async ({ page }) => {
@@ -1661,6 +1686,167 @@ test('desktop: images show above their hidden line, resize by the corner, paste'
 	const assets = await page.evaluate(() => (window as unknown as { __assets: object }).__assets);
 	expect(Object.values(assets)).toEqual([3]);
 	await expect(page.locator('.md-image img')).toHaveCount(2);
+	await ctx.close();
+});
+
+test('desktop: dragging a picture moves its lines', async ({ browser }) => {
+	const { ctx, page } = await desktopPage(browser, {
+		'hello.md': '# Hello\n\n![A cat](assets/cat.png)\n<!-- size: 40% -->\nfirst\nsecond\nend'
+	});
+	await openHello(page);
+	const pic = (await page.locator('.md-image img').boundingBox())!;
+	const line = (text: string) =>
+		page.locator('.ProseMirror p', { hasText: new RegExp(`^${text}$`) });
+	await page.mouse.move(pic.x + pic.width / 2, pic.y + pic.height / 2);
+	await page.mouse.down();
+	// The press shows the source under the picture: measure after it.
+	await expect(page.locator('p.md-img-src')).toHaveCount(2);
+	const end = (await line('end').boundingBox())!;
+	await page.mouse.move(pic.x + pic.width / 2, end.y - 1, { steps: 8 });
+	await expect(page.locator('.md-image.moving')).toHaveCount(1);
+	await expect(page.locator('.md-image-drop')).toBeVisible();
+	// Escape puts it back.
+	await page.keyboard.press('Escape');
+	await page.mouse.up();
+	await expect(page.locator('.md-image-drop')).toHaveCount(0);
+	expect(await editorText(page)).toContain(
+		'\n\n![A cat](assets/cat.png)\n<!-- size: 40% -->\nfirst'
+	);
+
+	await page.mouse.move(pic.x + pic.width / 2, pic.y + pic.height / 2);
+	await page.mouse.down();
+	await page.mouse.move(pic.x + pic.width / 2, end.y - 1, { steps: 8 });
+	await page.mouse.up();
+	await expect
+		.poll(() => editorText(page))
+		.toBe('# Hello\n\nfirst\nsecond\n![A cat](assets/cat.png)\n<!-- size: 40% -->\nend');
+	// The caret went along: its source shows at the new place.
+	await expect(page.locator('p.md-img-src')).toHaveText([
+		'![A cat](assets/cat.png)',
+		'<!-- size: 40% -->'
+	]);
+	// One undo step puts it back.
+	await page.keyboard.press('Control+z');
+	await expect.poll(() => editorText(page)).toContain('\n\n![A cat](assets/cat.png)\n<!-- size');
+	await ctx.close();
+});
+
+test('a long press lifts a picture to drag it; a plain swipe scrolls', async ({ page }) => {
+	await writeFake(page, 'hello.md', '# Hello\n\n![A cat](assets/cat.png)\nfirst\nsecond\nend');
+	await openFolder(page, /^All Notes/);
+	await list(page).getByRole('button', { name: /Hello/ }).tap();
+	await edit(page);
+	const pic = (await page.locator('.md-image img').boundingBox())!;
+	const end = (await page.locator('.ProseMirror p', { hasText: /^end$/ }).boundingBox())!;
+	const cdp = await page.context().newCDPSession(page);
+	const touch = (type: 'touchStart' | 'touchMove' | 'touchEnd', x?: number, y?: number) =>
+		cdp.send('Input.dispatchTouchEvent', {
+			type,
+			touchPoints: x === undefined ? [] : [{ x, y: y! }]
+		});
+	const x = pic.x + pic.width / 2;
+	const y = pic.y + pic.height / 2;
+	// No hold: nothing lifts.
+	await touch('touchStart', x, y);
+	for (let i = 1; i <= 5; i++) await touch('touchMove', x, y + i * 6);
+	await touch('touchEnd');
+	await expect(page.locator('.md-image.moving')).toHaveCount(0);
+
+	await touch('touchStart', x, y);
+	await page.waitForTimeout(550);
+	await expect(page.locator('.md-image.moving')).toHaveCount(1);
+	for (let i = 1; i <= 10; i++) await touch('touchMove', x, y + ((end.y - 1 - y) * i) / 10);
+	await expect(page.locator('.md-image-drop')).toBeVisible();
+	await touch('touchEnd');
+	await expect
+		.poll(() => editorText(page))
+		.toBe('# Hello\n\nfirst\nsecond\n![A cat](assets/cat.png)\nend');
+	await expect(page.getByRole('menu')).toHaveCount(0);
+});
+
+test('desktop: note tabs — new notes get a tab, list clicks reuse one, @tabs for the AI', async ({
+	browser
+}) => {
+	const { ctx, page } = await desktopPage(browser, {
+		'alpha.md': '# Alpha\n\none',
+		'beta.md': '# Beta\n\ntwo',
+		'gamma.md': '# Gamma\n\nthree'
+	});
+	const tabs = page.getByRole('tablist', { name: 'Open notes' }).getByRole('tab');
+	const body = page.locator('.ProseMirror');
+	await sidebar(page)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	await list(page).getByText('Alpha', { exact: true }).click();
+	// Off by default.
+	await expect(tabs).toHaveCount(0);
+	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
+	await page
+		.getByRole('navigation', { name: 'Settings sections' })
+		.getByRole('button', { name: /Editor/ })
+		.click();
+	await page.getByRole('switch', { name: 'Tabs' }).click();
+	await page.getByRole('button', { name: 'Close settings' }).click();
+	// The open note is the first tab.
+	await expect(tabs).toHaveText(['Alpha']);
+
+	// A list click opens in the current tab; Ctrl+click in a new one.
+	await list(page).getByText('Beta', { exact: true }).click();
+	await expect(tabs).toHaveText(['Beta']);
+	await list(page)
+		.getByText('Gamma', { exact: true })
+		.click({ modifiers: ['Control'] });
+	await expect(tabs).toHaveText(['Beta', 'Gamma']);
+	await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
+	// New note: a tab of its own, named once the typed title is saved.
+	await page.keyboard.press('Control+n');
+	await expect(tabs).toHaveText(['Beta', 'Gamma', 'New note']);
+	await expect(body).toBeFocused();
+	await page.keyboard.type('Delta');
+	await expect(tabs).toHaveText(['Beta', 'Gamma', 'Delta']);
+	// Switching: a click, Ctrl+Tab round the ends.
+	await tabs.first().click();
+	await expect(body).toContainText('two');
+	await page.keyboard.press('Control+Tab');
+	await expect(body).toContainText('three');
+	// Mod+W closes the current tab; the next one opens.
+	await page.keyboard.press('Control+w');
+	await expect(tabs).toHaveText(['Beta', 'Delta']);
+	await expect(body).toContainText('Delta');
+	await expect
+		.poll(() =>
+			page.evaluate(() =>
+				(window as unknown as { api: { getState(k: string): Promise<unknown> } }).api.getState(
+					'tabs'
+				)
+			)
+		)
+		.toEqual(['beta.md', 'Delta.md']);
+
+	// The AI: the current tab is attached; @tabs adds every open one.
+	await page.keyboard.press('Control+j');
+	const harness = page.getByRole('region', { name: 'AI harness' });
+	const input = harness.locator('textarea');
+	await input.fill('@ta');
+	await expect(harness.locator('.suggest [role=option]').first()).toContainText('all 2 open tabs');
+	await input.press('Enter');
+	await expect(input).toHaveValue('@tabs ');
+	await input.pressSequentially('context?');
+	await input.press('Enter');
+	await expect(harness.getByText('ctx: Delta.md | beta.md | index of @tabs')).toBeVisible();
+	await harness.locator('.ctx-sum').click();
+	await expect(harness.getByRole('button', { name: /current tab/ })).toBeVisible();
+	await expect(harness.locator('.chip.tabs')).toHaveText(/all tabs/);
+
+	// Off: the strip goes.
+	await page.keyboard.press('Control+,');
+	await page
+		.getByRole('navigation', { name: 'Settings sections' })
+		.getByRole('button', { name: /Editor/ })
+		.click();
+	await page.getByRole('switch', { name: 'Tabs' }).click();
+	await page.getByRole('button', { name: 'Close settings' }).click();
+	await expect(tabs).toHaveCount(0);
 	await ctx.close();
 });
 

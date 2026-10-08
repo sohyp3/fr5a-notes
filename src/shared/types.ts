@@ -54,7 +54,8 @@ export interface SidebarState {
 }
 
 /** Keys the renderer may read/write in the persistent store. */
-export type StateKey = 'lastOpenFile' | 'sidebar' | 'settings' | 'theme' | 'ai' | 'aiPrices';
+export type StateKey =
+	'lastOpenFile' | 'tabs' | 'sidebar' | 'settings' | 'theme' | 'ai' | 'aiPrices';
 
 /** One file left conflicted by a pull; `null` means that side deleted the file. */
 export interface ConflictFile {

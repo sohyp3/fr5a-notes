@@ -44,6 +44,15 @@
 			];
 		return [
 			{ label: 'Open', icon: 'note', action: () => void app.openNote(n.id) },
+			...(app.settings.tabs
+				? [
+						{
+							label: 'Open in new tab',
+							icon: 'plus',
+							action: () => void app.openNote(n.id, true)
+						} as MenuItem
+					]
+				: []),
 			{ label: n.pinned ? 'Unpin' : 'Pin', icon: 'pin', action: () => void app.togglePin(n.id) },
 			{
 				label: n.locked ? 'Unlock' : 'Lock',

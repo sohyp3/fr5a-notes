@@ -147,6 +147,17 @@
 			app.createNote();
 			return;
 		}
+		// Tabs: Mod+W closes the current one (never the window), Ctrl+Tab steps through them.
+		if (app.settings.tabs && mod && !e.shiftKey && (e.key === 'w' || e.key === 'W')) {
+			e.preventDefault();
+			if (app.tabIndex >= 0) void app.closeTab(app.tabIndex);
+			return;
+		}
+		if (app.settings.tabs && e.ctrlKey && e.key === 'Tab') {
+			e.preventDefault();
+			app.cycleTab(e.shiftKey ? -1 : 1);
+			return;
+		}
 		// Mod+P pins / unpins the active note.
 		if (mod && !e.shiftKey && (e.key === 'p' || e.key === 'P')) {
 			if (!app.activeId) return;

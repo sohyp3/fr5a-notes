@@ -19,7 +19,7 @@
 	const SECTIONS: { id: SettingsSection; label: string; icon: IconName; desc: string }[] = [
 		{ id: 'general', label: 'General', icon: 'note', desc: 'Notes folder, opening notes' },
 		{ id: 'appearance', label: 'Appearance', icon: 'sun', desc: 'Theme, accent, fonts' },
-		{ id: 'editor', label: 'Editor', icon: 'edit', desc: 'Ghost syntax, highlights, Vim' },
+		{ id: 'editor', label: 'Editor', icon: 'edit', desc: 'Ghost syntax, highlights, tabs, Vim' },
 		{ id: 'sync', label: 'Sync', icon: 'sync', desc: 'Git remotes, changes' },
 		{ id: 'ai', label: 'AI assistant', icon: 'ai', desc: 'Providers, web search, skills' },
 		{ id: 'encryption', label: 'Encryption', icon: 'key', desc: 'Encrypt notes with your key' },
@@ -277,6 +277,19 @@
 								{@render toggle(s.highlights, 'Highlights', () =>
 									app.updateSettings({ highlights: !s.highlights })
 								)}
+							</div>
+						</section>
+						<section class="group">
+							<h3>Notes</h3>
+							<div class="row">
+								<div class="label">
+									<span class="name">Tabs</span>
+									<span class="desc"
+										>Keep several notes open above the editor. New note opens a tab; a click in the
+										list opens in the current one{app.touch ? '' : ' (Ctrl+click: a new tab)'}</span
+									>
+								</div>
+								{@render toggle(s.tabs, 'Tabs', () => app.updateSettings({ tabs: !s.tabs }))}
 							</div>
 						</section>
 						<!-- No Vim on Android (on-screen keyboard; the editor ignores the setting there). -->
