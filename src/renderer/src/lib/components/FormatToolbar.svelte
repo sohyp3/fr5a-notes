@@ -6,7 +6,6 @@
 	import { wrap } from '../editor/MarkdownShortcuts';
 	import { lift, sink } from '../editor/ListBehavior';
 	import { cycleHeading, insertTag, toggleBullet } from '../editor/formatCommands';
-	import { toggleHighlight } from '../editor/HighlightBehavior';
 	import { getAppState } from '../stores/app.svelte';
 	import type { IconName } from '../icons';
 	import Icon from './Icon.svelte';
@@ -16,9 +15,13 @@
 		editor: Editor;
 		/** Insert menu (image, table): the editor owns what they open. */
 		insert: MenuItem[];
+		/** Highlight: the editor's color picker, over this button (again: closes it). Null: off. */
+		highlight?: ((button: HTMLElement) => void) | null;
+		/** The color picker is open. */
+		highlightOpen?: boolean;
 	}
 
-	let { editor, insert }: Props = $props();
+	let { editor, insert, highlight = null, highlightOpen = false }: Props = $props();
 	const app = getAppState();
 
 	let insertBtn = $state<HTMLButtonElement | null>(null);
@@ -57,10 +60,27 @@
 		insertAt = { x: r.left, y: r.top - 6 };
 	}
 
-	const actions = $derived<{ label: string; icon: IconName; do: () => void }[]>([
+	interface Action {
+		label: string;
+		icon: IconName;
+		do: (button: HTMLElement) => void;
+		/** Opens a popup; `on` while it's open. */
+		popup?: boolean;
+		on?: boolean;
+	}
+
+	const actions = $derived<Action[]>([
 		{ label: 'Bold', icon: 'bold', do: () => run(wrap('**')) },
-		...(app.settings.highlights
-			? [{ label: 'Highlight', icon: 'highlight' as const, do: () => run(toggleHighlight) }]
+		...(highlight
+			? [
+					{
+						label: 'Highlight',
+						icon: 'highlight' as const,
+						do: highlight,
+						popup: true,
+						on: highlightOpen
+					}
+				]
 			: []),
 		{ label: 'Heading', icon: 'heading', do: () => run(cycleHeading) },
 		{ label: 'List', icon: 'bullet', do: () => run(toggleBullet) },
@@ -87,11 +107,13 @@
 	{#each actions as a (a.label)}
 		<!-- pointerdown + preventDefault keeps focus (and the keyboard) in the editor. -->
 		<button
-			class="fmt"
+			class={['fmt', { on: a.on }]}
 			aria-label={a.label}
 			title={a.label}
+			aria-haspopup={a.popup ? 'true' : undefined}
+			aria-expanded={a.popup ? !!a.on : undefined}
 			onpointerdown={(e) => e.preventDefault()}
-			onclick={a.do}
+			onclick={(e) => a.do(e.currentTarget)}
 		>
 			<Icon name={a.icon} size={20} stroke={2} />
 		</button>

@@ -26,7 +26,11 @@ export const SHORTCUTS: Shortcut[] = [
 	{ keys: ['Mod', 'E'], desc: 'Inline code  `text`' },
 	{ keys: ['Mod', 'P'], desc: 'Pin / unpin the current note' },
 	{ keys: ['Mod', '⇧', 'X'], desc: 'Strikethrough  ~~text~~' },
-	{ keys: ['Mod', '⇧', 'H'], desc: 'Highlight the selection or line', feature: 'highlights' },
+	{
+		keys: ['Mod', '⇧', 'H'],
+		desc: 'Highlight the selection or line (last color picked), or clear it',
+		feature: 'highlights'
+	},
 	{ keys: ['Esc'], desc: 'Close overlay · exit Settings / Changes / Zen' }
 ];
 

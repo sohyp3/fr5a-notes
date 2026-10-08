@@ -11,6 +11,7 @@ import { uiStack, editorStack } from '../fonts';
 import { accentById, applyPalette, DEFAULT_ACCENT } from '../accents';
 import { setPinned, setLocked, setAiLocal, titleFromContent } from '../editor/markdown';
 import { ASSETS_DIR, assetName, relativeLink } from '../editor/images';
+import type { HighlightColor } from '../editor/highlights';
 import { syncErrorMessage } from '../sync';
 import { getAiSettings } from '../harness/config.svelte';
 import { folderPrivacy, isHidden } from '../harness/privacy';
@@ -102,13 +103,15 @@ export interface Settings {
 	ghost: boolean;
 	/** Paint `<!-- highlight -->` comments (and Mod+Shift+H to add them). */
 	highlights: boolean;
+	/** The highlight color last picked: what Mod+Shift+H paints. */
+	highlightColor: HighlightColor;
 	/** Accent color id (see accents.ts). */
 	accent: string;
 	/** AI harness on. Off: its code is never loaded, no button, no Mod+J. */
 	ai: boolean;
 	/** Open notes in view or edit mode. */
 	openIn: OpenIn;
-	/** Note tabs above the editor: New note opens a tab, a list click opens in the current one. */
+	/** Note tabs above the editor: every note opened (or created) gets a tab. */
 	tabs: boolean;
 	/** Encrypted notes. Off: no crypto code loaded, no key in memory, no buttons. */
 	encryption: boolean;
@@ -134,6 +137,7 @@ const DEFAULT_SETTINGS: Settings = {
 	vim: false,
 	ghost: true,
 	highlights: true,
+	highlightColor: 'yellow',
 	accent: DEFAULT_ACCENT,
 	ai: true,
 	openIn: 'auto',
@@ -598,8 +602,8 @@ class AppState {
 		}
 	}
 
-	/** Open a note: in its tab when it has one, else the current tab (`newTab`: a tab of its own). */
-	async openNote(id: string, newTab = false): Promise<void> {
+	/** Open a note: in its tab when it has one, else in a new tab after the current one. */
+	async openNote(id: string): Promise<void> {
 		this.swipeOpen = null;
 		if (id === this.activeId) {
 			this.view = 'editor';
@@ -628,7 +632,7 @@ class AppState {
 		this.baseline = { id, text: content.replace(/\r\n?/g, '\n') };
 		this.editing = this.defaultEditing();
 		this.editorSession++;
-		this.placeTab(id, slot, newTab);
+		this.placeTab(id, slot);
 		void platform.setState('lastOpenFile', id);
 	}
 
@@ -651,7 +655,7 @@ class AppState {
 		// A new note is for writing: always open it editable.
 		this.editing = true;
 		this.editorSession++;
-		this.placeTab(null, slot, true);
+		this.placeTab(null, slot);
 	}
 
 	// --- tabs (Settings → Editor) --------------------------------------------------
@@ -674,16 +678,13 @@ class AppState {
 
 	/**
 	 * Give the note just opened (null: the draft) a tab: its own when it has
-	 * one, else the one that was current (`slot`), else — `fresh`, or no tab
-	 * was current — a new one after it.
+	 * one, else a new one right after the tab that was current (`slot`), or
+	 * at the end when none was.
 	 */
-	private placeTab(id: string | null, slot: number, fresh: boolean): void {
+	private placeTab(id: string | null, slot: number): void {
 		if (!this.settings.tabs) return;
 		const tabs = [...this.tabs];
-		if (!tabs.includes(id)) {
-			if (slot >= 0 && !fresh) tabs[slot] = id;
-			else tabs.splice(slot >= 0 ? slot + 1 : tabs.length, 0, id);
-		}
+		if (!tabs.includes(id)) tabs.splice(slot >= 0 ? slot + 1 : tabs.length, 0, id);
 		// A draft left blank was dropped on the way out: so is its tab.
 		this.setTabs(tabs.filter((t) => t !== null || this.draft));
 	}

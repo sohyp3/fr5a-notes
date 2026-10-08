@@ -18,6 +18,21 @@ const editorText = (page: Page) =>
 		[...document.querySelectorAll('.ProseMirror p')].map((p) => p.textContent).join('\n')
 	);
 
+/** Highlighted stretches as `color:text` (the tint is split into spans; a stretch starts at `md-mark-s`). */
+const marks = (page: Page) =>
+	page.evaluate(() => {
+		const out: string[] = [];
+		for (const el of document.querySelectorAll('.ProseMirror .md-mark')) {
+			if (el.classList.contains('md-mark-s') || !out.length) {
+				const color = [...el.classList].find((c) => /^md-mark-[a-z]{3,}$/.test(c));
+				out.push(`${color?.slice(8)}:`);
+			}
+			out[out.length - 1] += el.textContent;
+		}
+		return out;
+	});
+const highlightPicker = (page: Page) => page.getByRole('toolbar', { name: 'Highlight color' });
+
 const sidebar = (page: Page) => page.locator('.sidebar-wrap');
 const list = (page: Page) => page.locator('.list-wrap');
 const editorPane = (page: Page) => page.locator('.editor-pane');
@@ -1764,9 +1779,7 @@ test('a long press lifts a picture to drag it; a plain swipe scrolls', async ({ 
 	await expect(page.getByRole('menu')).toHaveCount(0);
 });
 
-test('desktop: note tabs — new notes get a tab, list clicks reuse one, @tabs for the AI', async ({
-	browser
-}) => {
+test('desktop: note tabs — every note opened gets a tab, @tabs for the AI', async ({ browser }) => {
 	const { ctx, page } = await desktopPage(browser, {
 		'alpha.md': '# Alpha\n\none',
 		'beta.md': '# Beta\n\ntwo',
@@ -1790,13 +1803,21 @@ test('desktop: note tabs — new notes get a tab, list clicks reuse one, @tabs f
 	// The open note is the first tab.
 	await expect(tabs).toHaveText(['Alpha']);
 
-	// A list click opens in the current tab; Ctrl+click in a new one.
+	// A list click opens the note in a new tab, after the current one.
 	await list(page).getByText('Beta', { exact: true }).click();
+	await expect(tabs).toHaveText(['Alpha', 'Beta']);
+	await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
+	// Closing a tab in the background leaves the open note alone.
+	await page.getByRole('button', { name: 'Close Alpha' }).click();
 	await expect(tabs).toHaveText(['Beta']);
-	await list(page)
-		.getByText('Gamma', { exact: true })
-		.click({ modifiers: ['Control'] });
+	await list(page).getByText('Gamma', { exact: true }).click();
 	await expect(tabs).toHaveText(['Beta', 'Gamma']);
+	await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
+	// A note that has a tab switches to it rather than opening another.
+	await list(page).getByText('Beta', { exact: true }).click();
+	await expect(tabs).toHaveText(['Beta', 'Gamma']);
+	await expect(tabs.first()).toHaveAttribute('aria-selected', 'true');
+	await list(page).getByText('Gamma', { exact: true }).click();
 	await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
 	// New note: a tab of its own, named once the typed title is saved.
 	await page.keyboard.press('Control+n');
@@ -1850,7 +1871,9 @@ test('desktop: note tabs — new notes get a tab, list clicks reuse one, @tabs f
 	await ctx.close();
 });
 
-test('desktop: dividers draw by kind; highlights mark a line or a stretch', async ({ browser }) => {
+test('desktop: dividers draw by kind; highlights mark a line or a stretch, in colors', async ({
+	browser
+}) => {
 	const { ctx, page } = await desktopPage(browser, {
 		'hello.md': '# Hello\n\na\n---\nb\n* * *\nc\n___\nhello brave world\nlast'
 	});
@@ -1873,21 +1896,43 @@ test('desktop: dividers draw by kind; highlights mark a line or a stretch', asyn
 	await expect
 		.poll(() => editorText(page))
 		.toContain('<!-- highlight: 6-11 -->\nhello brave world');
-	await expect(page.locator('.md-mark')).toHaveText('brave');
+	await expect.poll(() => marks(page)).toEqual(['yellow:brave']);
 	await expect(page.locator('p.md-hl-comment')).toBeHidden();
 	// The stretch keeps to its word while the line is edited before it.
 	await page.keyboard.press('Home');
 	await page.keyboard.type('oh ');
 	await expect.poll(() => editorText(page)).toContain('<!-- highlight: 9-14 -->\noh hello brave');
-	await expect(page.locator('.md-mark')).toHaveText('brave');
+	await expect.poll(() => marks(page)).toEqual(['yellow:brave']);
 
-	// No selection: the whole line, from the Insert menu; again clears it.
+	// No selection: the whole line, in a color picked from Insert → Highlight….
 	await page.locator('.ProseMirror p', { hasText: 'last' }).click();
 	await page.getByRole('button', { name: 'Insert', exact: true }).click();
 	await page.getByRole('menuitem', { name: /Highlight/ }).click();
-	await expect.poll(() => editorText(page)).toContain('<!-- highlight -->\nlast');
-	await expect(page.locator('.md-mark')).toHaveText(['brave', 'last']);
+	await expect(highlightPicker(page).getByRole('button', { name: 'Yellow' })).toBeFocused();
+	await expect(
+		highlightPicker(page).getByRole('button', { name: 'Remove highlight' })
+	).toBeDisabled();
+	await highlightPicker(page).getByRole('button', { name: 'Green' }).click();
+	await expect(highlightPicker(page)).toHaveCount(0);
+	await expect.poll(() => editorText(page)).toContain('<!-- highlight: green -->\nlast');
+	await expect.poll(() => marks(page)).toEqual(['yellow:brave', 'green:last']);
+	// The picker shows the line's color; the shortcut clears, then paints the color last picked.
+	await page.getByRole('button', { name: 'Insert', exact: true }).click();
+	await page.getByRole('menuitem', { name: /Highlight/ }).click();
+	await expect(highlightPicker(page).getByRole('button', { name: 'Green' })).toHaveAttribute(
+		'aria-pressed',
+		'true'
+	);
+	await page.keyboard.press('Escape');
+	await page.locator('.ProseMirror p', { hasText: 'last' }).click();
 	await page.keyboard.press('Control+Shift+H');
+	await expect.poll(() => editorText(page)).toMatch(/brave world\nlast$/);
+	await page.keyboard.press('Control+Shift+H');
+	await expect.poll(() => editorText(page)).toContain('<!-- highlight: green -->\nlast');
+	// The eraser clears it.
+	await page.getByRole('button', { name: 'Insert', exact: true }).click();
+	await page.getByRole('menuitem', { name: /Highlight/ }).click();
+	await highlightPicker(page).getByRole('button', { name: 'Remove highlight' }).click();
 	await expect.poll(() => editorText(page)).toMatch(/brave world\nlast$/);
 
 	// Off in Settings: the comments are plain text again.
@@ -1923,15 +1968,18 @@ test('desktop: Insert → Table puts a blank table at the caret', async ({ brows
 	await ctx.close();
 });
 
-test('formatting toolbar: Highlight marks the line; Insert → Table sizes on a grid', async ({
+test('formatting toolbar: Highlight picks a color for the line; Insert → Table sizes on a grid', async ({
 	page
 }) => {
 	await openPlan(page);
 	await edit(page);
 	await page.locator('.ProseMirror p').last().tap();
 	await toolbar(page).getByRole('button', { name: 'Highlight', exact: true }).tap();
-	await expect.poll(() => editorText(page)).toContain('<!-- highlight -->\nfirst line');
-	await expect(page.locator('.md-mark')).toHaveText('first line');
+	await highlightPicker(page).getByRole('button', { name: 'Pink' }).tap();
+	await expect.poll(() => editorText(page)).toContain('<!-- highlight: pink -->\nfirst line');
+	await expect.poll(() => marks(page)).toEqual(['pink:first line']);
+	// The picker never took the focus (the keyboard stays up).
+	await expect(page.locator('.ProseMirror')).toBeFocused();
 
 	await page.keyboard.press('End');
 	await toolbar(page).getByRole('button', { name: 'Insert', exact: true }).tap();

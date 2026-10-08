@@ -3,8 +3,9 @@
 	import Icon from './Icon.svelte';
 
 	/**
-	 * Note tabs above the editor (Settings → Editor → Tabs). A click switches,
-	 * the × or a middle-click closes, + starts a new note in a new tab.
+	 * Note tabs above the editor (Settings → Editor → Tabs); every note opened
+	 * gets one. A click switches, the × or a middle-click closes, + starts a
+	 * new note in a new tab.
 	 */
 
 	const app = getAppState();
@@ -84,7 +85,7 @@
 		z-index: 6; /* above the "Nothing open" placeholder, which fills the pane */
 		display: flex;
 		align-items: center;
-		gap: 2px;
+		gap: 4px;
 		padding: 6px 8px 0 14px;
 		background: var(--bg-editor);
 		box-shadow: inset 0 -1px 0 var(--bg-hover);
@@ -103,9 +104,12 @@
 	.strip::-webkit-scrollbar {
 		display: none;
 	}
+	/* Sized to the title (so a tab is never mostly empty space), shrinking
+	   when crowded until the strip scrolls. */
 	.tab {
-		flex: 0 1 180px;
-		min-width: 90px;
+		flex: 0 1 auto;
+		min-width: 80px;
+		max-width: 200px;
 		display: flex;
 		align-items: center;
 		border-radius: 8px 8px 0 0;
@@ -146,11 +150,14 @@
 		border-radius: 6px;
 		color: var(--text-faint);
 	}
+	/* Always drawn (faint off the current tab): a hidden × left a blank gap
+	   at a tab's end, so + seemed to float away from an inactive last tab. */
 	.x {
 		width: 22px;
 		height: 22px;
 		margin-inline-end: 4px;
-		opacity: 0;
+		opacity: 0.5;
+		transition: opacity var(--dur-fast) ease;
 	}
 	.tab:hover .x,
 	.tab.on .x,
@@ -173,7 +180,6 @@
 	:global(html[data-touch]) .x {
 		width: 32px;
 		height: 32px;
-		opacity: 1;
 	}
 	:global(html[data-touch]) .new {
 		width: 40px;

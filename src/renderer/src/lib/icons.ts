@@ -18,6 +18,7 @@ import CircleDot from '@lucide/svelte/icons/circle-dot';
 import Copy from '@lucide/svelte/icons/copy';
 import Diff from '@lucide/svelte/icons/diff';
 import Ellipsis from '@lucide/svelte/icons/ellipsis';
+import Eraser from '@lucide/svelte/icons/eraser';
 import Eye from '@lucide/svelte/icons/eye';
 import FileText from '@lucide/svelte/icons/file-text';
 import Folder from '@lucide/svelte/icons/folder';
@@ -114,6 +115,7 @@ export const ICONS = {
 	table: Table,
 	image: ImagePlus,
 	highlight: Highlighter,
+	eraser: Eraser,
 	bold: Bold,
 	heading: Heading,
 	bullet: List,

@@ -8,7 +8,13 @@ import { cellRanges, findTables, pipeOffsets, tableHtml } from './tables';
 import { codeLines } from './blocks';
 import { findImages } from './images';
 import { imageWidget } from './imageView';
-import { coveredRanges, findHighlights, isHighlightComment, type Ranges } from './highlights';
+import {
+	coveredRanges,
+	findHighlights,
+	isHighlightComment,
+	type Ranges,
+	type Stretch
+} from './highlights';
 
 /**
  * MarkdownSyntax
@@ -35,8 +41,8 @@ import { coveredRanges, findHighlights, isHighlightComment, type Ranges } from '
  *   • Dividers draw a rule by kind: `---` a hairline, `***` three dots,
  *     `___` a double rule.
  *   • Highlights (option, see highlights.ts) tint the stretches their
- *     comment names; the comment lines stay hidden unless the caret is on
- *     one (or Ghost Syntax is off).
+ *     comment names, in its colors; the comment lines stay hidden unless the
+ *     caret is on one (or Ghost Syntax is off).
  */
 
 export interface MarkdownSyntaxOptions {
@@ -436,24 +442,53 @@ function buildDecorations(
 				decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: t.nodeClass }));
 		}
 
+		// Symbols Ghost Syntax collapses (no caret in their token), as line offsets.
+		const ghosted: [number, number][] = [];
 		for (const token of tokens) {
 			// A token is active when the selection overlaps its outer span.
 			const active = selTo >= token.outerFrom && selFrom <= token.outerTo;
 			for (const d of token.decos) {
 				const cls = d.syntax && active ? `${d.class} md-active` : d.class;
 				decorations.push(Decoration.inline(d.from, d.to, { class: cls }));
+				if (d.syntax && !active) ghosted.push([d.from - contentStart, d.to - contentStart]);
 			}
 		}
 
 		const hl = row ? undefined : marks.get(line);
 		if (hl)
-			for (const [a, b] of coveredRanges(text, hl))
-				decorations.push(
-					Decoration.inline(contentStart + a, contentStart + b, { class: 'md-mark' })
-				);
+			for (const stretch of coveredRanges(text, hl))
+				decorations.push(...markDecos(contentStart, stretch, ghosted));
 	});
 
 	return DecorationSet.create(state.doc, decorations);
+}
+
+/**
+ * A highlighted stretch: its tint, plus round padded ends on its first and
+ * last character. Other decorations split the tint into several spans, so
+ * only those two characters may round off. When Ghost Syntax collapses the
+ * symbols at an end (`**bold**`), the outermost visible character also gets
+ * one (`md-mark-vs` / `-ve`), worn only while they're collapsed (CSS).
+ */
+function markDecos(
+	start: number,
+	[a, b, color]: Stretch,
+	ghosted: [number, number][]
+): Decoration[] {
+	const shown = (i: number) => !ghosted.some(([x, y]) => i >= x && i < y);
+	let vs = a;
+	while (vs < b && !shown(vs)) vs++;
+	let ve = b - 1;
+	while (ve > vs && !shown(ve)) ve--;
+	const at = (i: number, cls: string) =>
+		Decoration.inline(start + i, start + i + 1, { class: cls });
+	return [
+		Decoration.inline(start + a, start + b, { class: `md-mark md-mark-${color}` }),
+		at(a, 'md-mark-s'),
+		at(b - 1, 'md-mark-e'),
+		...(vs < b && vs !== a ? [at(vs, 'md-mark-vs')] : []),
+		...(vs < b && ve !== b - 1 ? [at(ve, 'md-mark-ve')] : [])
+	];
 }
 
 interface SyntaxState {

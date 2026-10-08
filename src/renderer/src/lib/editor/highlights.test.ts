@@ -6,22 +6,44 @@ import {
 	coveredRanges,
 	findHighlights,
 	highlightComment,
-	parseHighlight
+	parseHighlight,
+	type HighlightColor
 } from './highlights';
-import { highlightPlugin, toggleHighlight } from './HighlightBehavior';
+import { highlightAt, highlightPlugin, setHighlight, toggleHighlight } from './HighlightBehavior';
 
 describe('highlight comments', () => {
 	it('parses the whole-line and ranged forms', () => {
-		expect(parseHighlight('<!-- highlight -->')).toEqual({ ranges: null });
+		expect(parseHighlight('<!-- highlight -->')).toEqual({ ranges: 'yellow' });
 		expect(parseHighlight(' <!--highlight: 4-12, 20 - 25-->')).toEqual({
 			ranges: [
-				[4, 12],
-				[20, 25]
+				[4, 12, 'yellow'],
+				[20, 25, 'yellow']
 			]
 		});
 		expect(parseHighlight('<!-- highlight: abc -->')).toBeNull();
 		expect(parseHighlight('<!-- highlights -->')).toBeNull();
-		expect(highlightComment([[1, 3]])).toBe('<!-- highlight: 1-3 -->');
+		expect(highlightComment([[1, 3, 'yellow']])).toBe('<!-- highlight: 1-3 -->');
+	});
+
+	it('reads and writes colors: the whole line, or per stretch', () => {
+		expect(parseHighlight('<!-- highlight: Green -->')).toEqual({ ranges: 'green' });
+		expect(parseHighlight('<!-- highlight: 0-3, pink 9-14 -->')).toEqual({
+			ranges: [
+				[0, 3, 'yellow'],
+				[9, 14, 'pink']
+			]
+		});
+		expect(parseHighlight('<!-- highlight: teal -->')).toBeNull();
+		expect(parseHighlight('<!-- highlight: pink -->')).not.toBeNull();
+		expect(parseHighlight('<!-- highlight: 1-2 blue -->')).toBeNull();
+		expect(highlightComment('yellow')).toBe('<!-- highlight -->');
+		expect(highlightComment('purple')).toBe('<!-- highlight: purple -->');
+		expect(
+			highlightComment([
+				[0, 3, 'yellow'],
+				[9, 14, 'blue']
+			])
+		).toBe('<!-- highlight: 0-3, blue 9-14 -->');
 	});
 
 	it('marks the line below, or above when no text follows', () => {
@@ -47,19 +69,34 @@ describe('highlight comments', () => {
 	});
 
 	it('leaves the block prefix out of a whole-line highlight', () => {
-		expect(coveredRanges('- item  ', [null])).toEqual([[2, 6]]);
-		expect(coveredRanges('## Head', [[[0, 4]], null])).toEqual([[0, 7]]);
+		expect(coveredRanges('- item  ', ['yellow'])).toEqual([[2, 6, 'yellow']]);
+		expect(coveredRanges('## Head', [[[0, 4, 'yellow']], 'yellow'])).toEqual([[0, 7, 'yellow']]);
 	});
 
 	it('adds, clears and folds stretches into a whole line', () => {
 		const text = 'hello world';
-		expect(applyRange(text, [], 0, 5, true)).toEqual([[0, 5]]);
-		expect(applyRange(text, [[0, 5]], 5, 11, true)).toBeNull();
-		expect(applyRange(text, [[0, 11]], 2, 4, false)).toEqual([
-			[0, 2],
-			[4, 11]
+		expect(applyRange(text, [], 0, 5, 'yellow')).toEqual([[0, 5, 'yellow']]);
+		expect(applyRange(text, [[0, 5, 'yellow']], 5, 11, 'yellow')).toBe('yellow');
+		expect(applyRange(text, [[0, 11, 'yellow']], 2, 4, null)).toEqual([
+			[0, 2, 'yellow'],
+			[4, 11, 'yellow']
 		]);
-		expect(applyRange(text, [[0, 5]], 0, 5, false)).toBeUndefined();
+		expect(applyRange(text, [[0, 5, 'yellow']], 0, 5, null)).toBeUndefined();
+	});
+
+	it('paints a color over another, without overlaps', () => {
+		const text = 'hello world';
+		expect(applyRange(text, [[0, 11, 'yellow']], 2, 4, 'green')).toEqual([
+			[0, 2, 'yellow'],
+			[2, 4, 'green'],
+			[4, 11, 'yellow']
+		]);
+		// Touching stretches of one color merge; of two colors they don't.
+		expect(applyRange(text, [[0, 5, 'blue']], 5, 8, 'pink')).toEqual([
+			[0, 5, 'blue'],
+			[5, 8, 'pink']
+		]);
+		expect(applyRange(text, [[0, 5, 'blue']], 5, 11, 'blue')).toBe('blue');
 	});
 });
 
@@ -95,9 +132,13 @@ function at(s: EditorState, line: number, offset: number): number {
 	return pos + offset;
 }
 
-function toggle(s: EditorState, from: number, to = from): EditorState {
-	let next = s.apply(s.tr.setSelection(TextSelection.create(s.doc, from, to)));
-	toggleHighlight(next, (tr) => (next = next.apply(tr)));
+function select(s: EditorState, from: number, to = from): EditorState {
+	return s.apply(s.tr.setSelection(TextSelection.create(s.doc, from, to)));
+}
+
+function toggle(s: EditorState, from: number, to = from, color: HighlightColor = 'yellow') {
+	let next = select(s, from, to);
+	toggleHighlight(color)(next, (tr) => (next = next.apply(tr)));
 	return next;
 }
 
@@ -119,6 +160,36 @@ describe('toggling highlights', () => {
 		expect(textOf(cleared)).toBe('<!-- highlight: 0-1, 3-5, 12-17 -->\nhello brave world');
 	});
 
+	it('paints a color, and clears whatever color is there', () => {
+		const s = stateOf('hello brave world');
+		const one = toggle(s, at(s, 0, 0), at(s, 0, 11));
+		let two = select(one, at(one, 1, 6), at(one, 1, 11));
+		setHighlight('green')(two, (tr) => (two = two.apply(tr)));
+		expect(textOf(two)).toBe('<!-- highlight: 0-6, green 6-11 -->\nhello brave world');
+		// All highlighted (two colors): the shortcut clears.
+		expect(textOf(toggle(two, at(two, 1, 0), at(two, 1, 11), 'green'))).toBe('hello brave world');
+		let picked = select(two, at(two, 1, 0), at(two, 1, 17));
+		setHighlight('green')(picked, (tr) => (picked = picked.apply(tr)));
+		expect(textOf(picked)).toBe('<!-- highlight: green -->\nhello brave world');
+	});
+
+	it('tells the picker the selection’s color', () => {
+		const s = stateOf('<!-- highlight: 0-6, blue 6-11 -->\nhello brave world');
+		expect(highlightAt(select(s, at(s, 1, 7), at(s, 1, 9)))).toEqual({
+			color: 'blue',
+			any: true,
+			can: true
+		});
+		expect(highlightAt(select(s, at(s, 1, 2), at(s, 1, 9)))).toMatchObject({
+			color: null,
+			any: true
+		});
+		expect(highlightAt(select(s, at(s, 1, 12), at(s, 1, 16)))).toMatchObject({
+			color: null,
+			any: false
+		});
+	});
+
 	it('marks each line of a selection across lines', () => {
 		const s = stateOf('first line\nsecond line');
 		const on = toggle(s, at(s, 0, 6), at(s, 1, 6));
@@ -129,6 +200,12 @@ describe('toggling highlights', () => {
 });
 
 describe('highlights follow edits', () => {
+	it('keeps each stretch’s color as it moves', () => {
+		const s = stateOf('<!-- highlight: 0-5, pink 6-11 -->\nhello world');
+		const next = s.apply(s.tr.insertText('oh ', at(s, 1, 0)));
+		expect(textOf(next)).toBe('<!-- highlight: 3-8, pink 9-14 -->\noh hello world');
+	});
+
 	const typed = (s: EditorState, pos: number, text: string) => s.apply(s.tr.insertText(text, pos));
 
 	it('shifts offsets when text is typed before them, grows when typed inside', () => {

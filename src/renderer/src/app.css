@@ -78,8 +78,12 @@
 	--del-strike: rgba(168, 58, 49, 0.4);
 	--table-line: rgba(0, 0, 0, 0.11);
 	--table-head: rgba(0, 0, 0, 0.035);
-	/* Highlighter marker: a fixed yellow, so it never reads as the accent (tags). */
-	--mark-bg: rgba(255, 206, 0, 0.38);
+	/* Highlighter colors (highlights.ts): fixed, so they never read as the accent (tags). */
+	--mark-yellow: rgba(255, 204, 0, 0.36);
+	--mark-green: rgba(64, 196, 99, 0.26);
+	--mark-blue: rgba(56, 145, 255, 0.22);
+	--mark-pink: rgba(255, 82, 145, 0.22);
+	--mark-purple: rgba(156, 102, 255, 0.22);
 }
 
 /* ---- dark ---- */
@@ -117,7 +121,11 @@
 	--del-strike: rgba(242, 149, 140, 0.45);
 	--table-line: rgba(255, 255, 255, 0.13);
 	--table-head: rgba(255, 255, 255, 0.045);
-	--mark-bg: rgba(255, 196, 0, 0.26);
+	--mark-yellow: rgba(255, 196, 0, 0.27);
+	--mark-green: rgba(72, 204, 108, 0.25);
+	--mark-blue: rgba(82, 156, 255, 0.29);
+	--mark-pink: rgba(255, 96, 156, 0.27);
+	--mark-purple: rgba(170, 124, 255, 0.3);
 }
 
 /* Follow OS theme until the user explicitly overrides via the toggle. */
@@ -638,12 +646,58 @@ html.md-image-dragging * {
 }
 
 /* --- highlights (Settings → Editor) ---
-   The tint; its `<!-- highlight -->` comment line stays hidden unless the
-   caret is on it, or Ghost Syntax is off (symbols always visible). */
+   The tint, in the stretch's color, a little taller than the text; its
+   `<!-- highlight -->` comment line stays hidden unless the caret is on it,
+   or Ghost Syntax is off (symbols always visible). */
 .md-mark {
-	background: var(--mark-bg);
+	--mark: var(--mark-yellow);
+	background: var(--mark);
+	padding-block: 0.1em;
 	-webkit-box-decoration-break: clone;
 	box-decoration-break: clone;
+}
+.md-mark-green {
+	--mark: var(--mark-green);
+}
+.md-mark-blue {
+	--mark: var(--mark-blue);
+}
+.md-mark-pink {
+	--mark: var(--mark-pink);
+}
+.md-mark-purple {
+	--mark: var(--mark-purple);
+}
+/* Round, padded ends on a stretch's first / last character (the tint is split
+   into several spans, so only they may round). The padding is pulled back
+   with a margin, so marking text never moves it. Ghost Syntax collapsing the
+   symbols at an end hands its round end to the outermost visible character
+   (`-vs` / `-ve`) — until hovering the line shows the symbols again. */
+.md-mark-s,
+:root:not([data-ghost='off']) .md-mark-vs {
+	padding-inline-start: 0.22em;
+	margin-inline-start: -0.22em;
+	border-start-start-radius: 0.32em;
+	border-end-start-radius: 0.32em;
+}
+.md-mark-e,
+:root:not([data-ghost='off']) .md-mark-ve {
+	padding-inline-end: 0.22em;
+	margin-inline-end: -0.22em;
+	border-start-end-radius: 0.32em;
+	border-end-end-radius: 0.32em;
+}
+:root:not([data-ghost='off']):not([data-hover='none']) .ProseMirror p:hover .md-mark-vs {
+	padding-inline-start: 0;
+	margin-inline-start: 0;
+	border-start-start-radius: 0;
+	border-end-start-radius: 0;
+}
+:root:not([data-ghost='off']):not([data-hover='none']) .ProseMirror p:hover .md-mark-ve {
+	padding-inline-end: 0;
+	margin-inline-end: 0;
+	border-start-end-radius: 0;
+	border-end-end-radius: 0;
 }
 .ProseMirror p.md-hl-comment {
 	display: none;

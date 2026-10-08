@@ -287,8 +287,8 @@
 								<div class="label">
 									<span class="name">Tabs</span>
 									<span class="desc"
-										>Keep several notes open above the editor. New note opens a tab; a click in the
-										list opens in the current one{app.touch ? '' : ' (Ctrl+click: a new tab)'}</span
+										>Keep several notes open above the editor. Each note you open or create gets a
+										tab of its own</span
 									>
 								</div>
 								{@render toggle(s.tabs, 'Tabs', () => app.updateSettings({ tabs: !s.tabs }))}

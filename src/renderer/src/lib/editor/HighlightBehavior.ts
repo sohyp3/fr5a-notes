@@ -16,16 +16,20 @@ import {
 	isHighlightComment,
 	lineSpan,
 	normalizeRanges,
+	touches,
 	type Highlight,
-	type Ranges
+	type HighlightColor,
+	type Ranges,
+	type Stretch
 } from './highlights';
 
 /**
  * Editing highlights (see highlights.ts; only loaded while Settings → Editor →
  * Highlights is on):
  *
- *   Mod+Shift+H   highlight the selection — or clear it when it's all
- *                 highlighted; with no selection, the whole line
+ *   Mod+Shift+H   highlight the selection in the color last picked — or
+ *                 clear it when it's all highlighted; with no selection,
+ *                 the whole line (the picker: `setHighlight`)
  *   typing        a highlighted stretch keeps to its text: the comment's
  *                 offsets follow edits made earlier in the line
  *   Backspace /   joining a line across a (hidden) highlight comment joins it
@@ -67,9 +71,17 @@ function rewrite(
 		tr.insert(tr.mapping.map(starts[target], -1), paragraph(doc, highlightComment(ranges)));
 }
 
-/** Highlight the selection, or clear it when it's all highlighted; no selection: the whole line. */
-export const toggleHighlight: Command = (state, dispatch) => {
-	const { lines, starts } = docLines(state);
+interface Part {
+	line: number;
+	from: number;
+	to: number;
+	/** What the line has highlighted now. */
+	covered: Stretch[];
+}
+
+/** The selected stretch of each line in the selection; no selection: the caret's whole line. */
+function selectedParts(state: EditorState): Part[] {
+	const { lines } = docLines(state);
 	const all = findHighlights(lines);
 	const targets = byTarget(all);
 	// Lines that show as something else (tables, pictures) can't be highlighted.
@@ -78,7 +90,7 @@ export const toggleHighlight: Command = (state, dispatch) => {
 	const { $from, $to, empty } = state.selection;
 	const first = $from.index(0);
 	const last = $to.index(0);
-	const parts: { line: number; from: number; to: number; covered: [number, number][] }[] = [];
+	const parts: Part[] = [];
 	for (let i = first; i <= last; i++) {
 		if (skip.has(i) || isHighlightComment(lines[i])) continue;
 		const text = lines[i];
@@ -93,18 +105,63 @@ export const toggleHighlight: Command = (state, dispatch) => {
 		);
 		parts.push({ line: i, from, to, covered });
 	}
-	if (!parts.length) return false;
-	const on = !parts.every((p) => isCovered(p.covered, p.from, p.to));
-	if (dispatch) {
-		const tr = state.tr;
-		for (const p of parts) {
-			const next = applyRange(lines[p.line], p.covered, p.from, p.to, on);
-			rewrite(tr, state.doc, starts, p.line, targets.get(p.line) ?? [], next);
-		}
-		dispatch(tr.setMeta(key, true).scrollIntoView());
+	return parts;
+}
+
+/** Paint every part in `color` (null: clear them), in one transaction. */
+function paint(state: EditorState, parts: Part[], color: HighlightColor | null): Transaction {
+	const { lines, starts } = docLines(state);
+	const targets = byTarget(findHighlights(lines));
+	const tr = state.tr;
+	for (const p of parts) {
+		const next = applyRange(lines[p.line], p.covered, p.from, p.to, color);
+		rewrite(tr, state.doc, starts, p.line, targets.get(p.line) ?? [], next);
 	}
-	return true;
-};
+	return tr.setMeta(key, true).scrollIntoView();
+}
+
+/** Highlight the selection in `color`, or (null) clear it; no selection: the whole line. */
+export function setHighlight(color: HighlightColor | null): Command {
+	return (state, dispatch) => {
+		const parts = selectedParts(state);
+		if (!parts.length) return false;
+		dispatch?.(paint(state, parts, color));
+		return true;
+	};
+}
+
+/** Highlight the selection in `color`, or clear it when it's all highlighted (any color). */
+export function toggleHighlight(color: HighlightColor): Command {
+	return (state, dispatch) => {
+		const parts = selectedParts(state);
+		if (!parts.length) return false;
+		const all = parts.every((p) => isCovered(p.covered, p.from, p.to));
+		dispatch?.(paint(state, parts, all ? null : color));
+		return true;
+	};
+}
+
+/**
+ * The selection's highlight, for the picker: the color all of it is
+ * highlighted in (null: none, or mixed), whether any of it is highlighted,
+ * and whether it can be highlighted at all.
+ */
+export function highlightAt(state: EditorState): {
+	color: HighlightColor | null;
+	any: boolean;
+	can: boolean;
+} {
+	const parts = selectedParts(state);
+	const colors = new Set(parts.map((p) => p.covered.find(([a, b]) => a < p.to && b > p.from)?.[2]));
+	const [only] = colors;
+	const one =
+		colors.size === 1 && only && parts.every((p) => isCovered(p.covered, p.from, p.to, only));
+	return {
+		color: one ? only : null,
+		any: parts.some((p) => touches(p.covered, p.from, p.to)),
+		can: parts.length > 0
+	};
+}
 
 /**
  * Join text lines `p` and `n` (only highlight comments between them) into
@@ -126,7 +183,7 @@ function join(view: EditorView, p: number, n: number): boolean {
 			...coveredRanges(
 				lines[n],
 				(targets.get(n) ?? []).map((h) => h.ranges)
-			).map(([a, b]): [number, number] => [a + len, b + len])
+			).map(([a, b, c]): Stretch => [a + len, b + len, c])
 		],
 		text.length
 	);
@@ -135,7 +192,9 @@ function join(view: EditorView, p: number, n: number): boolean {
 	const top = Math.min(p, ...mine.map((h) => h.comment));
 	const bottom = Math.max(n, ...mine.map((h) => h.comment));
 	const nodes = [
-		...(ranges.length ? [paragraph(state.doc, highlightComment(whole ? null : ranges))] : []),
+		...(ranges.length
+			? [paragraph(state.doc, highlightComment(whole ? ranges[0][2] : ranges))]
+			: []),
 		paragraph(state.doc, text)
 	];
 	const from = starts[top];
@@ -164,8 +223,8 @@ function joinAcross(view: EditorView, back: boolean): boolean {
 	return back ? join(view, j, i) : join(view, i, j);
 }
 
-function sameRanges(a: [number, number][], b: [number, number][]): boolean {
-	return a.length === b.length && a.every(([x, y], k) => x === b[k][0] && y === b[k][1]);
+function sameRanges(a: Stretch[], b: Stretch[]): boolean {
+	return a.length === b.length && a.every((s, k) => s.every((v, j) => v === b[k][j]));
 }
 
 /**
@@ -180,7 +239,7 @@ function followEdits(
 ): Transaction | null {
 	if (!trs.some((tr) => tr.docChanged) || trs.some((tr) => tr.getMeta(key))) return null;
 	const old = docLines(oldState);
-	const ranged = findHighlights(old.lines).filter((h) => h.ranges);
+	const ranged = findHighlights(old.lines).filter((h) => typeof h.ranges !== 'string');
 	if (!ranged.length) return null;
 	const mapping = new Mapping();
 	for (const tr of trs) mapping.appendMapping(tr.mapping);
@@ -192,14 +251,15 @@ function followEdits(
 		if (at.deleted) continue;
 		const c = newState.doc.resolve(at.pos).index(0);
 		const nh = now.get(c);
-		if (!nh?.ranges || cur.lines[c] !== old.lines[h.comment]) continue;
+		if (!nh || typeof nh.ranges === 'string' || cur.lines[c] !== old.lines[h.comment]) continue;
 		if (cur.lines[nh.target] === old.lines[h.target]) continue;
 		const base = old.starts[h.target] + 1;
 		const into = cur.starts[nh.target] + 1;
 		const moved = normalizeRanges(
-			h.ranges!.map(([a, b]): [number, number] => [
+			(h.ranges as Stretch[]).map(([a, b, color]): Stretch => [
 				mapping.map(base + a, 1) - into,
-				mapping.map(base + b, -1) - into
+				mapping.map(base + b, -1) - into,
+				color
 			]),
 			cur.lines[nh.target].length
 		);
@@ -228,14 +288,24 @@ export function highlightPlugin(): Plugin {
 	});
 }
 
-export const HighlightBehavior = Extension.create({
+export interface HighlightBehaviorOptions {
+	/** The color Mod+Shift+H paints: the one last picked. */
+	color: () => HighlightColor;
+}
+
+export const HighlightBehavior = Extension.create<HighlightBehaviorOptions>({
 	name: 'highlightBehavior',
 	// Ahead of the core keymap's Backspace / Delete joins.
 	priority: 150,
 
+	addOptions() {
+		return { color: () => 'yellow' };
+	},
+
 	addKeyboardShortcuts() {
 		return {
-			'Mod-Shift-h': () => toggleHighlight(this.editor.state, this.editor.view.dispatch)
+			'Mod-Shift-h': () =>
+				toggleHighlight(this.options.color())(this.editor.state, this.editor.view.dispatch)
 		};
 	},
 

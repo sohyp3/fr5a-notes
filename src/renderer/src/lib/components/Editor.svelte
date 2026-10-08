@@ -13,7 +13,8 @@
 	import { ListBehavior } from '../editor/ListBehavior';
 	import { TableBehavior, insertTable } from '../editor/TableBehavior';
 	import { ImageBehavior, insertImages } from '../editor/ImageBehavior';
-	import { HighlightBehavior, toggleHighlight } from '../editor/HighlightBehavior';
+	import { HighlightBehavior, highlightAt, setHighlight } from '../editor/HighlightBehavior';
+	import { isHighlightColor, type HighlightColor } from '../editor/highlights';
 	import { imageSource } from '../editor/images';
 	import { TagSuggest, flattenTagTree } from '../editor/TagSuggest';
 	import { Vim, type VimMode } from '../editor/vim';
@@ -29,6 +30,7 @@
 	import FormatToolbar from './FormatToolbar.svelte';
 	import ActionMenu, { type MenuItem } from './ActionMenu.svelte';
 	import TablePicker from './TablePicker.svelte';
+	import HighlightPicker from './HighlightPicker.svelte';
 	import NoteTabs from './NoteTabs.svelte';
 	import Icon from './Icon.svelte';
 	import { platform } from '../platform';
@@ -50,6 +52,18 @@
 	let insertBtn = $state<HTMLButtonElement | null>(null);
 	let insertAt = $state<{ x: number; y: number } | null>(null);
 	let tableAt = $state<{ x: number; y: number; sheet: boolean } | null>(null);
+	/**
+	 * The highlight color picker (shown while `open`). Kept once closed: the
+	 * picker still reads its props while it fades out.
+	 */
+	let highlightPick = $state<{
+		open: boolean;
+		at: { x: number; y: number };
+		touch: boolean;
+		trigger: HTMLElement | null;
+		color: HighlightColor | null;
+		any: boolean;
+	} | null>(null);
 	let imageInput = $state<HTMLInputElement | null>(null);
 	// Suppress auto-save while we programmatically replace content.
 	let loading = false;
@@ -111,7 +125,7 @@
 			// Fed from the store's tag tree (itself the SQLite index over IPC).
 			TagSuggest.configure({ getTags: () => flattenTagTree(app.tags) })
 		];
-		if (highlights) extensions.push(HighlightBehavior);
+		if (highlights) extensions.push(HighlightBehavior.configure({ color: lastHighlight }));
 		if (vimOn) {
 			extensions.push(Vim.configure({ onModeChange: (m) => (vimMode = m) }));
 		}
@@ -332,21 +346,54 @@
 		}
 	]);
 
+	/** The color last picked (Mod+Shift+H paints it). */
+	function lastHighlight(): HighlightColor {
+		const c = app.settings.highlightColor;
+		return isHighlightColor(c) ? c : 'yellow';
+	}
+
+	/**
+	 * The highlight color picker: over the touch toolbar's Highlight button
+	 * (`trigger`, which toggles it), or below the header's Insert button.
+	 */
+	function openHighlight(trigger: HTMLElement | null): void {
+		if (highlightPick?.open) {
+			highlightPick.open = false;
+			return;
+		}
+		const r = (trigger ?? insertBtn)?.getBoundingClientRect();
+		if (!editor || !r) return;
+		const { color, any } = highlightAt(editor.state);
+		const x = r.left + r.width / 2;
+		highlightPick = {
+			open: true,
+			at: trigger ? { x, y: r.top - 6 } : { x, y: r.bottom + 6 },
+			touch: !!trigger,
+			trigger,
+			color,
+			any
+		};
+	}
+
+	function pickHighlight(color: HighlightColor | null): void {
+		if (!editor) return;
+		setHighlight(color)(editor.state, editor.view.dispatch);
+		if (color && color !== app.settings.highlightColor)
+			app.updateSettings({ highlightColor: color });
+		editor.view.focus();
+	}
+
 	/** Header Insert menu (mouse): the touch toolbar has its own Highlight button. */
 	const headerInsertItems = $derived.by((): MenuItem[] => [
 		...insertItems,
 		...(highlights
 			? [
 					{
-						label: 'Highlight',
+						label: 'Highlight…',
 						icon: 'highlight' as const,
 						hint: platform.platform === 'darwin' ? '⌘⇧H' : 'Ctrl+Shift+H',
 						divider: true,
-						action: () => {
-							if (!editor) return;
-							toggleHighlight(editor.state, editor.view.dispatch);
-							editor.view.focus();
-						}
+						action: () => openHighlight(null)
 					}
 				]
 			: [])
@@ -440,7 +487,7 @@
 				{#if editable && !app.touch}
 					<button
 						bind:this={insertBtn}
-						class={['act icon', { on: !!insertAt || !!tableAt }]}
+						class={['act icon', { on: !!insertAt || !!tableAt || !!highlightPick?.open }]}
 						title="Insert image, table or highlight"
 						aria-label="Insert"
 						aria-haspopup="menu"
@@ -577,7 +624,12 @@
 		</div>
 
 		{#if app.touch && editor && editable}
-			<FormatToolbar {editor} insert={insertItems} />
+			<FormatToolbar
+				{editor}
+				insert={insertItems}
+				highlight={highlights ? openHighlight : null}
+				highlightOpen={!!highlightPick?.open}
+			/>
 		{/if}
 		<input
 			bind:this={imageInput}
@@ -621,6 +673,19 @@
 		trigger={insertBtn}
 		onpick={(cols, rows) => editor && insertTable(editor.view, cols, rows)}
 		onclose={() => (tableAt = null)}
+	/>
+{/if}
+
+{#if highlightPick?.open}
+	<HighlightPicker
+		at={highlightPick.at}
+		above={highlightPick.touch}
+		current={highlightPick.color}
+		any={highlightPick.any}
+		focus={!highlightPick.touch}
+		trigger={highlightPick.trigger}
+		onpick={pickHighlight}
+		onclose={() => highlightPick && (highlightPick.open = false)}
 	/>
 {/if}
 
