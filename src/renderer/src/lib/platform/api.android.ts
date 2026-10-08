@@ -1,5 +1,5 @@
 import { App } from '@capacitor/app';
-import { CapacitorHttp } from '@capacitor/core';
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { Directory, Encoding, Filesystem, type FileInfo } from '@capacitor/filesystem';
 import { Preferences } from '@capacitor/preferences';
 import { SecureStorage } from '@aparajita/capacitor-secure-storage';
@@ -17,7 +17,7 @@ import type {
 	SyncResult
 } from '../../../../shared/types';
 import { createCapFs } from './git/capFs';
-import { createCapHttp } from './git/capHttp';
+import { createCapHttp, toBase64 } from './git/capHttp';
 import { classify, createIsoGitSync, GitSyncError } from './git/isoGit';
 import {
 	byRepo,
@@ -31,6 +31,8 @@ import {
 import {
 	folderDeleteError,
 	folderMoveError,
+	isHiddenPath,
+	isImagePath,
 	noteExt,
 	noteMoveError
 } from '../../../../shared/paths';
@@ -127,7 +129,8 @@ export function buildMeta(id: string, absPath: string, raw: string, mtime: numbe
 	let title = '';
 	for (const line of body.split('\n')) {
 		const t = line.trim();
-		if (!t) continue;
+		// Comment lines (highlights, image sizes) are never the title.
+		if (!t || /^<!--.*-->$/.test(t)) continue;
 		title = t.replace(/^#{1,6}\s*/, '');
 		break;
 	}
@@ -663,6 +666,28 @@ export function createAndroidPlatform(): PlatformApi {
 		async setSecret(name, value) {
 			if (value) await SecureStorage.setItem(SECRET_PREFIX + name, value);
 			else await SecureStorage.remove(SECRET_PREFIX + name);
+		},
+
+		assetUrl(path) {
+			// Served by Capacitor's local server (same origin as the app).
+			const file = `file://${rootUri}/${path.split('/').map(encodeURIComponent).join('/')}`;
+			return Capacitor.convertFileSrc(file);
+		},
+		async saveAsset(path, data) {
+			await ready;
+			const dest = safeSubdir(path);
+			if (!dest || !isImagePath(dest) || isHiddenPath(dest))
+				throw new Error(`Not an image path: ${path}`);
+			const id = await uniqueId(dest);
+			// Not a note: no reindex; the change event lets the sidebar learn of a new folder.
+			await Filesystem.writeFile({
+				path: rel(id),
+				directory: DIR,
+				data: toBase64(data),
+				recursive: true
+			});
+			emitChange();
+			return id;
 		},
 
 		async readMeta(path) {

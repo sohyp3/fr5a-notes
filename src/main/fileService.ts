@@ -4,7 +4,14 @@ import chokidar, { type FSWatcher } from 'chokidar';
 import { NoteIndex } from './db';
 import { parseTags } from './tags';
 import type { NoteMeta } from '../shared/types';
-import { folderDeleteError, folderMoveError, noteExt, noteMoveError } from '../shared/paths';
+import {
+	folderDeleteError,
+	folderMoveError,
+	isHiddenPath,
+	isImagePath,
+	noteExt,
+	noteMoveError
+} from '../shared/paths';
 import { noteSnippet } from '../shared/snippet';
 import { isEncryptedNote } from '../shared/encrypted';
 
@@ -76,7 +83,8 @@ export class FileService {
 		let title = '';
 		for (const line of lines) {
 			const t = line.trim();
-			if (!t) continue;
+			// Comment lines (highlights, image sizes) are never the title.
+			if (!t || /^<!--.*-->$/.test(t)) continue;
 			title = t.replace(/^#{1,6}\s*/, '');
 			break;
 		}
@@ -187,6 +195,32 @@ export class FileService {
 		await fs.writeFile(absPath, content, 'utf8');
 		await this.indexFile(absPath);
 		this.scheduleChange();
+	}
+
+	/**
+	 * Absolute path of a workspace image, for the `fr5a:` protocol: null for
+	 * anything outside the workspace or that isn't an image.
+	 */
+	assetPath(rel: string): string | null {
+		const root = path.resolve(this.root);
+		const abs = path.resolve(root, rel.replace(/^[/\\]+/, ''));
+		return abs.startsWith(root + path.sep) && isImagePath(abs) ? abs : null;
+	}
+
+	/**
+	 * Write an image (pasted / dropped into a note) at workspace path `rel`; a
+	 * taken name gets a numeric suffix. Returns the path written.
+	 */
+	async saveAsset(rel: string, data: Uint8Array): Promise<string> {
+		const dest = this.safeSubdir(rel);
+		if (!dest || !isImagePath(dest) || isHiddenPath(dest))
+			throw new Error(`Not an image path: ${rel}`);
+		const target = await this.uniquePath(path.join(this.root, dest));
+		await fs.mkdir(path.dirname(target), { recursive: true });
+		await fs.writeFile(target, data);
+		// A new `assets/` folder shows up in the sidebar.
+		this.scheduleChange();
+		return this.toId(target).replace(/\\/g, '/');
 	}
 
 	/**

@@ -1,6 +1,7 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, Menu, net } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Menu, net, protocol } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { promises as fs } from 'node:fs';
 import Store from 'electron-store';
 import { NoteIndex } from './db';
@@ -55,6 +56,12 @@ const RENDERER_KEYS = new Set<StateKey>([
 	'theme',
 	'ai',
 	'aiPrices'
+]);
+
+// Workspace images in notes load as `fr5a://workspace/<path>` (see `assetPath`).
+// Schemes must be registered before the app is ready.
+protocol.registerSchemesAsPrivileged([
+	{ scheme: 'fr5a', privileges: { standard: true, secure: true, stream: true } }
 ]);
 
 const secrets = createSecrets(store);
@@ -314,6 +321,10 @@ function registerIpc(): void {
 	);
 	ipcMain.handle(Channels.metaList, (_e, rel: string) => listMeta(root(), rel));
 	ipcMain.handle(Channels.metaDelete, (_e, rel: string) => deleteMeta(root(), rel));
+	ipcMain.handle(Channels.assetSave, (_e, rel: string, data: Uint8Array) => {
+		if (!fileService) throw new Error('No workspace open');
+		return fileService.saveAsset(rel, data);
+	});
 	// Read-only git status of the notes (root + nested repos), for the Changes view.
 	ipcMain.handle(Channels.gitChanges, async () => {
 		const r = fileService?.root;
@@ -350,6 +361,17 @@ app.whenReady().then(async () => {
 	app.setAppUserModelId('com.fr5a.app');
 
 	registerIpc();
+	// Images only, and only inside the open workspace.
+	protocol.handle('fr5a', (req) => {
+		const url = new URL(req.url);
+		let abs: string | null | undefined = null;
+		try {
+			if (url.host === 'workspace') abs = fileService?.assetPath(decodeURIComponent(url.pathname));
+		} catch {
+			// Malformed escape: not found.
+		}
+		return abs ? net.fetch(pathToFileURL(abs).toString()) : new Response(null, { status: 404 });
+	});
 	createWindow();
 
 	// Re-open the last workspace if it still exists.

@@ -54,6 +54,12 @@ export function installFakeApi(): void {
 		}
 	};
 	const metaFiles: Record<string, string> = {};
+	// Saved images (path → byte count); every workspace image shows as a 400×200 SVG.
+	const assets: Record<string, number> = {};
+	(window as unknown as { __assets: typeof assets }).__assets = assets;
+	const svg = `data:image/svg+xml,${encodeURIComponent(
+		'<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200"><rect width="400" height="200" fill="#7aa"/></svg>'
+	)}`;
 	const secrets: Record<string, string> = {};
 	(window as unknown as { __meta: typeof metaFiles }).__meta = metaFiles;
 	// Every reply reports its tokens in a last chunk, like `stream_options.include_usage`.
@@ -284,6 +290,13 @@ export function installFakeApi(): void {
 		setSecret: async (name: string, value: string | null) => {
 			if (value) secrets[name] = value;
 			else delete secrets[name];
+		},
+		assetUrl: (path: string) => (path.includes('missing') ? 'data:image/png;base64,AA' : svg),
+		saveAsset: async (path: string, data: Uint8Array) => {
+			let p = path;
+			for (let n = 2; p in assets; n++) p = path.replace(/(\.\w+)$/, ` ${n}$1`);
+			assets[p] = data.length;
+			return p;
 		},
 		readMeta: async (rel: string) => metaFiles[rel] ?? null,
 		writeMeta: async (rel: string, content: string) => {

@@ -78,6 +78,8 @@
 	--del-strike: rgba(168, 58, 49, 0.4);
 	--table-line: rgba(0, 0, 0, 0.11);
 	--table-head: rgba(0, 0, 0, 0.035);
+	/* Highlighter marker: a fixed yellow, so it never reads as the accent (tags). */
+	--mark-bg: rgba(255, 206, 0, 0.38);
 }
 
 /* ---- dark ---- */
@@ -115,6 +117,7 @@
 	--del-strike: rgba(242, 149, 140, 0.45);
 	--table-line: rgba(255, 255, 255, 0.13);
 	--table-head: rgba(255, 255, 255, 0.045);
+	--mark-bg: rgba(255, 196, 0, 0.26);
 }
 
 /* Follow OS theme until the user explicitly overrides via the toggle. */
@@ -324,8 +327,48 @@ button.scrim {
 .ProseMirror p.md-ordered {
 	padding-left: 8px;
 }
+/* Dividers: the rule is the line's ::after, filling the width the (ghosted)
+   `---` leaves free, so revealed syntax sits beside it rather than on it. */
 .ProseMirror p.md-hr {
+	display: flex;
+	align-items: center;
+	min-height: 1.7em;
+	margin: 0.5em 0;
 	color: var(--text-faint);
+}
+.ProseMirror p.md-hr::after {
+	content: '';
+	flex: 1;
+}
+/* Space before the rule only while the syntax shows (ghosted, font-size 0 makes it 0). */
+.ProseMirror p.md-hr > .md-syntax {
+	margin-inline-end: 0.6em;
+}
+/* `---` a hairline */
+.ProseMirror p.md-hr-line::after {
+	height: 1px;
+	background: var(--text-faint);
+	opacity: 0.7;
+}
+/* `***` three dots, centred: a section break */
+.ProseMirror p.md-hr-dots::after {
+	height: 6px;
+	background-image:
+		radial-gradient(circle, var(--text-muted) 0 2.4px, transparent 3px),
+		radial-gradient(circle, var(--text-muted) 0 2.4px, transparent 3px),
+		radial-gradient(circle, var(--text-muted) 0 2.4px, transparent 3px);
+	background-size: 6px 6px;
+	background-repeat: no-repeat;
+	background-position:
+		calc(50% - 22px) 50%,
+		50% 50%,
+		calc(50% + 22px) 50%;
+}
+/* `___` a double rule */
+.ProseMirror p.md-hr-double::after {
+	height: 5px;
+	border-top: 1px solid var(--text-faint);
+	border-bottom: 1px solid var(--text-faint);
 }
 
 /* Bullet markers: NEVER hidden. Styled to look designed — a coloured, weighted
@@ -425,6 +468,147 @@ button.scrim {
 }
 .md-tsep-text {
 	color: var(--text-faint);
+}
+
+/* --- images: a picture above its (hidden) `![alt](src)` line ---
+   With the caret in the line, its source shows below the picture. */
+.ProseMirror p.md-img-hidden {
+	display: none;
+}
+.ProseMirror p.md-img-src {
+	margin: 0;
+	font-family: var(--font-mono);
+	font-size: 0.84em;
+	color: var(--text-muted);
+	word-break: break-all;
+}
+.ProseMirror p.md-img-size {
+	color: var(--text-faint);
+}
+.md-img-alt {
+	color: var(--text-muted);
+	font-style: italic;
+}
+.md-image {
+	margin: 0.5em 0 0.3em;
+	line-height: 0;
+}
+.md-image-frame {
+	position: relative;
+	display: inline-block;
+	max-width: 100%;
+	vertical-align: top;
+}
+.md-image-frame.sized {
+	display: block;
+}
+.md-image-frame img {
+	display: block;
+	max-width: 100%;
+	height: auto;
+	border-radius: 6px;
+}
+.md-image-frame.sized img {
+	width: 100%;
+}
+.ProseMirror[contenteditable='true'] .md-image img {
+	cursor: pointer;
+}
+/* Resize: a dot on the corner, on hover (always on touch) while editing. */
+.md-image-handle {
+	position: absolute;
+	bottom: -6px;
+	inset-inline-end: -6px;
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	background: var(--accent);
+	box-shadow: 0 0 0 2px var(--bg-editor);
+	cursor: nwse-resize;
+	touch-action: none;
+	opacity: 0;
+	transition: opacity var(--dur-fast) ease;
+}
+.editor-pane.is-rtl .md-image-handle {
+	cursor: nesw-resize;
+}
+/* A finger-sized hit area around the dot. */
+.md-image-handle::before {
+	content: '';
+	position: absolute;
+	inset: -10px;
+}
+:root[data-touch] .md-image-handle {
+	width: 18px;
+	height: 18px;
+	bottom: -8px;
+	inset-inline-end: -8px;
+}
+:root[data-touch] .md-image-handle::before {
+	inset: -13px;
+}
+.ProseMirror[contenteditable='false'] .md-image-handle {
+	display: none;
+}
+.ProseMirror[contenteditable='true'] .md-image:hover .md-image-handle,
+:root[data-hover='none'] .ProseMirror[contenteditable='true'] .md-image-handle,
+.md-image.resizing .md-image-handle {
+	opacity: 1;
+}
+.md-image-pct {
+	position: absolute;
+	top: 8px;
+	inset-inline-end: 8px;
+	padding: 2px 8px;
+	border-radius: 999px;
+	background: rgba(0, 0, 0, 0.6);
+	color: #fff;
+	font: 600 11px/1.6 var(--font-ui);
+	font-variant-numeric: tabular-nums;
+	opacity: 0;
+	pointer-events: none;
+}
+.md-image.resizing .md-image-pct {
+	opacity: 1;
+}
+.md-image.resizing {
+	cursor: nwse-resize;
+}
+.md-image-frame.md-image-missing {
+	display: inline-flex;
+	flex-direction: column;
+	gap: 2px;
+	padding: 10px 14px;
+	border-radius: 8px;
+	box-shadow: inset 0 0 0 1px var(--table-line);
+	background: var(--table-head);
+	font: 500 13px/1.5 var(--font-ui);
+	color: var(--text-muted);
+}
+.md-image-src {
+	font-family: var(--font-mono);
+	font-size: 11.5px;
+	color: var(--text-faint);
+	word-break: break-all;
+}
+
+/* --- highlights (Settings → Editor) ---
+   The tint; its `<!-- highlight -->` comment line stays hidden unless the
+   caret is on it, or Ghost Syntax is off (symbols always visible). */
+.md-mark {
+	background: var(--mark-bg);
+	-webkit-box-decoration-break: clone;
+	box-decoration-break: clone;
+}
+.ProseMirror p.md-hl-comment {
+	display: none;
+	font-family: var(--font-mono);
+	font-size: 0.8em;
+	color: var(--text-faint);
+}
+.ProseMirror p.md-hl-comment.md-hl-open,
+:root[data-ghost='off'] .ProseMirror p.md-hl-comment {
+	display: block;
 }
 
 /* Tags rendered inside the note body. */

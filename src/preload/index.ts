@@ -120,6 +120,12 @@ const api = {
 	listMeta: (rel: string): Promise<string[]> => ipcRenderer.invoke(Channels.metaList, rel),
 	deleteMeta: (rel: string): Promise<void> => ipcRenderer.invoke(Channels.metaDelete, rel),
 
+	/** Workspace images load over the `fr5a:` protocol main registers (images only). */
+	assetUrl: (path: string): string =>
+		`fr5a://workspace/${path.split('/').map(encodeURIComponent).join('/')}`,
+	saveAsset: (path: string, data: Uint8Array): Promise<string> =>
+		ipcRenderer.invoke(Channels.assetSave, path, data),
+
 	/** A pull stopped on conflicts; returns an unsubscribe fn. */
 	onSyncConflict: (cb: (files: ConflictFile[]) => void): (() => void) => {
 		const listener = (_e: unknown, files: ConflictFile[]) => cb(files);

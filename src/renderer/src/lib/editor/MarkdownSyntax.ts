@@ -5,6 +5,10 @@ import type { Node as PMNode } from '@tiptap/pm/model';
 import type { EditorState } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 import { cellRanges, findTables, pipeOffsets, tableHtml } from './tables';
+import { codeLines } from './blocks';
+import { findImages } from './images';
+import { imageWidget } from './imageView';
+import { coveredRanges, findHighlights, isHighlightComment, type Ranges } from './highlights';
 
 /**
  * MarkdownSyntax
@@ -25,7 +29,22 @@ import { cellRanges, findTables, pipeOffsets, tableHtml } from './tables';
  *     widget with their lines hidden — until the caret enters them (a click
  *     on a cell puts it there), when the lines show as editable source. View
  *     mode always shows the rendered table.
+ *   • Images (a line of just `![alt](src)`, see images.ts) show as a picture
+ *     above their line, which (with its size comment) is hidden until the
+ *     caret enters it; the picture stays while the source shows below it.
+ *   • Dividers draw a rule by kind: `---` a hairline, `***` three dots,
+ *     `___` a double rule.
+ *   • Highlights (option, see highlights.ts) tint the stretches their
+ *     comment names; the comment lines stay hidden unless the caret is on
+ *     one (or Ghost Syntax is off).
  */
+
+export interface MarkdownSyntaxOptions {
+	/** Paint highlight comments (Settings → Editor → Highlights). */
+	highlights: boolean;
+	/** What an `<img>` loads for an image's `src`; null when it can't be shown. */
+	imageUrl: (src: string) => string | null;
+}
 
 interface Deco {
 	from: number;
@@ -74,6 +93,19 @@ const INLINE_RULES: { re: RegExp; build: (m: RegExpExecArray, base: number) => D
 	{
 		re: /(?<![_\w])(_)(?!\s)([^_\n]+?)(?<!\s)_(?![_\w])/g,
 		build: (m, base) => wrap(m, base, 1, 'md-italic')
+	},
+	// inline image ![alt](src) — a line of just an image renders as a picture instead
+	{
+		re: /!\[([^\]\n]*)\]\(([^)\n]+)\)/g,
+		build: (m, base) => {
+			const s = base + m.index;
+			const altEnd = s + 2 + m[1].length;
+			return [
+				{ from: s, to: s + 2, class: 'md-syntax', syntax: true }, // ![
+				{ from: s + 2, to: altEnd, class: 'md-img-alt' },
+				{ from: altEnd, to: s + m[0].length, class: 'md-syntax', syntax: true } // ](src)
+			];
+		}
 	},
 	// link [text](url)
 	{
@@ -133,8 +165,10 @@ function blockInfo(text: string): { nodeClass: string; prefixLen: number } | nul
 	if ((m = text.match(/^>\s?/))) {
 		return { nodeClass: 'md-quote', prefixLen: m[0].length };
 	}
-	if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(text)) {
-		return { nodeClass: 'md-hr', prefixLen: text.length };
+	// `---` / `***` / `___` (spaces between allowed): each kind draws its own rule.
+	if ((m = text.match(/^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/))) {
+		const kind = m[1] === '-' ? 'line' : m[1] === '*' ? 'dots' : 'double';
+		return { nodeClass: `md-hr md-hr-${kind}`, prefixLen: text.length };
 	}
 	if ((m = text.match(/^(\s*)([-*+])\s/))) {
 		return { nodeClass: 'md-bullet', prefixLen: m[0].length };
@@ -163,7 +197,7 @@ function tokenizeLine(text: string, contentStart: number): { tokens: Token[]; no
 			decos: [{ from: contentStart, to: contentStart + text.length, class: 'md-meta-text' }]
 		});
 		consume(0, text.length);
-	} else if (block?.nodeClass === 'md-hr') {
+	} else if (block?.nodeClass.startsWith('md-hr')) {
 		tokens.push({
 			outerFrom: contentStart,
 			outerTo: contentStart + text.length,
@@ -295,7 +329,14 @@ function tableWidget(
 
 const key = new PluginKey('markdownSyntax');
 
-function buildDecorations(state: EditorState, editable: boolean): DecorationSet {
+/** Events a block widget (table, picture) handles itself, not ProseMirror. */
+const widgetEvent = (e: Event) => /^(mouse|touch|pointer|drag|dblclick)/.test(e.type);
+
+function buildDecorations(
+	state: EditorState,
+	editable: boolean,
+	opts: MarkdownSyntaxOptions
+): DecorationSet {
 	const decorations: Decoration[] = [];
 	const { from: selFrom, to: selTo } = state.selection;
 	// Tables span lines, so find them over the whole document first.
@@ -327,6 +368,35 @@ function buildDecorations(state: EditorState, editable: boolean): DecorationSet 
 			);
 		}
 	}
+
+	// Images: the picture sits above its line; the line (and its size comment)
+	// show as source only while the caret is in them.
+	const imageRows = new Map<number, { raw: boolean; size: boolean }>();
+	for (const [i, img] of findImages(lines)) {
+		if (tables.has(i)) continue;
+		const last = img.sizeLine ?? i;
+		const raw =
+			editable && selTo >= starts[i] && selFrom <= starts[last] + state.doc.child(last).nodeSize;
+		imageRows.set(i, { raw, size: false });
+		if (img.sizeLine !== null) imageRows.set(img.sizeLine, { raw, size: true });
+		const url = opts.imageUrl(img.src);
+		const view = { url, src: img.src, alt: img.alt, size: img.size };
+		decorations.push(
+			Decoration.widget(starts[i], (v, getPos) => imageWidget(v, getPos, view), {
+				side: -1,
+				key: `img:${img.size}:${url}:${img.alt}:${img.src}`,
+				stopEvent: widgetEvent
+			})
+		);
+	}
+
+	// Highlights: stretches per marked line; their comment lines are hidden.
+	const code = opts.highlights ? codeLines(lines) : null;
+	const marks = new Map<number, Ranges[]>();
+	if (opts.highlights)
+		for (const h of findHighlights(lines))
+			marks.set(h.target, [...(marks.get(h.target) ?? []), h.ranges]);
+
 	let line = -1;
 
 	state.doc.forEach((node: PMNode, pos: number) => {
@@ -335,6 +405,21 @@ function buildDecorations(state: EditorState, editable: boolean): DecorationSet 
 		const text = node.textContent;
 		const contentStart = pos + 1;
 		const row = tables.get(line);
+		const end = pos + node.nodeSize;
+
+		const img = row ? undefined : imageRows.get(line);
+		if (img) {
+			const cls = img.raw ? `md-img-src${img.size ? ' md-img-size' : ''}` : 'md-img-hidden';
+			decorations.push(Decoration.node(pos, end, { class: cls }));
+			return;
+		}
+		if (code && !code[line] && !row && isHighlightComment(text)) {
+			// Shown (as source) only with the caret on it — or with Ghost Syntax off (CSS).
+			const open = editable && selTo > pos && selFrom < end;
+			const cls = open ? 'md-hl-comment md-hl-open' : 'md-hl-comment';
+			decorations.push(Decoration.node(pos, end, { class: cls }));
+			return;
+		}
 
 		let tokens: Token[];
 		if (row && !source.get(line)) {
@@ -359,6 +444,13 @@ function buildDecorations(state: EditorState, editable: boolean): DecorationSet 
 				decorations.push(Decoration.inline(d.from, d.to, { class: cls }));
 			}
 		}
+
+		const hl = row ? undefined : marks.get(line);
+		if (hl)
+			for (const [a, b] of coveredRanges(text, hl))
+				decorations.push(
+					Decoration.inline(contentStart + a, contentStart + b, { class: 'md-mark' })
+				);
 	});
 
 	return DecorationSet.create(state.doc, decorations);
@@ -370,21 +462,29 @@ interface SyntaxState {
 	editable: boolean;
 }
 
-export const MarkdownSyntax = Extension.create({
+export const MarkdownSyntax = Extension.create<MarkdownSyntaxOptions>({
 	name: 'markdownSyntax',
 
+	addOptions() {
+		return { highlights: false, imageUrl: () => null };
+	},
+
 	addProseMirrorPlugins() {
+		const opts = this.options;
 		return [
 			new Plugin<SyntaxState>({
 				key,
 				state: {
-					init: (_config, state) => ({ set: buildDecorations(state, true), editable: true }),
+					init: (_config, state) => ({
+						set: buildDecorations(state, true, opts),
+						editable: true
+					}),
 					// Recompute on any doc or selection change so hover/active track live,
 					// and when the view flips between view and edit mode.
 					apply: (tr, old, _oldState, newState) => {
 						const editable = (tr.getMeta(key) as boolean | undefined) ?? old.editable;
 						return tr.docChanged || tr.selectionSet || editable !== old.editable
-							? { set: buildDecorations(newState, editable), editable }
+							? { set: buildDecorations(newState, editable, opts), editable }
 							: old;
 					}
 				},

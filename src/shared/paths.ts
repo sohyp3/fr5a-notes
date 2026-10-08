@@ -87,3 +87,10 @@ export function noteMoveError(id: string, to: string): string | null {
 	if (!noteExt(to)) return 'Notes keep a Markdown or text extension.';
 	return null;
 }
+
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i;
+
+/** Image files the editor shows and the hosts serve / save (`assets/…`). */
+export function isImagePath(p: string): boolean {
+	return IMAGE_EXT.test(p);
+}

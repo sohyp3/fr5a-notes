@@ -17,4 +17,12 @@ describe('noteSnippet', () => {
 	it('strips task boxes and ordered markers', () => {
 		expect(noteSnippet('1. first\n- [x] done')).toBe('first done');
 	});
+
+	it('drops images, comment lines and spaced rules', () => {
+		expect(
+			noteSnippet(
+				'# T\n![chart](assets/a.png)\n<!-- size: 50% -->\n<!-- highlight: 0-4 -->\nkeep this\n* * *\nend'
+			)
+		).toBe('keep this end');
+	});
 });

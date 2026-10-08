@@ -844,7 +844,8 @@ test('AI harness: web search turns on from the context panel', async ({ page }) 
 
 // --- mouse desktop ---------------------------------------------------------------------
 
-async function desktopPage(browser: Browser) {
+/** A mouse window; `seed` notes are written before the app boots (and again on reloads). */
+async function desktopPage(browser: Browser, seed: Record<string, string> = {}) {
 	const ctx = await browser.newContext({
 		viewport: { width: 1280, height: 800 },
 		isMobile: false,
@@ -852,6 +853,10 @@ async function desktopPage(browser: Browser) {
 	});
 	const page = await ctx.newPage();
 	await page.addInitScript(installFakeApi);
+	await page.addInitScript((notes) => {
+		const api = (window as unknown as { api: { writeNote(id: string, text: string): void } }).api;
+		for (const [id, text] of Object.entries(notes)) api.writeNote(id, text);
+	}, seed);
 	await page.goto('/');
 	await expect(page.locator('.body')).toHaveAttribute('data-layout', 'desktop');
 	return { ctx, page };
@@ -1583,4 +1588,177 @@ test('desktop: unlocked encrypted notes reach the AI; such a chat stays on this 
 		.toEqual([]);
 	expect((await metaKeys(page)).filter((k) => /^sessions\/[^/]+\.md$/.test(k))).toHaveLength(1);
 	await ctx.close();
+});
+
+// --- images, dividers, highlights, table creator ---------------------------------
+
+/** Open Hello (seeded by `desktopPage`) from All Notes; notes open editable with a mouse. */
+async function openHello(page: Page) {
+	await sidebar(page)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	await list(page).getByText('Hello', { exact: true }).click();
+	await expect(page.locator('.ProseMirror')).toHaveAttribute('contenteditable', 'true');
+}
+
+test('desktop: images show above their hidden line, resize by the corner, paste', async ({
+	browser
+}) => {
+	const { ctx, page } = await desktopPage(browser, {
+		'hello.md': '# Hello\n\n![A cat](assets/cat.png)\n<!-- size: 40% -->\n![](missing.png)\nend'
+	});
+	await openHello(page);
+	await expect(page.locator('.md-image img')).toHaveCount(1);
+	await expect(page.locator('.md-image-missing')).toContainText('Image not found');
+	// The lines are hidden behind the pictures; the size is a share of the column.
+	await expect(page.locator('p.md-img-hidden')).toHaveCount(3);
+	const share = await page
+		.locator('.md-image')
+		.first()
+		.evaluate(
+			(el) =>
+				el.querySelector('.md-image-frame')!.getBoundingClientRect().width /
+				el.getBoundingClientRect().width
+		);
+	expect(share).toBeCloseTo(0.4, 2);
+
+	// A click on the picture shows its source below it.
+	await page.locator('.md-image img').click();
+	await expect(page.locator('p.md-img-src')).toHaveText([
+		'![A cat](assets/cat.png)',
+		'<!-- size: 40% -->'
+	]);
+
+	// Dragging the corner rewrites the size comment; a double-click drops it.
+	await page.locator('.md-image').first().hover();
+	const h = (await page.locator('.md-image-handle').boundingBox())!;
+	await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
+	await page.mouse.down();
+	await page.mouse.move(h.x + 120, h.y, { steps: 6 });
+	await expect(page.locator('.md-image-pct')).toHaveText(/^\d+%$/);
+	await page.mouse.up();
+	await expect.poll(() => editorText(page)).toMatch(/cat\.png\)\n<!-- size: (\d+)% -->/);
+	const pct = Number(/size: (\d+)%/.exec(await editorText(page))![1]);
+	expect(pct).toBeGreaterThan(55);
+	await page.locator('.md-image').first().hover();
+	await page.locator('.md-image-handle').dblclick();
+	await expect.poll(() => editorText(page)).toContain('cat.png)\n![](missing.png)');
+
+	// A pasted image is saved under assets/ and linked on its own line.
+	await page.keyboard.press('Control+End');
+	await page.evaluate(() => {
+		const dt = new DataTransfer();
+		dt.items.add(new File([new Uint8Array([1, 2, 3])], 'image.png', { type: 'image/png' }));
+		document
+			.querySelector('.ProseMirror')!
+			.dispatchEvent(
+				new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })
+			);
+	});
+	await expect
+		.poll(() => editorText(page))
+		.toMatch(/\nend\n!\[\]\(assets\/image-\d{8}-\d{6}\.png\)\n$/);
+	const assets = await page.evaluate(() => (window as unknown as { __assets: object }).__assets);
+	expect(Object.values(assets)).toEqual([3]);
+	await expect(page.locator('.md-image img')).toHaveCount(2);
+	await ctx.close();
+});
+
+test('desktop: dividers draw by kind; highlights mark a line or a stretch', async ({ browser }) => {
+	const { ctx, page } = await desktopPage(browser, {
+		'hello.md': '# Hello\n\na\n---\nb\n* * *\nc\n___\nhello brave world\nlast'
+	});
+	await openHello(page);
+	await expect(page.locator('p.md-hr-line')).toHaveText('---');
+	await expect(page.locator('p.md-hr-dots')).toHaveText('* * *');
+	await expect(page.locator('p.md-hr-double')).toHaveText('___');
+
+	// Mod+Shift+H on a selection: offsets in a hidden comment above the line.
+	const line = page.locator('.ProseMirror p', { hasText: 'hello brave world' });
+	await line.click();
+	await page.keyboard.press('Home');
+	for (let i = 0; i < 6; i++) await page.keyboard.press('ArrowRight');
+	// Paced like a held key: instant presses can outrun the editor's selection sync.
+	for (let i = 0; i < 5; i++) {
+		await page.keyboard.press('Shift+ArrowRight');
+		await page.waitForTimeout(40);
+	}
+	await page.keyboard.press('Control+Shift+H');
+	await expect
+		.poll(() => editorText(page))
+		.toContain('<!-- highlight: 6-11 -->\nhello brave world');
+	await expect(page.locator('.md-mark')).toHaveText('brave');
+	await expect(page.locator('p.md-hl-comment')).toBeHidden();
+	// The stretch keeps to its word while the line is edited before it.
+	await page.keyboard.press('Home');
+	await page.keyboard.type('oh ');
+	await expect.poll(() => editorText(page)).toContain('<!-- highlight: 9-14 -->\noh hello brave');
+	await expect(page.locator('.md-mark')).toHaveText('brave');
+
+	// No selection: the whole line, from the Insert menu; again clears it.
+	await page.locator('.ProseMirror p', { hasText: 'last' }).click();
+	await page.getByRole('button', { name: 'Insert', exact: true }).click();
+	await page.getByRole('menuitem', { name: /Highlight/ }).click();
+	await expect.poll(() => editorText(page)).toContain('<!-- highlight -->\nlast');
+	await expect(page.locator('.md-mark')).toHaveText(['brave', 'last']);
+	await page.keyboard.press('Control+Shift+H');
+	await expect.poll(() => editorText(page)).toMatch(/brave world\nlast$/);
+
+	// Off in Settings: the comments are plain text again.
+	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
+	await page.getByRole('button', { name: /^Editor/ }).click();
+	await page.getByRole('switch', { name: 'Highlights' }).click();
+	await page.keyboard.press('Escape');
+	await expect(page.locator('.md-mark')).toHaveCount(0);
+	await expect(
+		page.locator('.ProseMirror p', { hasText: '<!-- highlight: 9-14 -->' })
+	).toBeVisible();
+	await ctx.close();
+});
+
+test('desktop: Insert → Table puts a blank table at the caret', async ({ browser }) => {
+	const { ctx, page } = await desktopPage(browser);
+	await openHello(page);
+	await page.keyboard.press('Control+End');
+	await page.getByRole('button', { name: 'Insert', exact: true }).click();
+	await page.getByRole('menuitem', { name: 'Table…' }).click();
+	const picker = page.getByRole('dialog', { name: 'Insert table' });
+	await picker.locator('[data-cell="2:1"]').hover();
+	await expect(picker).toContainText('3 columns × 2 rows');
+	await picker.locator('[data-cell="2:1"]').click();
+	await expect(picker).toHaveCount(0);
+	// The caret waits in the first header cell; Tab moves on.
+	await page.keyboard.type('Name');
+	await page.keyboard.press('Tab');
+	await page.keyboard.type('Qty');
+	expect(await editorText(page)).toBe(
+		'# Hello\n\nworld\n\n| Name    | Qty    |     |\n| --- | --- | --- |\n|     |     |     |\n'
+	);
+	await ctx.close();
+});
+
+test('formatting toolbar: Highlight marks the line; Insert → Table sizes on a grid', async ({
+	page
+}) => {
+	await openPlan(page);
+	await edit(page);
+	await page.locator('.ProseMirror p').last().tap();
+	await toolbar(page).getByRole('button', { name: 'Highlight', exact: true }).tap();
+	await expect.poll(() => editorText(page)).toContain('<!-- highlight -->\nfirst line');
+	await expect(page.locator('.md-mark')).toHaveText('first line');
+
+	await page.keyboard.press('End');
+	await toolbar(page).getByRole('button', { name: 'Insert', exact: true }).tap();
+	await page.getByRole('menuitem', { name: 'Table…' }).tap();
+	const picker = page.getByRole('dialog', { name: 'Insert table' });
+	await picker.locator('[data-cell="1:1"]').tap();
+	// Phones: a tap only sizes, Insert confirms. Elsewhere the tap inserts.
+	if ((await layoutOf(page)) === 'phone') {
+		await expect(picker.locator('.sheet-title, .size')).toContainText('2 columns × 2 rows');
+		await picker.getByRole('button', { name: 'Insert 2 × 2' }).tap();
+	}
+	await expect(picker).toHaveCount(0);
+	await expect
+		.poll(() => editorText(page))
+		.toContain('first line\n\n|     |     |\n| --- | --- |\n|     |     |');
 });

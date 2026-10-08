@@ -19,7 +19,7 @@
 	const SECTIONS: { id: SettingsSection; label: string; icon: IconName; desc: string }[] = [
 		{ id: 'general', label: 'General', icon: 'note', desc: 'Notes folder, opening notes' },
 		{ id: 'appearance', label: 'Appearance', icon: 'sun', desc: 'Theme, accent, fonts' },
-		{ id: 'editor', label: 'Editor', icon: 'edit', desc: 'Ghost syntax, Vim' },
+		{ id: 'editor', label: 'Editor', icon: 'edit', desc: 'Ghost syntax, highlights, Vim' },
 		{ id: 'sync', label: 'Sync', icon: 'sync', desc: 'Git remotes, changes' },
 		{ id: 'ai', label: 'AI assistant', icon: 'ai', desc: 'Providers, web search, skills' },
 		{ id: 'encryption', label: 'Encryption', icon: 'key', desc: 'Encrypt notes with your key' },
@@ -265,6 +265,17 @@
 								</div>
 								{@render toggle(s.ghost, 'Ghost Syntax', () =>
 									app.updateSettings({ ghost: !s.ghost })
+								)}
+							</div>
+							<div class="row">
+								<div class="label">
+									<span class="name">Highlights</span>
+									<span class="desc"
+										>Tint text marked by a <code>&lt;!-- highlight --&gt;</code> comment line</span
+									>
+								</div>
+								{@render toggle(s.highlights, 'Highlights', () =>
+									app.updateSettings({ highlights: !s.highlights })
 								)}
 							</div>
 						</section>

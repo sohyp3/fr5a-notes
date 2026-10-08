@@ -10,6 +10,7 @@ import type {
 import { uiStack, editorStack } from '../fonts';
 import { accentById, applyPalette, DEFAULT_ACCENT } from '../accents';
 import { setPinned, setLocked, setAiLocal, titleFromContent } from '../editor/markdown';
+import { ASSETS_DIR, assetName, relativeLink } from '../editor/images';
 import { syncErrorMessage } from '../sync';
 import { getAiSettings } from '../harness/config.svelte';
 import { folderPrivacy, isHidden } from '../harness/privacy';
@@ -99,6 +100,8 @@ export interface Settings {
 	vim: boolean;
 	/** "Ghost Syntax": collapse Markdown symbols until hover/caret. */
 	ghost: boolean;
+	/** Paint `<!-- highlight -->` comments (and Mod+Shift+H to add them). */
+	highlights: boolean;
 	/** Accent color id (see accents.ts). */
 	accent: string;
 	/** AI harness on. Off: its code is never loaded, no button, no Mod+J. */
@@ -128,6 +131,7 @@ const DEFAULT_SETTINGS: Settings = {
 	arFont: 'naskh',
 	vim: false,
 	ghost: true,
+	highlights: true,
 	accent: DEFAULT_ACCENT,
 	ai: true,
 	openIn: 'auto',
@@ -1465,6 +1469,42 @@ class AppState {
 		if (hidden.some((f) => remapPath(f, from, to) !== null))
 			this.updateSettings({ hiddenFolders: hidden.map((f) => remapPath(f, from, to) ?? f) });
 		for (const cb of this.moveListeners) cb(from, to);
+	}
+
+	// --- images -------------------------------------------------------------------
+
+	/** Folder of the open note, or the one the draft will be saved in. */
+	get activeDir(): string {
+		return this.activeId ? parentOf(this.activeId) : this.draftFolder;
+	}
+
+	private warnedPlainImage = false;
+
+	/**
+	 * Save an image pasted / dropped / picked into the open note under
+	 * `assets/` (workspace root). Resolves to its link from the note's folder,
+	 * or null when it couldn't be saved (already told).
+	 */
+	async saveImage(file: File): Promise<string | null> {
+		if (!platform.saveAsset) {
+			this.notify('error', 'Images can’t be saved on this device.');
+			return null;
+		}
+		try {
+			const data = new Uint8Array(await file.arrayBuffer());
+			const path = await platform.saveAsset(
+				joinPath(ASSETS_DIR, assetName(file.name, file.type)),
+				data
+			);
+			if (this.activeEncrypted && !this.warnedPlainImage) {
+				this.warnedPlainImage = true;
+				this.notify('ok', `Image saved in ${ASSETS_DIR}/ — images aren’t encrypted.`);
+			}
+			return relativeLink(this.activeDir, path);
+		} catch (err) {
+			this.notify('error', `Couldn’t save the image: ${err instanceof Error ? err.message : err}`);
+			return null;
+		}
 	}
 
 	// --- notices + prompt dialog ---------------------------------------------------

@@ -198,6 +198,8 @@ export const Channels = {
 	metaWrite: 'meta:write',
 	metaList: 'meta:list',
 	metaDelete: 'meta:delete',
+	/** Save an image under the workspace (pasted / dropped into a note). */
+	assetSave: 'asset:save',
 	// main -> renderer push
 	/** A streamed HTTP body chunk: (requestId, text). */
 	httpChunk: 'http:chunk',

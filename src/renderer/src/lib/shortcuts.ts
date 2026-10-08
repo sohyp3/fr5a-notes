@@ -7,7 +7,7 @@ export interface Shortcut {
 	keys: string[];
 	desc: string;
 	/** Listed only while this setting is on. */
-	feature?: 'encryption';
+	feature?: 'encryption' | 'highlights';
 }
 
 export const SHORTCUTS: Shortcut[] = [
@@ -24,6 +24,7 @@ export const SHORTCUTS: Shortcut[] = [
 	{ keys: ['Mod', 'E'], desc: 'Inline code  `text`' },
 	{ keys: ['Mod', 'P'], desc: 'Pin / unpin the current note' },
 	{ keys: ['Mod', '⇧', 'X'], desc: 'Strikethrough  ~~text~~' },
+	{ keys: ['Mod', '⇧', 'H'], desc: 'Highlight the selection or line', feature: 'highlights' },
 	{ keys: ['Esc'], desc: 'Close overlay · exit Settings / Changes / Zen' }
 ];
 

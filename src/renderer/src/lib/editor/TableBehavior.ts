@@ -2,7 +2,8 @@ import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import type { EditorState } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
-import { Fragment, Slice } from '@tiptap/pm/model';
+import { insertBlock } from './blocks';
+import { outsideBlocks } from './ImageBehavior';
 import { cellRanges, findTables, parsePastedTable, toMarkdownTable } from './tables';
 
 /**
@@ -14,6 +15,8 @@ import { cellRanges, findTables, parsePastedTable, toMarkdownTable } from './tab
  *                the table (like double-Enter in a list), after a blank line
  *   Paste        a spreadsheet / web-table selection (tab-separated) becomes a
  *                Markdown table; Mod+Shift+V pastes the raw text
+ *
+ * `insertTable` (the Insert → Table picker) puts a blank table at the caret.
  */
 
 interface RowCtx {
@@ -134,6 +137,27 @@ function enter(view: EditorView): boolean {
 	return true;
 }
 
+/**
+ * A blank table — `cols` columns, a header row and `rows - 1` body rows — as
+ * lines of their own at the caret, which goes into its first header cell.
+ */
+export function insertTable(view: EditorView, cols: number, rows: number): void {
+	const start = outsideBlocks(view.state.tr);
+	const { $from } = start.selection;
+	const grid = Array.from({ length: rows }, () => Array.from({ length: cols }, () => ''));
+	const tr = insertBlock(start, toMarkdownTable(grid), true);
+	// Text before the caret keeps its line, then a blank line: the header follows.
+	const before = $from.parent.textContent.slice(0, $from.parentOffset).trim();
+	const head = $from.index(0) + (before ? 2 : 0);
+	let pos = 1;
+	for (let k = 0; k < head; k++) pos += tr.doc.child(k).nodeSize;
+	const first = cellRanges(tr.doc.child(head).textContent)[0];
+	view.dispatch(
+		tr.setSelection(TextSelection.create(tr.doc, pos + (first?.from ?? 0))).scrollIntoView()
+	);
+	view.focus();
+}
+
 export const TableBehavior = Extension.create({
 	name: 'tableBehavior',
 	// Ahead of ListBehavior's Tab-indent, behind TagSuggest's open dropdown.
@@ -159,22 +183,7 @@ export const TableBehavior = Extension.create({
 						const text = event.clipboardData?.getData('text/plain');
 						const rows = !raw && text ? parsePastedTable(text) : null;
 						if (!rows) return false;
-						const { state } = view;
-						const { $from, $to } = state.selection;
-						const before = $from.parent.textContent.slice(0, $from.parentOffset).trim();
-						const after = $to.parent.textContent.slice($to.parentOffset).trim();
-						// Open slice: the first / last line merge with the text around the caret,
-						// so the table gets blank lines around it and lines of its own.
-						const lines = [
-							...(before ? ['', ''] : []),
-							...toMarkdownTable(rows),
-							...(after ? ['', ''] : [''])
-						];
-						const p = state.schema.nodes.paragraph;
-						const nodes = lines.map((l) => p.create(null, l ? state.schema.text(l) : null));
-						view.dispatch(
-							state.tr.replaceSelection(new Slice(Fragment.from(nodes), 1, 1)).scrollIntoView()
-						);
+						view.dispatch(insertBlock(view.state.tr, toMarkdownTable(rows), true).scrollIntoView());
 						return true;
 					}
 				}

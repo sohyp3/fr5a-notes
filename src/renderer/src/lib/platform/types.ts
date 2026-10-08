@@ -123,6 +123,17 @@ export interface PlatformApi {
 	getSecret(name: string): Promise<string | null>;
 	setSecret(name: string, value: string | null): Promise<void>;
 
+	/**
+	 * A URL an `<img>` can load for a workspace image (workspace-relative
+	 * path). Absent on hosts that can't show local files.
+	 */
+	assetUrl?(path: string): string;
+	/**
+	 * Write an image at workspace path `path` (its folder is created; a taken
+	 * name gets a numeric suffix). Returns the path written.
+	 */
+	saveAsset?(path: string, data: Uint8Array): Promise<string>;
+
 	/** Files under the workspace's hidden `.fr5a/` folder (paths relative to it). */
 	readMeta(rel: string): Promise<string | null>;
 	writeMeta(rel: string, content: string): Promise<void>;

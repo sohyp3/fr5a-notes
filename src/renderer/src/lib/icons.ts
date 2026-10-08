@@ -27,7 +27,9 @@ import GitFork from '@lucide/svelte/icons/git-fork';
 import Globe from '@lucide/svelte/icons/globe';
 import Hash from '@lucide/svelte/icons/hash';
 import Heading from '@lucide/svelte/icons/heading';
+import Highlighter from '@lucide/svelte/icons/highlighter';
 import History from '@lucide/svelte/icons/history';
+import ImagePlus from '@lucide/svelte/icons/image-plus';
 import Info from '@lucide/svelte/icons/info';
 import Keyboard from '@lucide/svelte/icons/keyboard';
 import KeyRound from '@lucide/svelte/icons/key-round';
@@ -110,6 +112,8 @@ export const ICONS = {
 	insert: TextCursor,
 	append: ListPlus,
 	table: Table,
+	image: ImagePlus,
+	highlight: Highlighter,
 	bold: Bold,
 	heading: Heading,
 	bullet: List,

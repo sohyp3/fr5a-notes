@@ -11,7 +11,10 @@
 	import { MarkdownSyntax } from '../editor/MarkdownSyntax';
 	import { MarkdownShortcuts } from '../editor/MarkdownShortcuts';
 	import { ListBehavior } from '../editor/ListBehavior';
-	import { TableBehavior } from '../editor/TableBehavior';
+	import { TableBehavior, insertTable } from '../editor/TableBehavior';
+	import { ImageBehavior, insertImages } from '../editor/ImageBehavior';
+	import { HighlightBehavior, toggleHighlight } from '../editor/HighlightBehavior';
+	import { imageSource } from '../editor/images';
 	import { TagSuggest, flattenTagTree } from '../editor/TagSuggest';
 	import { Vim, type VimMode } from '../editor/vim';
 	import {
@@ -25,6 +28,7 @@
 	import EmptyState from './EmptyState.svelte';
 	import FormatToolbar from './FormatToolbar.svelte';
 	import ActionMenu, { type MenuItem } from './ActionMenu.svelte';
+	import TablePicker from './TablePicker.svelte';
 	import Icon from './Icon.svelte';
 	import { platform } from '../platform';
 	import { reducedMotion } from '../portal';
@@ -42,11 +46,16 @@
 	let moreAt = $state<{ x: number; y: number } | null>(null);
 	let crumbBtn = $state<HTMLButtonElement | null>(null);
 	let crumbAt = $state<{ x: number; y: number } | null>(null);
+	let insertBtn = $state<HTMLButtonElement | null>(null);
+	let insertAt = $state<{ x: number; y: number } | null>(null);
+	let tableAt = $state<{ x: number; y: number; sheet: boolean } | null>(null);
+	let imageInput = $state<HTMLInputElement | null>(null);
 	// Suppress auto-save while we programmatically replace content.
 	let loading = false;
 
 	// No hardware keyboard to drive modal editing on Android: Vim stays off there.
 	const vimOn = $derived(app.settings.vim && platform.platform !== 'android');
+	const highlights = $derived(app.settings.highlights);
 	const activeMeta = $derived(app.notes.find((n) => n.id === app.activeId));
 	// Locked notes are read-only. Fall back to the buffer so the badge is right
 	// even before the index round-trips.
@@ -63,17 +72,28 @@
 	const narrow = $derived(compact || (headW > 0 && headW < (app.touch ? 620 : 440)));
 	const change = $derived(app.changeFor(app.activeId));
 	const hiddenAi = $derived(!!activeMeta && app.hiddenFromAi(activeMeta));
-	// Recreate the editor when a different buffer opens (editorSession), Vim is
-	// toggled, or an external rewrite (e.g. pin toggle) bumps the reload token.
-	// Keyed on the session — not the note id — so a draft materialising into a
-	// real file doesn't remount the editor mid-typing.
-	const editorKey = $derived(`${app.editorSession}:${vimOn}:${app.editorReloadToken}`);
+	// Recreate the editor when a different buffer opens (editorSession), Vim or
+	// highlights are toggled, or an external rewrite (e.g. pin toggle) bumps the
+	// reload token. Keyed on the session — not the note id — so a draft
+	// materialising into a real file doesn't remount the editor mid-typing.
+	const editorKey = $derived(
+		`${app.editorSession}:${vimOn}:${highlights}:${app.editorReloadToken}`
+	);
 	const crumb = $derived.by(() => {
 		const id = app.activeId;
 		if (!id) return { dir: '', name: 'New note' };
 		const i = id.lastIndexOf('/');
 		return i === -1 ? { dir: '', name: id } : { dir: id.slice(0, i), name: id.slice(i + 1) };
 	});
+
+	/** What an `<img>` loads for an image line's `src` (relative to the open note). */
+	function imageUrl(src: string): string | null {
+		const at = imageSource(src, app.activeDir);
+		if (!at) return null;
+		return at.kind === 'url' ? at.url : (platform.assetUrl?.(at.path) ?? null);
+	}
+
+	const saveImage = (file: File) => app.saveImage(file);
 
 	function buildEditor(node: HTMLElement, content: string): Editor {
 		const extensions = [
@@ -82,13 +102,15 @@
 			Text,
 			UndoRedo,
 			Placeholder.configure({ placeholder: 'Start writing…' }),
-			MarkdownSyntax,
+			MarkdownSyntax.configure({ highlights, imageUrl }),
 			MarkdownShortcuts,
 			ListBehavior,
 			TableBehavior,
+			ImageBehavior.configure({ save: saveImage }),
 			// Fed from the store's tag tree (itself the SQLite index over IPC).
 			TagSuggest.configure({ getTags: () => flattenTagTree(app.tags) })
 		];
+		if (highlights) extensions.push(HighlightBehavior);
 		if (vimOn) {
 			extensions.push(Vim.configure({ onModeChange: (m) => (vimMode = m) }));
 		}
@@ -146,8 +168,9 @@
 		await tick();
 		const ed = editor;
 		if (!ed || !scroller) return;
-		// A rendered table cell: the table puts the caret into that cell's source.
-		const cell = at && document.elementFromPoint(at.x, at.y)?.closest('.md-table [data-line]');
+		// A rendered table cell / picture: it puts the caret into its source.
+		const cell =
+			at && document.elementFromPoint(at.x, at.y)?.closest('.md-table [data-line], .md-image');
 		if (cell) {
 			cell.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
 			return;
@@ -272,6 +295,67 @@
 		}
 	]);
 
+	// --- Insert: image, table, highlight -----------------------------------
+
+	function pickImage(): void {
+		imageInput?.click();
+	}
+
+	function onImagePicked(): void {
+		const files = [...(imageInput?.files ?? [])];
+		if (imageInput) imageInput.value = '';
+		if (editor && files.length) void insertImages(editor.view, files, saveImage);
+	}
+
+	/** The table size picker: below the header's Insert button, or above the touch toolbar. */
+	function openTable(): void {
+		const sheet = app.layout === 'phone';
+		const r = (app.touch ? scroller : insertBtn)?.getBoundingClientRect();
+		if (!r) return;
+		// The popover flips above `y` when it wouldn't fit below.
+		tableAt = app.touch
+			? { x: r.left + 12, y: r.bottom - 6, sheet }
+			: { x: r.right - 210, y: r.bottom + 6, sheet };
+	}
+
+	const insertItems = $derived.by((): MenuItem[] => [
+		...(platform.saveAsset ? [{ label: 'Image…', icon: 'image' as const, action: pickImage }] : []),
+		{
+			label: 'Table…',
+			icon: 'table' as const,
+			action: openTable
+		}
+	]);
+
+	/** Header Insert menu (mouse): the touch toolbar has its own Highlight button. */
+	const headerInsertItems = $derived.by((): MenuItem[] => [
+		...insertItems,
+		...(highlights
+			? [
+					{
+						label: 'Highlight',
+						icon: 'highlight' as const,
+						hint: platform.platform === 'darwin' ? '⌘⇧H' : 'Ctrl+Shift+H',
+						divider: true,
+						action: () => {
+							if (!editor) return;
+							toggleHighlight(editor.state, editor.view.dispatch);
+							editor.view.focus();
+						}
+					}
+				]
+			: [])
+	]);
+
+	function openInsert(): void {
+		if (insertAt) {
+			insertAt = null;
+			return;
+		}
+		const r = insertBtn!.getBoundingClientRect();
+		insertAt = { x: r.right - 200, y: r.bottom + 6 };
+	}
+
 	const dur = reducedMotion() ? 0 : 1;
 </script>
 
@@ -349,6 +433,20 @@
 				</div>
 			{/if}
 			<div class="editor-actions">
+				{#if editable && !app.touch}
+					<button
+						bind:this={insertBtn}
+						class="act icon"
+						class:on={!!insertAt || !!tableAt}
+						title="Insert image, table or highlight"
+						aria-label="Insert"
+						aria-haspopup="menu"
+						aria-expanded={!!insertAt}
+						onclick={openInsert}
+					>
+						<Icon name="plus" size={17} stroke={1.8} />
+					</button>
+				{/if}
 				{#if !locked}
 					{#if editable}
 						<button
@@ -477,8 +575,18 @@
 		</div>
 
 		{#if app.touch && editor && editable}
-			<FormatToolbar {editor} />
+			<FormatToolbar {editor} insert={insertItems} />
 		{/if}
+		<input
+			bind:this={imageInput}
+			class="file-input"
+			type="file"
+			accept="image/*"
+			multiple
+			tabindex="-1"
+			aria-hidden="true"
+			onchange={onImagePicked}
+		/>
 	{/if}
 </section>
 
@@ -490,6 +598,27 @@
 		label="File actions"
 		trigger={crumbBtn}
 		onclose={() => (crumbAt = null)}
+	/>
+{/if}
+
+{#if insertAt}
+	<ActionMenu
+		items={headerInsertItems}
+		at={insertAt}
+		title="Insert"
+		label="Insert"
+		trigger={insertBtn}
+		onclose={() => (insertAt = null)}
+	/>
+{/if}
+
+{#if tableAt}
+	<TablePicker
+		at={tableAt}
+		sheet={tableAt.sheet}
+		trigger={insertBtn}
+		onpick={(cols, rows) => editor && insertTable(editor.view, cols, rows)}
+		onclose={() => (tableAt = null)}
 	/>
 {/if}
 
@@ -744,6 +873,9 @@
 	}
 	.vim-badge.visual {
 		background: #7c6ff0;
+	}
+	.file-input {
+		display: none;
 	}
 	.placeholder-screen {
 		position: absolute;
