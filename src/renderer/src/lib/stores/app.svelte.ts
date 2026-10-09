@@ -113,6 +113,8 @@ export interface Settings {
 	openIn: OpenIn;
 	/** Note tabs above the editor: every note opened (or created) gets a tab. */
 	tabs: boolean;
+	/** Most tabs open at once; past it a note opens in the current tab (0 = no limit). */
+	maxTabs: number;
 	/** Encrypted notes. Off: no crypto code loaded, no key in memory, no buttons. */
 	encryption: boolean;
 	/** Lock encrypted notes after this many idle / background minutes (0 = never). */
@@ -142,6 +144,7 @@ const DEFAULT_SETTINGS: Settings = {
 	ai: true,
 	openIn: 'auto',
 	tabs: false,
+	maxTabs: 5,
 	encryption: false,
 	autoLockMinutes: 15,
 	aiReadsEncrypted: true,
@@ -422,6 +425,7 @@ class AppState {
 		if (this.settings.tabs) {
 			const tabs = (await platform.getState<string[]>('tabs')) ?? [];
 			this.tabs = tabs.filter((id) => this.notes.some((n) => n.id === id));
+			this.limitTabs();
 		}
 		// Re-open the note from the previous session, if it still exists.
 		// An encrypted one only when already unlocked (no passphrase prompt at launch).
@@ -576,11 +580,10 @@ class AppState {
 		this.tags = tags;
 		this.trashNotes = trash;
 		this.folders = folders;
-		// If the active note was deleted externally, clear the editor.
-		if (this.activeId && !notes.some((n) => n.id === this.activeId)) {
-			this.activeId = null;
-			this.activeContent = '';
-		}
+		// The open note was deleted under us (a pull, another app): close it, and
+		// drop any edit still queued for it, which would write the file back.
+		if (this.activeId && !this.moving && !notes.some((n) => n.id === this.activeId))
+			this.closeEditor();
 		// Tabs of notes gone from disk close (mid-move, `pathMoved` re-points them instead).
 		const gone = (t: string | null) =>
 			t !== null && t !== this.activeId && !notes.some((n) => n.id === t);
@@ -679,14 +682,29 @@ class AppState {
 	/**
 	 * Give the note just opened (null: the draft) a tab: its own when it has
 	 * one, else a new one right after the tab that was current (`slot`), or
-	 * at the end when none was.
+	 * at the end when none was. With `maxTabs` open it takes over the current
+	 * tab instead (the last one when none is current).
 	 */
 	private placeTab(id: string | null, slot: number): void {
 		if (!this.settings.tabs) return;
 		const tabs = [...this.tabs];
-		if (!tabs.includes(id)) tabs.splice(slot >= 0 ? slot + 1 : tabs.length, 0, id);
+		const max = this.settings.maxTabs;
+		if (!tabs.includes(id)) {
+			if (max > 0 && tabs.length >= max) tabs[slot >= 0 ? slot : tabs.length - 1] = id;
+			else tabs.splice(slot >= 0 ? slot + 1 : tabs.length, 0, id);
+		}
 		// A draft left blank was dropped on the way out: so is its tab.
 		this.setTabs(tabs.filter((t) => t !== null || this.draft));
+	}
+
+	/** A lower limit closes the tabs past it, keeping the current one. */
+	private limitTabs(): void {
+		const max = this.settings.maxTabs;
+		if (max <= 0 || this.tabs.length <= max) return;
+		const tabs = this.tabs.slice(0, max);
+		const at = this.tabIndex;
+		if (at >= max) tabs[max - 1] = this.tabs[at];
+		this.setTabs(tabs);
 	}
 
 	/** Close tab `i`; closing the current one opens its neighbour. */
@@ -1719,6 +1737,7 @@ class AppState {
 			void (patch.encryption ? this.startVault() : this.stopVault());
 		if (patch.autoLockMinutes !== undefined) this.vault?.rearm();
 		if (patch.tabs !== undefined) this.tabsToggled(patch.tabs);
+		if (patch.maxTabs !== undefined) this.limitTabs();
 		localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
 		void platform.setState('settings', $state.snapshot(this.settings));
 		this.applyFonts();

@@ -1871,6 +1871,43 @@ test('desktop: note tabs — every note opened gets a tab, @tabs for the AI', as
 	await ctx.close();
 });
 
+test('desktop: past the tab limit a note opens in the current tab', async ({ browser }) => {
+	const { ctx, page } = await desktopPage(browser, {
+		'alpha.md': '# Alpha\n\none',
+		'beta.md': '# Beta\n\ntwo',
+		'gamma.md': '# Gamma\n\nthree',
+		'delta.md': '# Delta\n\nfour'
+	});
+	const tabs = page.getByRole('tablist', { name: 'Open notes' }).getByRole('tab');
+	await sidebar(page)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	await list(page).getByText('Alpha', { exact: true }).click();
+	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
+	await page
+		.getByRole('navigation', { name: 'Settings sections' })
+		.getByRole('button', { name: /Editor/ })
+		.click();
+	await page.getByRole('switch', { name: 'Tabs' }).click();
+	const limit = page.getByLabel('Tab limit');
+	await expect(limit).toHaveValue('5');
+	await limit.selectOption('2');
+	await page.getByRole('button', { name: 'Close settings' }).click();
+
+	await list(page).getByText('Beta', { exact: true }).click();
+	await expect(tabs).toHaveText(['Alpha', 'Beta']);
+	// Full: Gamma takes over the current tab.
+	await list(page).getByText('Gamma', { exact: true }).click();
+	await expect(tabs).toHaveText(['Alpha', 'Gamma']);
+	await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
+	// A note with a tab still switches to it.
+	await list(page).getByText('Alpha', { exact: true }).click();
+	await expect(tabs.first()).toHaveAttribute('aria-selected', 'true');
+	await list(page).getByText('Delta', { exact: true }).click();
+	await expect(tabs).toHaveText(['Delta', 'Gamma']);
+	await ctx.close();
+});
+
 test('desktop: dividers draw by kind; highlights mark a line or a stretch, in colors', async ({
 	browser
 }) => {

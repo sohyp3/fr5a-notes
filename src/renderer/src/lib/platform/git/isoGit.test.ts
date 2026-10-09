@@ -116,6 +116,17 @@ const remoteLog = () =>
 		.trim()
 		.split('\n');
 
+/** Files on the remote's main branch. */
+const remoteTree = () =>
+	execFileSync(
+		'git',
+		['--git-dir', path.join(tmp, 'remote.git'), 'ls-tree', '-r', '--name-only', 'main'],
+		{ encoding: 'utf8' }
+	)
+		.trim()
+		.split('\n')
+		.sort();
+
 beforeEach(() => {
 	tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fr5a-isogit-'));
 	execFileSync('git', ['init', '--bare', '--initial-branch=main', path.join(tmp, 'remote.git')]);
@@ -216,6 +227,75 @@ describe('isomorphic-git sync', () => {
 		expect(read(b.dir, 'from-a.md')).toBe('# From A\n');
 		expect(read(b.dir, 'a-only.md')).toBe('# A\n\nedited on B, not committed\n');
 		expect(read(b.dir, 'draft.md')).toBe('# Draft on B\n');
+	});
+
+	it('deletes on pull what the remote deleted, with the folders it empties', async () => {
+		const { a, b } = await twoClones();
+		write(a.dir, 'dir/sub/x.md', '# X\n');
+		await a.sync.push();
+		await b.sync.pull();
+		fs.rmSync(path.join(a.dir, 'a-only.md'));
+		fs.rmSync(path.join(a.dir, 'dir'), { recursive: true });
+		await a.sync.push();
+		expect(await b.sync.pull()).toEqual({ status: 'ok' }); // fast-forward
+		expect(has(b.dir, 'a-only.md')).toBe(false);
+		expect(has(b.dir, 'dir')).toBe(false);
+		await expect(b.sync.push()).rejects.toMatchObject({ code: 'nothing-to-push' });
+	});
+
+	it('deletes what the remote deleted through a merge too', async () => {
+		const { a, b } = await twoClones();
+		write(a.dir, 'dir/x.md', '# X\n');
+		await a.sync.push();
+		await b.sync.pull();
+		fs.rmSync(path.join(a.dir, 'dir'), { recursive: true });
+		await a.sync.push();
+		write(b.dir, 'b-only.md', '# B\n');
+		expect(await b.sync.push()).toEqual({ status: 'ok' });
+		expect(has(b.dir, 'dir')).toBe(false);
+		expect(remoteTree()).toEqual(['a-only.md', 'b-only.md', 'shared.md']);
+	});
+
+	it('a conflicted pull keeps what the remote deleted deleted, and its edits, once resolved', async () => {
+		const { a, b } = await twoClones();
+		write(a.dir, 'dir/x.md', '# X\n');
+		write(a.dir, 'other.md', '# Other\n');
+		await a.sync.push();
+		await b.sync.pull();
+		fs.rmSync(path.join(a.dir, 'a-only.md'));
+		fs.rmSync(path.join(a.dir, 'dir'), { recursive: true });
+		write(a.dir, 'other.md', '# Other, edited by A\n');
+		write(a.dir, 'new.md', '# New from A\n');
+		write(a.dir, 'shared.md', '# Shared\n\nA\n');
+		await a.sync.push();
+		write(b.dir, 'shared.md', '# Shared\n\nB\n');
+		expect((await b.sync.pull()).status).toBe('conflict');
+		expect(has(b.dir, 'a-only.md')).toBe(false);
+		expect(has(b.dir, 'dir')).toBe(false);
+		expect(await b.sync.resolve([{ path: 'shared.md', pick: 'mine' }])).toEqual({ status: 'ok' });
+		expect(await b.sync.push()).toEqual({ status: 'ok' });
+		expect(remoteTree()).toEqual(['new.md', 'other.md', 'shared.md']);
+		const show = (f: string) =>
+			execFileSync('git', ['--git-dir', path.join(tmp, 'remote.git'), 'show', `main:${f}`], {
+				encoding: 'utf8'
+			});
+		expect(show('other.md')).toBe('# Other, edited by A\n');
+		expect(show('shared.md')).toBe('# Shared\n\nB\n');
+	});
+
+	it('an aborted conflicted pull puts back what the remote deleted', async () => {
+		const { a, b } = await twoClones();
+		fs.rmSync(path.join(a.dir, 'a-only.md'));
+		write(a.dir, 'shared.md', '# Shared\n\nA\n');
+		await a.sync.push();
+		write(b.dir, 'shared.md', '# Shared\n\nB\n');
+		expect((await b.sync.pull()).status).toBe('conflict');
+		expect(has(b.dir, 'a-only.md')).toBe(false);
+		await b.sync.abort();
+		expect(read(b.dir, 'a-only.md')).toBe('# A\n');
+		expect(read(b.dir, 'shared.md')).toBe('# Shared\n\nB\n');
+		const status = await git.statusMatrix({ fs, dir: b.dir });
+		expect(status.filter(([, h, w, s]) => !(h === 1 && w === 1 && s === 1))).toEqual([]);
 	});
 
 	it('keeps note times across a pull; notes new here get their commit time', async () => {

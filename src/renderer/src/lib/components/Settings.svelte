@@ -42,6 +42,9 @@
 		{ id: 'view', label: 'View' },
 		{ id: 'edit', label: 'Edit' }
 	];
+
+	/** Tab limits offered (0 = no limit). */
+	const MAX_TABS = [2, 3, 4, 5, 6, 8, 10, 15, 0];
 </script>
 
 {#snippet toggle(on: boolean, label: string, flip: () => void)}
@@ -293,6 +296,21 @@
 								</div>
 								{@render toggle(s.tabs, 'Tabs', () => app.updateSettings({ tabs: !s.tabs }))}
 							</div>
+							{#if s.tabs}
+								<div class="row">
+									<div class="label">
+										<label class="name" for="max-tabs">Tab limit</label>
+										<span class="desc">With this many open, a note opens in the current tab</span>
+									</div>
+									<select
+										id="max-tabs"
+										value={s.maxTabs}
+										onchange={(e) => app.updateSettings({ maxTabs: Number(e.currentTarget.value) })}
+									>
+										{#each MAX_TABS as n (n)}<option value={n}>{n || 'No limit'}</option>{/each}
+									</select>
+								</div>
+							{/if}
 						</section>
 						<!-- No Vim on Android (on-screen keyboard; the editor ignores the setting there). -->
 						{#if platform.platform !== 'android'}

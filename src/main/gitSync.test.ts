@@ -154,6 +154,24 @@ describe('gitSync', () => {
 		expect(read(a, 'b.md')).toBe('B side\n');
 	});
 
+	it('a pull deletes what the remote deleted, through a conflicted merge too', async () => {
+		fs.mkdirSync(path.join(a, 'dir'));
+		write(a, 'dir/x.md', '# X\n');
+		write(a, 'gone.md', '# Gone\n');
+		await createGitSync(a).push();
+		await createGitSync(b).pull();
+		fs.rmSync(path.join(a, 'dir'), { recursive: true });
+		fs.rmSync(path.join(a, 'gone.md'));
+		await makeConflict();
+		const sync = createGitSync(b);
+		expect((await sync.pull()).status).toBe('conflict');
+		expect(fs.existsSync(path.join(b, 'gone.md'))).toBe(false);
+		expect(fs.existsSync(path.join(b, 'dir'))).toBe(false);
+		await sync.resolve([{ path: 'note.md', pick: 'mine' }]);
+		expect(await sync.push()).toEqual({ status: 'ok' });
+		expect(git(bare, 'ls-tree', '-r', '--name-only', 'main').trim()).toBe('note.md');
+	});
+
 	it('a same-line edit returns a conflict list with mine and theirs', async () => {
 		await makeConflict();
 		const result = await createGitSync(b).pull();

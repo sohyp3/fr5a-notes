@@ -46,6 +46,8 @@ const MERGE_STATE = 'fr5a-merge.json';
 const FALLBACK_AUTHOR = { name: 'fr5a', email: 'fr5a@localhost' };
 /** How far back to look for the commit that last changed a file new to this device. */
 const TIME_WALK_LIMIT = 200;
+/** Git's empty tree: the merge base of unrelated histories. */
+const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
 /** Repo-relative path → its mtime before a merge; null when it wasn't on disk. */
 type FileTimes = Record<string, number | null>;
@@ -251,6 +253,86 @@ export function createIsoGitSync({ fs, http, dir, getToken }: IsoGitDeps) {
 		if (fresh.length) for (const [p, at] of await commitTimes(fresh, ref)) await setMtime(p, at);
 	}
 
+	// --- deletions ----------------------------------------------------------
+	// A note deleted on the remote has to go here too: left on disk, the next
+	// commit would add it back and push it back to the remote.
+
+	/** Delete files the merge took away, then the folders that leaves empty. */
+	async function removeFiles(paths: string[]): Promise<void> {
+		const folders = new Set<string>();
+		for (const filepath of paths) {
+			await fs.promises.unlink(`${dir}/${filepath}`).catch(() => {});
+			// The Capacitor fs reports a failed delete as a missing file: check.
+			if ((await mtimeOf(filepath)) !== null)
+				throw new GitSyncError('git', `Couldn't delete ${filepath}, which the remote deleted.`);
+			for (let i = filepath.lastIndexOf('/'); i > 0; i = filepath.lastIndexOf('/', i - 1))
+				folders.add(filepath.slice(0, i));
+		}
+		// Deepest first, so a folder emptied by removing its subfolders goes too.
+		for (const folder of [...folders].sort((a, b) => b.length - a.length)) {
+			const p = `${dir}/${folder}`;
+			const left = (await fs.promises.readdir(p).catch(() => null)) as string[] | null;
+			if (left?.length === 0) await fs.promises.rmdir(p).catch(() => {});
+		}
+	}
+
+	/** Files of `a` that `b` doesn't have. */
+	async function removedFiles(a: string, b: string): Promise<string[]> {
+		const out: string[] = [];
+		await git.walk({
+			...base,
+			trees: [git.TREE({ ref: a }), git.TREE({ ref: b })],
+			map: async (filepath, [x, y]) => {
+				if ((await x?.oid()) === (await y?.oid())) return null;
+				if ((await x?.type()) === 'blob' && !y) out.push(filepath);
+			}
+		});
+		return out;
+	}
+
+	/**
+	 * A merge stopped on conflicts leaves the index as it was, bar the
+	 * conflicted files and the edits both sides made: what only the remote
+	 * changed is written to disk but not staged, and what it deleted stays on
+	 * disk and staged. The merge commit is made from the index, so resolving
+	 * would undo the remote's edits and bring back what it deleted. Take the
+	 * remote's side of every path only it changed, on disk and in the index.
+	 */
+	async function takeTheirs(ours: string, theirs: string, conflicted: Set<string>): Promise<void> {
+		const [mergeBase] = await git.findMergeBase({ ...base, oids: [ours, theirs] });
+		const take: [string, string | null][] = [];
+		await git.walk({
+			...base,
+			trees: [
+				git.TREE({ ref: ours }),
+				git.TREE({ ref: mergeBase ?? EMPTY_TREE }),
+				git.TREE({ ref: theirs })
+			],
+			map: async (filepath, [o, b, t]) => {
+				// Nothing the remote changed in here.
+				if ((await b?.oid()) === (await t?.oid())) return null;
+				const types = [await o?.type(), await b?.type(), await t?.type()];
+				if (conflicted.has(filepath) || types.some((x) => x && x !== 'blob')) return;
+				const [oo, bo, to] = [await o?.oid(), await b?.oid(), await t?.oid()];
+				if (oo === bo) take.push([filepath, to ?? null]);
+			}
+		});
+		const deleted: string[] = [];
+		for (const [filepath, oid] of take) {
+			if (oid === null) {
+				deleted.push(filepath);
+				await git.remove({ ...base, filepath });
+			} else {
+				const abs = `${dir}/${filepath}`;
+				const { blob } = await git.readBlob({ ...base, oid });
+				await mkdirp(abs.slice(0, abs.lastIndexOf('/')));
+				await fs.promises.writeFile(abs, blob);
+				await git.add({ ...base, filepath });
+			}
+		}
+		await removeFiles(deleted);
+	}
+
 	async function conflictsOf(state: MergeState): Promise<ConflictFile[]> {
 		return Promise.all(
 			state.paths.map(async (p) => ({
@@ -390,8 +472,9 @@ export function createIsoGitSync({ fs, http, dir, getToken }: IsoGitDeps) {
 				const paths = (err as InstanceType<typeof Errors.MergeConflictError>).data.filepaths;
 				const state: MergeState = { branch, ours, theirs, paths, times };
 				await writeState(state);
-				// Conflicted files get their old time back as each one is resolved.
 				const conflicted = new Set(paths);
+				await takeTheirs(ours, theirs, conflicted);
+				// Conflicted files get their old time back as each one is resolved.
 				await restoreTimes(
 					times,
 					theirs,
@@ -405,6 +488,10 @@ export function createIsoGitSync({ fs, http, dir, getToken }: IsoGitDeps) {
 		// forced checkout only moves it to the merge result (merge may have
 		// updated the index already, which a plain checkout would take as current).
 		await git.checkout({ ...base, ref: branch, force: true });
+		// Checkout deletes what the remote deleted but leaves its folders (and
+		// a delete the fs failed silently): finish the job.
+		const head = await resolveRef('HEAD');
+		if (head && head !== ours) await removeFiles(await removedFiles(ours, head));
 		await restoreTimes(times, theirs);
 		return { status: 'ok' };
 	}
@@ -490,7 +577,7 @@ export function createIsoGitSync({ fs, http, dir, getToken }: IsoGitDeps) {
 					? choice.content
 					: await blobAt(choice.pick === 'mine' ? state.ours : state.theirs, filepath);
 			if (content === null) {
-				await fs.promises.unlink(abs).catch(() => {});
+				await removeFiles([filepath]);
 				await git.remove({ ...base, filepath });
 			} else {
 				await mkdirp(abs.slice(0, abs.lastIndexOf('/')));
