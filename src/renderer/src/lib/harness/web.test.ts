@@ -58,6 +58,20 @@ describe('parseSearch', () => {
 		});
 		expect(formatResults(parseSearch('brave', brave))).toBe('1. B\n   https://b\n   y');
 	});
+
+	it('reads Exa highlights as one line, titles falling back to the URL', () => {
+		const exa = JSON.stringify({
+			requestId: 'r',
+			results: [
+				{ title: 'E', url: 'https://e', highlights: ['first\npart', 'second'] },
+				{ title: '', url: 'https://bare' }
+			]
+		});
+		expect(parseSearch('exa', exa)).toEqual([
+			{ title: 'E', url: 'https://e', snippet: 'first part … second' },
+			{ title: 'https://bare', url: 'https://bare', snippet: '' }
+		]);
+	});
 });
 
 describe('webSearch', () => {
@@ -113,6 +127,37 @@ describe('webSearch', () => {
 		).toBe('Unable to validate request parameter(s) (query q: too long)');
 		expect(searchError(JSON.stringify({ detail: { error: 'Unauthorized' } }))).toBe('Unauthorized');
 		expect(searchError('<html>bad gateway</html>')).toBe('<html>bad gateway</html>');
+	});
+
+	it('posts to Exa with the key header and asks for highlights', async () => {
+		const exa = { kind: 'exa' as const, baseUrl: '' };
+		const { sent, http } = fakeHttp({ status: 200, headers: {}, body: '{"results":[]}' });
+		await expect(webSearch(http, exa, null, 'x')).rejects.toThrow(/Exa needs an API key/);
+		expect(await webSearch(http, exa, ' key \n', 'svelte runes', 3)).toEqual([]);
+		expect(sent).toHaveLength(1);
+		expect(sent[0].url).toBe('https://api.exa.ai/search');
+		expect(sent[0].method).toBe('POST');
+		expect(sent[0].headers?.['x-api-key']).toBe('key');
+		expect(JSON.parse(sent[0].body!)).toEqual({
+			query: 'svelte runes',
+			numResults: 3,
+			contents: { highlights: { maxCharacters: 300 } }
+		});
+	});
+
+	it("turns Exa's invalid-key error into a pointer to Settings", async () => {
+		const body = JSON.stringify({
+			requestId: 'r',
+			error: "Invalid API key. Provide a valid key using 'x-api-key: <key>'.",
+			tag: 'INVALID_API_KEY'
+		});
+		const { http } = fakeHttp({ status: 401, headers: {}, body });
+		await expect(webSearch(http, { kind: 'exa', baseUrl: '' }, 'bad', 'x')).rejects.toThrow(
+			'Search failed (401): Invalid API key. Check the key in Settings → AI → Web search.'
+		);
+		expect(searchError(JSON.stringify({ error: 'Rate limit exceeded', tag: 'RATE_LIMIT' }))).toBe(
+			'Rate limit exceeded'
+		);
 	});
 });
 

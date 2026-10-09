@@ -13,6 +13,7 @@ import {
 	BUILTIN_PROVIDERS,
 	DEFAULT_AI_CONFIG,
 	LEGACY_SEARCH_KEY_NAME,
+	SEARCH_KINDS,
 	providerKeyName,
 	searchKeyName,
 	type AiConfig,
@@ -197,11 +198,11 @@ class AiSettings {
 
 	/** The key for a search provider (DuckDuckGo / SearXNG need none). */
 	async searchKey(kind: SearchKind | undefined): Promise<string | null> {
-		if (kind !== 'brave' && kind !== 'tavily') return null;
-		return (
-			(await platform.getSecret(searchKeyName(kind))) ??
-			(await platform.getSecret(LEGACY_SEARCH_KEY_NAME))
-		);
+		if (!SEARCH_KINDS.find((k) => k.kind === kind)?.needsKey) return null;
+		const key = await platform.getSecret(searchKeyName(kind!));
+		// The legacy key was Brave's or Tavily's; never hand it to a provider added since.
+		if (key !== null || (kind !== 'brave' && kind !== 'tavily')) return key;
+		return platform.getSecret(LEGACY_SEARCH_KEY_NAME);
 	}
 
 	async setSearchKey(kind: SearchKind, key: string | null): Promise<void> {

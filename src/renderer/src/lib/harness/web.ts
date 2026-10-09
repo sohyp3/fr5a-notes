@@ -36,7 +36,7 @@ export async function webSearch(
 		const results = parseDuckDuckGo(res.body);
 		if (!results.length && /anomaly|captcha/i.test(res.body))
 			throw new Error(
-				'DuckDuckGo asked for a captcha. Retry later, or use SearXNG / Brave / Tavily in Settings → AI.'
+				'DuckDuckGo asked for a captcha. Retry later, or pick another provider in Settings → AI.'
 			);
 		return results.slice(0, max);
 	} else if (profile.kind === 'searxng') {
@@ -55,12 +55,25 @@ export async function webSearch(
 			headers: { Accept: 'application/json', 'X-Subscription-Token': apiKey!.trim() },
 			timeoutMs: 30_000
 		});
-	} else {
+	} else if (profile.kind === 'tavily') {
 		res = await http.httpFetch({
 			url: 'https://api.tavily.com/search',
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey!.trim()}` },
 			body: JSON.stringify({ query, max_results: max }),
+			timeoutMs: 30_000
+		});
+	} else {
+		// Highlights: the passages that best match the query, as the snippet.
+		res = await http.httpFetch({
+			url: 'https://api.exa.ai/search',
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey!.trim() },
+			body: JSON.stringify({
+				query,
+				numResults: Math.min(max, 100),
+				contents: { highlights: { maxCharacters: 300 } }
+			}),
 			timeoutMs: 30_000
 		});
 	}
@@ -71,7 +84,8 @@ export async function webSearch(
 
 /**
  * The readable part of a search API error: Brave's `error.detail` (plus which
- * field failed validation), Tavily's `detail.error`, else the start of the body.
+ * field failed validation), Tavily's `detail.error`, Exa's `error`, else the
+ * start of the body.
  */
 export function searchError(body: string): string {
 	try {
@@ -84,6 +98,8 @@ export function searchError(body: string): string {
 				return `${e.detail} Check the key in Settings → AI → Web search.`;
 			if (e.detail) return `${e.detail}${where}`;
 		}
+		if (j?.tag === 'INVALID_API_KEY')
+			return 'Invalid API key. Check the key in Settings → AI → Web search.';
 		const d = j?.detail;
 		if (typeof d === 'string') return d;
 		if (d?.error) return String(d.error);
@@ -132,14 +148,21 @@ export function parseDuckDuckGo(html: string): SearchResult[] {
 export function parseSearch(kind: SearchProfile['kind'], body: string): SearchResult[] {
 	if (kind === 'duckduckgo') return parseDuckDuckGo(body);
 	const j = JSON.parse(body);
-	const rows: { title?: string; url?: string; content?: string; description?: string }[] =
-		kind === 'brave' ? (j?.web?.results ?? []) : (j?.results ?? []);
+	const rows: {
+		title?: string;
+		url?: string;
+		content?: string;
+		description?: string;
+		highlights?: string[];
+	}[] = kind === 'brave' ? (j?.web?.results ?? []) : (j?.results ?? []);
 	return rows
 		.filter((r) => r.url)
 		.map((r) => ({
-			title: stripTags(r.title ?? r.url ?? ''),
+			title: stripTags(r.title || r.url || ''),
 			url: r.url!,
-			snippet: stripTags(r.content ?? r.description ?? '').slice(0, 300)
+			snippet: stripTags(
+				r.content ?? r.description ?? r.highlights?.join(' … ').replace(/\s+/g, ' ') ?? ''
+			).slice(0, 300)
 		}));
 }
 

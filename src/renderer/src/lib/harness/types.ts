@@ -18,7 +18,7 @@ export interface ProviderProfile {
 	price?: Price;
 }
 
-export type SearchKind = 'duckduckgo' | 'searxng' | 'brave' | 'tavily';
+export type SearchKind = 'duckduckgo' | 'searxng' | 'brave' | 'tavily' | 'exa';
 
 export interface SearchProfile {
 	kind: SearchKind;
@@ -32,7 +32,8 @@ export const SEARCH_KINDS: { kind: SearchKind; label: string; hint: string; need
 		{ kind: 'duckduckgo', label: 'DuckDuckGo', hint: 'No key needed', needsKey: false },
 		{ kind: 'searxng', label: 'SearXNG', hint: 'Your own instance', needsKey: false },
 		{ kind: 'brave', label: 'Brave Search', hint: 'API key', needsKey: true },
-		{ kind: 'tavily', label: 'Tavily', hint: 'API key', needsKey: true }
+		{ kind: 'tavily', label: 'Tavily', hint: 'API key', needsKey: true },
+		{ kind: 'exa', label: 'Exa', hint: 'API key', needsKey: true }
 	];
 
 /** Persisted under the `ai` state key. API keys live in secrets, never here. */
@@ -106,9 +107,9 @@ export const DEFAULT_AI_CONFIG: AiConfig = {
 
 /** Secret names for API keys. */
 export const providerKeyName = (id: string) => `provider:${id}`;
-/** One key per search provider, so switching Brave ↔ Tavily never sends the other's key. */
+/** One key per search provider, so switching between them never sends another's key. */
 export const searchKeyName = (kind: SearchKind) => `search:${kind}`;
-/** The single search key older versions kept (read as a fallback). */
+/** The single (Brave or Tavily) search key older versions kept (read as a fallback). */
 export const LEGACY_SEARCH_KEY_NAME = 'search';
 
 export interface ToolCall {
