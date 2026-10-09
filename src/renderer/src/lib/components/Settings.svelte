@@ -10,6 +10,15 @@
 	import { ACCENTS } from '../accents';
 	import { SHORTCUTS, VIM_SHORTCUTS as vimShortcuts } from '../shortcuts';
 	import { reducedMotion } from '../portal';
+	import {
+		BAR_ICONS,
+		BAR_LABELS,
+		FORMAT_ITEMS,
+		INSERT_ITEMS,
+		NOTE_ITEMS,
+		isInsertItem,
+		type BarItem
+	} from '../noteBar';
 
 	const app = getAppState();
 	const s = $derived(app.settings);
@@ -20,6 +29,7 @@
 		{ id: 'general', label: 'General', icon: 'note', desc: 'Notes folder, opening notes' },
 		{ id: 'appearance', label: 'Appearance', icon: 'sun', desc: 'Theme, accent, fonts' },
 		{ id: 'editor', label: 'Editor', icon: 'edit', desc: 'Ghost syntax, highlights, tabs, Vim' },
+		{ id: 'toolbar', label: 'Toolbar', icon: 'toolbar', desc: 'Buttons in the bar or in its menu' },
 		{ id: 'sync', label: 'Sync', icon: 'sync', desc: 'Git remotes, changes' },
 		{ id: 'ai', label: 'AI assistant', icon: 'ai', desc: 'Providers, web search, skills' },
 		{ id: 'encryption', label: 'Encryption', icon: 'key', desc: 'Encrypt notes with your key' },
@@ -45,7 +55,46 @@
 
 	/** Tab limits offered (0 = no limit). */
 	const MAX_TABS = [2, 3, 4, 5, 6, 8, 10, 15, 0];
+
+	/** Note actions offered: the AI button only while AI is on. */
+	const noteBarItems = $derived(NOTE_ITEMS.filter((id) => id !== 'ai' || s.ai));
+	/**
+	 * While editing. Touch: the formatting toolbar's buttons, then insert actions
+	 * (Insert itself is that toolbar's, so not movable). Mouse: insert actions.
+	 */
+	const insertBarItems = $derived<BarItem[]>([
+		...(app.touch ? FORMAT_ITEMS : ['insert' as const]),
+		...INSERT_ITEMS.filter(
+			(id) => (id !== 'image' || !!platform.saveAsset) && (id !== 'highlight' || s.highlights)
+		)
+	]);
+	const BAR_DESC: Partial<Record<BarItem, string>> = {
+		insert: 'Image, table and highlight without a button of their own',
+		edit: 'Switch between reading and editing',
+		dir: 'Left-to-right or right-to-left'
+	};
 </script>
+
+{#snippet barRow(id: BarItem)}
+	{@const spot = app.barSpot(id)}
+	<div class="row">
+		<div class="label">
+			<span class="name bar-name"><Icon name={BAR_ICONS[id]} size={15} />{BAR_LABELS[id]}</span>
+			{#if BAR_DESC[id]}<span class="desc">{BAR_DESC[id]}</span>{/if}
+		</div>
+		<div class="segmented" role="radiogroup" aria-label={BAR_LABELS[id]}>
+			{#each ['bar', 'menu'] as const as to (to)}
+				<button
+					class={['seg', { on: spot === to }]}
+					role="radio"
+					aria-checked={spot === to}
+					onclick={() => app.setBarSpot(id, to)}
+					>{to === 'bar' ? 'Bar' : isInsertItem(id) ? 'Insert' : 'Menu'}</button
+				>
+			{/each}
+		</div>
+	</div>
+{/snippet}
 
 {#snippet toggle(on: boolean, label: string, flip: () => void)}
 	<button
@@ -322,6 +371,39 @@
 										<span class="desc">Modal editing (normal · insert · visual)</span>
 									</div>
 									{@render toggle(s.vim, 'Vim motions', () => app.updateSettings({ vim: !s.vim }))}
+								</div>
+							</section>
+						{/if}
+					{:else if section.id === 'toolbar'}
+						<section class="group">
+							<h3>Note bar</h3>
+							<p class="prose">
+								The buttons above a note. Keep the ones you use in the bar and the rest in its ⋯
+								menu. Set for this device only, so a phone and a computer can differ. Buttons that
+								don’t fit the bar wait in ⋯.
+							</p>
+							{#each noteBarItems as id (id)}{@render barRow(id)}{/each}
+						</section>
+						<section class="group">
+							<h3>{app.touch ? 'Formatting toolbar' : 'While editing'}</h3>
+							<p class="prose">
+								{#if app.touch}
+									The toolbar under the note while you edit. Buttons moved out of it wait in its ⋯
+									menu; Image, Table and Highlight in Insert (+).
+								{:else}
+									Shown in the bar while you edit. Insert (+) holds what isn’t a button of its own.
+								{/if}
+							</p>
+							{#each insertBarItems as id (id)}{@render barRow(id)}{/each}
+						</section>
+						{#if Object.keys(s.bar ?? {}).length}
+							<section class="group">
+								<div class="row">
+									<div class="label">
+										<span class="name">Default layout</span>
+										<span class="desc">Put every button back where it started</span>
+									</div>
+									<button class="btn" onclick={() => app.updateSettings({ bar: {} })}>Reset</button>
 								</div>
 							</section>
 						{/if}
@@ -637,6 +719,15 @@
 	}
 	.phone .row.wrap > select {
 		flex: 1 1 100%;
+	}
+	.bar-name {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.bar-name :global(svg) {
+		flex: 0 0 auto;
+		color: var(--text-muted);
 	}
 	.label {
 		display: flex;

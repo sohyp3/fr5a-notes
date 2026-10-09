@@ -29,6 +29,8 @@ Touch gotchas (each caused a real bug): `.body` (its `.layout-phone` rule too) i
 
 View / edit mode: `app.editing` (setting `openIn`: `auto` = view on touch, edit with a mouse; new notes always edit). Toggled with `editor.setEditable()` — no remount — via the editor header's Edit/Done, double-tap, or Mod+Shift+E. In view mode the editor never autofocuses, so the Android keyboard stays down. The editor header (`.editor-head`) is a strip in normal flow above the scroll area, not an overlay.
 
+Note toolbar (`lib/noteBar.ts`, Settings → Toolbar, `settings.bar`, so per device): each note action (edit, AI, pin, direction, lock, changes, trash) sits in the header bar or in its ⋯; insert actions (image, table, highlight) are buttons or rows of Insert (+): in the header with a mouse, in the formatting toolbar on touch (Insert itself is only movable with a mouse); on touch the formatting buttons (bold … undo) stay in that toolbar or move into its own ⋯ (`FormatToolbar.svelte`). Items the user never moved follow `defaultSpot`, which is the old fixed layout (phones keep direction / lock / changes / trash in ⋯; Highlight is a toolbar button on touch, in Insert with a mouse). Bar buttons that don't fit fold into ⋯ from the right (`fitBar` over estimated widths; the crumb keeps 120px, 160 on touch). Right-click a header button (mouse) to move it; ⋯ ends with Customize toolbar….
+
 ## Native module gotcha
 
 `better-sqlite3` is compiled for Node's ABI by `bun install`, but runs under Electron's ABI. If you see "Could not locate the bindings file" or a `NODE_MODULE_VERSION` mismatch at runtime, run `bun run rebuild`.

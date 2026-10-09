@@ -27,7 +27,7 @@
 		type Direction
 	} from '../editor/markdown';
 	import EmptyState from './EmptyState.svelte';
-	import FormatToolbar from './FormatToolbar.svelte';
+	import FormatToolbar, { type ToolAction } from './FormatToolbar.svelte';
 	import ActionMenu, { type MenuItem } from './ActionMenu.svelte';
 	import TablePicker from './TablePicker.svelte';
 	import HighlightPicker from './HighlightPicker.svelte';
@@ -35,6 +35,16 @@
 	import Icon from './Icon.svelte';
 	import { platform } from '../platform';
 	import { reducedMotion } from '../portal';
+	import type { IconName } from '../icons';
+	import {
+		BAR_LABELS,
+		NOTE_ITEMS,
+		fitBar,
+		isInsertItem,
+		type BarItem,
+		type InsertItem,
+		type NoteItem
+	} from '../noteBar';
 	import logo from '$lib/assets/logo.png';
 	import mascotNew from '$lib/assets/fr5a-new.png';
 
@@ -51,7 +61,16 @@
 	let crumbAt = $state<{ x: number; y: number } | null>(null);
 	let insertBtn = $state<HTMLButtonElement | null>(null);
 	let insertAt = $state<{ x: number; y: number } | null>(null);
-	let tableAt = $state<{ x: number; y: number; sheet: boolean } | null>(null);
+	let tableBtn = $state<HTMLButtonElement | null>(null);
+	let highlightBtn = $state<HTMLButtonElement | null>(null);
+	/** The table size picker, opened from `anchor` (`toggle`: its own button, which closes it again). */
+	let tableAt = $state<{
+		x: number;
+		y: number;
+		sheet: boolean;
+		anchor: HTMLElement;
+		toggle: boolean;
+	} | null>(null);
 	/**
 	 * The highlight color picker (shown while `open`). Kept once closed: the
 	 * picker still reads its props while it fades out.
@@ -59,11 +78,14 @@
 	let highlightPick = $state<{
 		open: boolean;
 		at: { x: number; y: number };
-		touch: boolean;
-		trigger: HTMLElement | null;
+		above: boolean;
+		anchor: HTMLElement;
+		toggle: boolean;
 		color: HighlightColor | null;
 		any: boolean;
 	} | null>(null);
+	/** Right-click on the bar (mouse): move a button into its menu, or customize the bar. */
+	let barMenu = $state<{ at: { x: number; y: number }; id: BarItem | null } | null>(null);
 	let imageInput = $state<HTMLInputElement | null>(null);
 	// Suppress auto-save while we programmatically replace content.
 	let loading = false;
@@ -79,12 +101,11 @@
 	const editable = $derived(app.editing && !locked);
 	const compact = $derived(app.layout === 'phone');
 	let headW = $state(0);
-	/**
-	 * Too narrow for every header button (touch tablets: 44px targets beside
-	 * the list): direction / lock / changes / trash fold into ⋯, so the crumb
-	 * keeps room and nothing is clipped.
-	 */
+	/** A narrow header (touch tablets: 44px targets beside the list): the crumb keeps to the file name. */
 	const narrow = $derived(compact || (headW > 0 && headW < (app.touch ? 620 : 440)));
+	const mac = platform.platform === 'darwin';
+	/** A shortcut to show in a menu row: none on touch, where there's no keyboard to press it. */
+	const keys = (onMac: string, other: string) => (app.touch ? undefined : mac ? onMac : other);
 	const change = $derived(app.changeFor(app.activeId));
 	const hiddenAi = $derived(!!activeMeta && app.hiddenFromAi(activeMeta));
 	// Recreate the editor when a different buffer opens (editorSession), Vim or
@@ -282,37 +303,70 @@
 		crumbAt = { x: r.left, y: r.bottom + 4 };
 	}
 
-	const moreItems = $derived.by((): MenuItem[] => [
-		...fileItems,
-		{
-			label: dir === 'rtl' ? 'Left-to-right text' : 'Right-to-left text',
-			icon: 'dir',
-			hint: dir.toUpperCase(),
-			disabled: locked,
-			divider: fileItems.length > 0,
-			action: toggleDir
-		},
-		{
-			label: locked ? 'Unlock note' : 'Lock note',
-			icon: locked ? 'unlock' : 'lock',
-			disabled: !app.activeId,
-			action: () => app.activeId && app.toggleLock(app.activeId)
-		},
-		{
-			label: change ? 'Show changes' : 'Changes',
-			icon: 'diff',
-			hint: change ? 'modified' : undefined,
-			action: () => app.showChanges(app.activeId)
-		},
-		{
-			label: 'Move to Trash',
-			icon: 'trash',
-			danger: true,
-			divider: true,
-			disabled: locked || !activeMeta,
-			action: () => void deleteNote()
+	/** A note action as a row of ⋯ (Settings → Toolbar put it there, or the bar ran out of room). */
+	function noteRow(id: NoteItem): MenuItem {
+		switch (id) {
+			case 'edit':
+				return editable
+					? {
+							label: 'Done editing',
+							icon: app.touch ? 'check' : 'eye',
+							hint: keys('⌘⇧E', 'Ctrl+Shift+E'),
+							action: () => app.setEditing(false)
+						}
+					: {
+							label: 'Edit',
+							icon: 'edit',
+							hint: keys('⌘⇧E', 'Ctrl+Shift+E'),
+							action: () => void startEditing()
+						};
+			case 'ai':
+				return {
+					label: app.harnessOpen ? 'Close AI assistant' : 'AI assistant',
+					icon: 'ai',
+					hint: keys('⌘J', 'Ctrl+J'),
+					action: () => app.toggleHarness()
+				};
+			case 'pin':
+				return {
+					label: activeMeta?.pinned ? 'Unpin note' : 'Pin note',
+					icon: 'pin',
+					hint: keys('⌘P', 'Ctrl+P'),
+					disabled: !app.activeId,
+					action: () => app.activeId && app.togglePin(app.activeId)
+				};
+			case 'dir':
+				return {
+					label: dir === 'rtl' ? 'Left-to-right text' : 'Right-to-left text',
+					icon: 'dir',
+					hint: dir.toUpperCase(),
+					disabled: locked,
+					action: toggleDir
+				};
+			case 'lock':
+				return {
+					label: locked ? 'Unlock note' : 'Lock note',
+					icon: locked ? 'unlock' : 'lock',
+					disabled: !app.activeId,
+					action: () => app.activeId && app.toggleLock(app.activeId)
+				};
+			case 'changes':
+				return {
+					label: change ? 'Show changes' : 'Changes',
+					icon: 'diff',
+					hint: change ? 'modified' : undefined,
+					action: () => app.showChanges(app.activeId)
+				};
+			case 'trash':
+				return {
+					label: 'Move to Trash',
+					icon: 'trash',
+					danger: true,
+					disabled: locked || !activeMeta,
+					action: () => void deleteNote()
+				};
 		}
-	]);
+	}
 
 	// --- Insert: image, table, highlight -----------------------------------
 
@@ -326,25 +380,32 @@
 		if (editor && files.length) void insertImages(editor.view, files, saveImage);
 	}
 
-	/** The table size picker: below the header's Insert button, or above the touch toolbar. */
-	function openTable(): void {
-		const sheet = app.layout === 'phone';
-		const r = (app.touch ? scroller : insertBtn)?.getBoundingClientRect();
-		if (!r) return;
-		// The popover flips above `y` when it wouldn't fit below.
-		tableAt = app.touch
-			? { x: r.left + 12, y: r.bottom - 6, sheet }
-			: { x: r.right - 210, y: r.bottom + 6, sheet };
+	/**
+	 * How a popup opens from `anchor`: under a header button, or `above` one of
+	 * the touch toolbar. `toggle`: the anchor is the popup's own button, so
+	 * pressing it again closes it (a menu's button just opens the menu).
+	 */
+	interface PopupFrom {
+		above: boolean;
+		toggle: boolean;
 	}
 
-	const insertItems = $derived.by((): MenuItem[] => [
-		...(platform.saveAsset ? [{ label: 'Image…', icon: 'image' as const, action: pickImage }] : []),
-		{
-			label: 'Table…',
-			icon: 'table' as const,
-			action: openTable
+	/** The table size picker. */
+	function openTable(anchor: HTMLElement, { above, toggle }: PopupFrom): void {
+		if (tableAt && toggle) {
+			tableAt = null;
+			return;
 		}
-	]);
+		const r = anchor.getBoundingClientRect();
+		// The popover flips above `y` when it wouldn't fit below.
+		tableAt = {
+			x: above ? r.left : r.right - 210,
+			y: above ? r.top - 6 : r.bottom + 6,
+			sheet: app.layout === 'phone',
+			anchor,
+			toggle
+		};
+	}
 
 	/** The color last picked (Mod+Shift+H paints it). */
 	function lastHighlight(): HighlightColor {
@@ -352,24 +413,22 @@
 		return isHighlightColor(c) ? c : 'yellow';
 	}
 
-	/**
-	 * The highlight color picker: over the touch toolbar's Highlight button
-	 * (`trigger`, which toggles it), or below the header's Insert button.
-	 */
-	function openHighlight(trigger: HTMLElement | null): void {
+	/** The highlight color picker, centred on `anchor`. */
+	function openHighlight(anchor: HTMLElement, { above, toggle }: PopupFrom): void {
 		if (highlightPick?.open) {
 			highlightPick.open = false;
 			return;
 		}
-		const r = (trigger ?? insertBtn)?.getBoundingClientRect();
-		if (!editor || !r) return;
+		if (!editor) return;
+		const r = anchor.getBoundingClientRect();
 		const { color, any } = highlightAt(editor.state);
 		const x = r.left + r.width / 2;
 		highlightPick = {
 			open: true,
-			at: trigger ? { x, y: r.top - 6 } : { x, y: r.bottom + 6 },
-			touch: !!trigger,
-			trigger,
+			at: { x, y: above ? r.top - 6 : r.bottom + 6 },
+			above,
+			anchor,
+			toggle,
 			color,
 			any
 		};
@@ -383,21 +442,159 @@
 		editor.view.focus();
 	}
 
-	/** Header Insert menu (mouse): the touch toolbar has its own Highlight button. */
-	const headerInsertItems = $derived.by((): MenuItem[] => [
-		...insertItems,
-		...(highlights
-			? [
-					{
-						label: 'Highlight…',
-						icon: 'highlight' as const,
-						hint: platform.platform === 'darwin' ? '⌘⇧H' : 'Ctrl+Shift+H',
-						divider: true,
-						action: () => openHighlight(null)
-					}
-				]
-			: [])
-	]);
+	interface InsertAction {
+		id: InsertItem;
+		label: string;
+		icon: IconName;
+		hint?: string;
+		/** Its popup is open. */
+		on: boolean;
+		run(anchor: HTMLElement, from: PopupFrom): void;
+	}
+
+	/**
+	 * Image / table / highlight while editing. Settings → Toolbar makes each a
+	 * button (header with a mouse, formatting toolbar on touch) or a row of Insert.
+	 */
+	const inserts = $derived.by((): InsertAction[] => {
+		if (!editable) return [];
+		const all: InsertAction[] = [];
+		if (platform.saveAsset)
+			all.push({ id: 'image', label: 'Image', icon: 'image', on: false, run: pickImage });
+		all.push({ id: 'table', label: 'Table', icon: 'table', on: !!tableAt, run: openTable });
+		if (highlights)
+			all.push({
+				id: 'highlight',
+				label: 'Highlight',
+				icon: 'highlight',
+				hint: keys('⌘⇧H', 'Ctrl+Shift+H'),
+				on: !!highlightPick?.open,
+				run: openHighlight
+			});
+		return all;
+	});
+	const promoted = $derived(inserts.filter((a) => app.barSpot(a.id) === 'bar'));
+	const grouped = $derived(inserts.filter((a) => app.barSpot(a.id) === 'menu'));
+
+	/** Insert actions as menu rows; their popups open under the menu's button. */
+	function insertRows(list: InsertAction[], anchor: () => HTMLElement | null): MenuItem[] {
+		return list.map((a, i) => ({
+			label: `${a.label}…`,
+			icon: a.icon,
+			hint: a.hint,
+			divider: i > 0 && a.id === 'highlight',
+			action: () => {
+				const el = anchor();
+				if (el) a.run(el, { above: false, toggle: false });
+			}
+		}));
+	}
+
+	/** The touch toolbar's side of an insert action: popups open above it. */
+	const toolAction = (a: InsertAction): ToolAction => ({
+		label: a.label,
+		icon: a.icon,
+		popup: a.id !== 'image',
+		on: a.on,
+		do: (anchor, fromMenu) => a.run(anchor, { above: true, toggle: !fromMenu })
+	});
+
+	const headerInsertItems = $derived(insertRows(grouped, () => insertBtn));
+
+	// --- the bar: what sits in it, what waits in ⋯ (Settings → Toolbar) ----------
+
+	const noteApplies = (id: NoteItem): boolean =>
+		id === 'edit' ? !locked : id === 'ai' ? app.settings.ai : id === 'trash' ? !!activeMeta : true;
+
+	/** Buttons placed in the bar, in order. Touch keeps insert actions in the formatting toolbar. */
+	const wanted = $derived.by((): BarItem[] => {
+		const ids: BarItem[] = [];
+		if (!app.touch) {
+			if (grouped.length && app.barSpot('insert') === 'bar') ids.push('insert');
+			ids.push(...promoted.map((a) => a.id));
+		}
+		ids.push(...NOTE_ITEMS.filter((id) => noteApplies(id) && app.barSpot(id) === 'bar'));
+		return ids;
+	});
+	/** Insert placed in ⋯ (mouse): its rows go straight in. */
+	const insertInMore = $derived(
+		!app.touch && grouped.length > 0 && app.barSpot('insert') === 'menu'
+	);
+	const noteMenu = $derived(
+		NOTE_ITEMS.filter((id) => noteApplies(id) && app.barSpot(id) === 'menu')
+	);
+
+	/** Rough button widths (px), to fold what doesn't fit into ⋯ instead of clipping it. */
+	function barWidth(id: BarItem): number {
+		const t = app.touch;
+		if (id === 'edit') return editable ? (t ? 88 : 32) : t ? 84 : 72;
+		if (id === 'dir') return t ? 44 : 40;
+		return t ? 44 : 30;
+	}
+
+	/** How many of `wanted` fit; beside the crumb, which keeps room for the file name. */
+	const fit = $derived.by(() => {
+		if (!headW) return wanted.length;
+		const budget = compact ? headW - 16 : headW - 34 - 12 - (app.touch ? 160 : 120);
+		const menu = (compact && fileItems.length > 0) || insertInMore || noteMenu.length > 0;
+		return fitBar(wanted.map(barWidth), budget, app.touch ? 44 : 30, 4, menu);
+	});
+	const onBar = $derived(wanted.slice(0, fit));
+	const folded = $derived(wanted.slice(fit));
+
+	/** ⋯: the file actions on phones (no crumb), then whatever isn't on the bar. */
+	const moreItems = $derived.by((): MenuItem[] => {
+		const groups: MenuItem[][] = [];
+		if (compact) groups.push(fileItems);
+		groups.push(
+			insertRows(
+				inserts.filter(
+					(a) =>
+						folded.includes(a.id) ||
+						(!app.touch && grouped.includes(a) && !onBar.includes('insert'))
+				),
+				() => moreBtn
+			)
+		);
+		const notes = NOTE_ITEMS.filter((id) => noteMenu.includes(id) || folded.includes(id));
+		groups.push(notes.filter((id) => id !== 'trash').map(noteRow));
+		if (notes.includes('trash')) groups.push([noteRow('trash')]);
+		return groups
+			.filter((g) => g.length)
+			.flatMap((g, i) => g.map((item, j) => (i && !j ? { ...item, divider: true } : item)));
+	});
+	const customize: MenuItem = {
+		label: 'Customize toolbar…',
+		icon: 'toolbar',
+		divider: true,
+		action: () => app.openSettings('toolbar')
+	};
+
+	function onBarContext(e: MouseEvent): void {
+		if (app.touch) return;
+		e.preventDefault();
+		const id = (e.target as Element).closest<HTMLElement>('[data-bar]')?.dataset.bar;
+		barMenu = { at: { x: e.clientX, y: e.clientY }, id: (id as BarItem | undefined) ?? null };
+	}
+
+	const barMenuItems = $derived.by((): MenuItem[] => {
+		const id = barMenu?.id;
+		return [
+			...(id
+				? [
+						{
+							label: `Move “${BAR_LABELS[id]}” to ${isInsertItem(id) ? 'Insert' : 'the menu'}`,
+							icon: 'more' as const,
+							action: () => app.setBarSpot(id, 'menu')
+						}
+					]
+				: []),
+			{ ...customize, divider: !!id }
+		];
+	});
+
+	/** Insert buttons keep the editor's focus (and the touch keyboard). */
+	const keepFocus = (e: PointerEvent) => e.preventDefault();
 
 	function openInsert(): void {
 		if (insertAt) {
@@ -410,6 +607,161 @@
 
 	const dur = reducedMotion() ? 0 : 1;
 </script>
+
+{#snippet barButton(id: BarItem)}
+	{#if id === 'insert'}
+		<button
+			bind:this={insertBtn}
+			data-bar="insert"
+			class={[
+				'act icon',
+				{
+					on:
+						!!insertAt ||
+						(!!insertBtn && tableAt?.anchor === insertBtn) ||
+						(!!highlightPick?.open && highlightPick.anchor === insertBtn)
+				}
+			]}
+			title="Insert {grouped.map((a) => a.label.toLowerCase()).join(', ')}"
+			aria-label="Insert"
+			aria-haspopup="menu"
+			aria-expanded={!!insertAt}
+			onclick={openInsert}
+		>
+			<Icon name="plus" size={17} stroke={1.8} />
+		</button>
+	{:else if id === 'image'}
+		<button
+			data-bar="image"
+			class="act icon"
+			title="Insert image"
+			aria-label="Insert image"
+			onpointerdown={keepFocus}
+			onclick={pickImage}
+		>
+			<Icon name="image" size={16} stroke={1.7} />
+		</button>
+	{:else if id === 'table'}
+		{@const open = !!tableBtn && tableAt?.anchor === tableBtn}
+		<button
+			bind:this={tableBtn}
+			data-bar="table"
+			class={['act icon', { on: open }]}
+			title="Insert table"
+			aria-label="Insert table"
+			aria-haspopup="dialog"
+			aria-expanded={open}
+			onpointerdown={keepFocus}
+			onclick={() => tableBtn && openTable(tableBtn, { above: false, toggle: true })}
+		>
+			<Icon name="table" size={16} stroke={1.7} />
+		</button>
+	{:else if id === 'highlight'}
+		{@const open = !!highlightBtn && !!highlightPick?.open && highlightPick.anchor === highlightBtn}
+		<button
+			bind:this={highlightBtn}
+			data-bar="highlight"
+			class={['act icon', { on: open }]}
+			title="Highlight ({mac ? '⌘⇧H' : 'Ctrl+Shift+H'})"
+			aria-label="Highlight"
+			aria-haspopup="true"
+			aria-expanded={open}
+			onpointerdown={keepFocus}
+			onclick={() => highlightBtn && openHighlight(highlightBtn, { above: false, toggle: true })}
+		>
+			<Icon name="highlight" size={16} stroke={1.7} />
+		</button>
+	{:else if id === 'edit'}
+		{#if editable}
+			<button
+				data-bar="edit"
+				class="act mode"
+				title="View mode (Mod+Shift+E): read without editing"
+				aria-label="Done editing"
+				onclick={() => app.setEditing(false)}
+			>
+				{#if app.touch}<Icon name="check" size={17} /><span>Done</span>{:else}<Icon
+						name="eye"
+						size={16}
+					/>{/if}
+			</button>
+		{:else}
+			<button
+				data-bar="edit"
+				class="act mode edit"
+				title="Edit (Mod+Shift+E) · double-tap text to edit there"
+				aria-label="Edit note"
+				onclick={() => startEditing()}
+			>
+				<Icon name="edit" size={16} /><span>Edit</span>
+			</button>
+		{/if}
+	{:else if id === 'ai'}
+		<button
+			data-bar="ai"
+			class={['act ai', { on: app.harnessOpen }]}
+			title="AI harness (Mod+J)"
+			aria-label="Toggle AI harness"
+			onclick={() => app.toggleHarness()}
+		>
+			AI
+		</button>
+	{:else if id === 'pin'}
+		<button
+			data-bar="pin"
+			class={['act icon pin', { on: activeMeta?.pinned }]}
+			title={activeMeta?.pinned ? 'Unpin note' : 'Pin note'}
+			aria-label="Toggle pin"
+			aria-pressed={!!activeMeta?.pinned}
+			onclick={() => app.activeId && app.togglePin(app.activeId)}
+		>
+			<Icon name="pin" size={16} stroke={1.7} />
+		</button>
+	{:else if id === 'dir'}
+		<button
+			data-bar="dir"
+			class="act dir"
+			title="Text direction (LTR / RTL)"
+			aria-label="Toggle text direction"
+			disabled={locked}
+			onclick={toggleDir}
+		>
+			{dir === 'rtl' ? 'RTL' : 'LTR'}
+		</button>
+	{:else if id === 'lock'}
+		<button
+			data-bar="lock"
+			class={['act icon lock', { on: locked }]}
+			title={locked ? 'Unlock note' : 'Lock note'}
+			aria-label="Toggle lock"
+			aria-pressed={locked}
+			onclick={() => app.activeId && app.toggleLock(app.activeId)}
+		>
+			<Icon name={locked ? 'lock' : 'unlock'} size={16} stroke={1.7} />
+		</button>
+	{:else if id === 'changes'}
+		<button
+			data-bar="changes"
+			class={['act icon', { dot: !!change }]}
+			title={change ? 'Changed since the last sync — show diff' : 'Changes'}
+			aria-label="Show changes"
+			onclick={() => app.showChanges(app.activeId)}
+		>
+			<Icon name="diff" size={16} stroke={1.7} />
+		</button>
+	{:else if id === 'trash'}
+		<button
+			data-bar="trash"
+			class="act icon del"
+			title={locked ? 'Unlock the note to delete it' : 'Delete note'}
+			aria-label="Delete note"
+			disabled={locked}
+			onclick={deleteNote}
+		>
+			<Icon name="trash" size={16} stroke={1.7} />
+		</button>
+	{/if}
+{/snippet}
 
 <section
 	class={['editor-pane', { 'is-rtl': dir === 'rtl', compact, viewing: !editable }]}
@@ -483,64 +835,13 @@
 						>{:else if !editable && !narrow}<span class="state">Viewing</span>{/if}
 				</div>
 			{/if}
-			<div class="editor-actions">
-				{#if editable && !app.touch}
-					<button
-						bind:this={insertBtn}
-						class={['act icon', { on: !!insertAt || !!tableAt || !!highlightPick?.open }]}
-						title="Insert image, table or highlight"
-						aria-label="Insert"
-						aria-haspopup="menu"
-						aria-expanded={!!insertAt}
-						onclick={openInsert}
-					>
-						<Icon name="plus" size={17} stroke={1.8} />
-					</button>
-				{/if}
-				{#if !locked}
-					{#if editable}
-						<button
-							class="act mode"
-							title="View mode (Mod+Shift+E): read without editing"
-							aria-label="Done editing"
-							onclick={() => app.setEditing(false)}
-						>
-							{#if app.touch}<Icon name="check" size={17} /><span>Done</span>{:else}<Icon
-									name="eye"
-									size={16}
-								/>{/if}
-						</button>
-					{:else}
-						<button
-							class="act mode edit"
-							title="Edit (Mod+Shift+E) · double-tap text to edit there"
-							aria-label="Edit note"
-							onclick={() => startEditing()}
-						>
-							<Icon name="edit" size={16} /><span>Edit</span>
-						</button>
-					{/if}
-				{/if}
-				{#if app.settings.ai}
-					<button
-						class={['act ai', { on: app.harnessOpen }]}
-						title="AI harness (Mod+J)"
-						aria-label="Toggle AI harness"
-						onclick={() => app.toggleHarness()}
-					>
-						AI
-					</button>
-				{/if}
-				<button
-					class={['act icon pin', { on: activeMeta?.pinned }]}
-					title={activeMeta?.pinned ? 'Unpin note' : 'Pin note'}
-					aria-label="Toggle pin"
-					aria-pressed={!!activeMeta?.pinned}
-					onclick={() => app.activeId && app.togglePin(app.activeId)}
-				>
-					<Icon name="pin" size={16} stroke={1.7} />
-				</button>
-				{#if narrow}
+			<!-- Right-click moves a button into its menu (mouse); Settings → Toolbar does the rest. -->
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div class="editor-actions" oncontextmenu={onBarContext}>
+				{#each onBar as id (id)}
+					{@render barButton(id)}
+				{/each}
+				{#if moreItems.length}
 					<button
 						bind:this={moreBtn}
 						class={['act icon', { on: !!moreAt }]}
@@ -552,43 +853,6 @@
 					>
 						<Icon name="more" size={18} />
 					</button>
-				{:else}
-					<button
-						class="act dir"
-						title="Text direction (LTR / RTL)"
-						aria-label="Toggle text direction"
-						disabled={locked}
-						onclick={toggleDir}
-					>
-						{dir === 'rtl' ? 'RTL' : 'LTR'}
-					</button>
-					<button
-						class={['act icon lock', { on: locked }]}
-						title={locked ? 'Unlock note' : 'Lock note'}
-						aria-label="Toggle lock"
-						aria-pressed={locked}
-						onclick={() => app.activeId && app.toggleLock(app.activeId)}
-					>
-						<Icon name={locked ? 'lock' : 'unlock'} size={16} stroke={1.7} />
-					</button>
-					<button
-						class={['act icon', { dot: !!change }]}
-						title={change ? 'Changed since the last sync — show diff' : 'Changes'}
-						aria-label="Show changes"
-						onclick={() => app.showChanges(app.activeId)}
-					>
-						<Icon name="diff" size={16} stroke={1.7} />
-					</button>
-					{#if activeMeta && !locked}
-						<button
-							class="act icon del"
-							title="Delete note"
-							aria-label="Delete note"
-							onclick={deleteNote}
-						>
-							<Icon name="trash" size={16} stroke={1.7} />
-						</button>
-					{/if}
 				{/if}
 			</div>
 		</header>
@@ -624,12 +888,7 @@
 		</div>
 
 		{#if app.touch && editor && editable}
-			<FormatToolbar
-				{editor}
-				insert={insertItems}
-				highlight={highlights ? openHighlight : null}
-				highlightOpen={!!highlightPick?.open}
-			/>
+			<FormatToolbar {editor} buttons={promoted.map(toolAction)} insert={grouped.map(toolAction)} />
 		{/if}
 		<input
 			bind:this={imageInput}
@@ -670,7 +929,7 @@
 	<TablePicker
 		at={tableAt}
 		sheet={tableAt.sheet}
-		trigger={insertBtn}
+		trigger={tableAt.toggle ? tableAt.anchor : null}
 		onpick={(cols, rows) => editor && insertTable(editor.view, cols, rows)}
 		onclose={() => (tableAt = null)}
 	/>
@@ -679,11 +938,11 @@
 {#if highlightPick?.open}
 	<HighlightPicker
 		at={highlightPick.at}
-		above={highlightPick.touch}
+		above={highlightPick.above}
 		current={highlightPick.color}
 		any={highlightPick.any}
-		focus={!highlightPick.touch}
-		trigger={highlightPick.trigger}
+		focus={!app.touch}
+		trigger={highlightPick.toggle ? highlightPick.anchor : null}
 		onpick={pickHighlight}
 		onclose={() => highlightPick && (highlightPick.open = false)}
 	/>
@@ -691,13 +950,22 @@
 
 {#if moreAt}
 	<ActionMenu
-		items={moreItems}
+		items={[...moreItems, customize]}
 		at={moreAt}
 		sheet={compact}
 		title={activeMeta?.title ?? 'Note'}
 		label="Note actions"
 		trigger={moreBtn}
 		onclose={() => (moreAt = null)}
+	/>
+{/if}
+
+{#if barMenu}
+	<ActionMenu
+		items={barMenuItems}
+		at={barMenu.at}
+		label="Toolbar"
+		onclose={() => (barMenu = null)}
 	/>
 {/if}
 

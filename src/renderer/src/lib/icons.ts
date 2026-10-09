@@ -47,6 +47,7 @@ import Minimize from '@lucide/svelte/icons/minimize';
 import Moon from '@lucide/svelte/icons/moon';
 import NotebookText from '@lucide/svelte/icons/notebook-text';
 import PanelLeft from '@lucide/svelte/icons/panel-left';
+import PanelTop from '@lucide/svelte/icons/panel-top';
 import Pencil from '@lucide/svelte/icons/pencil';
 import Pilcrow from '@lucide/svelte/icons/pilcrow';
 import Pin from '@lucide/svelte/icons/pin';
@@ -101,6 +102,7 @@ export const ICONS = {
 	zenOn: Maximize,
 	zenOff: Minimize,
 	settings: Settings,
+	toolbar: PanelTop,
 	keyboard: Keyboard,
 	info: Info,
 	// editing

@@ -25,6 +25,7 @@ import {
 	withNoteExt
 } from '../../../../shared/paths';
 import type { Layout } from '../layout';
+import { spotOf, type BarItem, type BarPlacement, type BarSpot } from '../noteBar';
 import type { Editor } from '@tiptap/core';
 import type { Vault } from '../vault/vault.svelte';
 
@@ -44,7 +45,7 @@ const DEFAULT_SIDEBAR: SidebarState = {
 export type View = 'editor' | 'settings' | 'changes';
 export type Pane = 'nav' | 'list' | 'editor' | 'harness';
 export type SettingsSection =
-	'general' | 'appearance' | 'editor' | 'sync' | 'ai' | 'encryption' | 'shortcuts';
+	'general' | 'appearance' | 'editor' | 'toolbar' | 'sync' | 'ai' | 'encryption' | 'shortcuts';
 /** How a note opens: 'auto' = view on touch devices (no keyboard pop-up), edit with a mouse. */
 export type OpenIn = 'auto' | 'view' | 'edit';
 
@@ -115,6 +116,8 @@ export interface Settings {
 	tabs: boolean;
 	/** Most tabs open at once; past it a note opens in the current tab (0 = no limit). */
 	maxTabs: number;
+	/** Note toolbar buttons moved to / from their menu (Settings → Toolbar, `noteBar.ts`). */
+	bar: BarPlacement;
 	/** Encrypted notes. Off: no crypto code loaded, no key in memory, no buttons. */
 	encryption: boolean;
 	/** Lock encrypted notes after this many idle / background minutes (0 = never). */
@@ -145,6 +148,7 @@ const DEFAULT_SETTINGS: Settings = {
 	openIn: 'auto',
 	tabs: false,
 	maxTabs: 5,
+	bar: {},
 	encryption: false,
 	autoLockMinutes: 15,
 	aiReadsEncrypted: true,
@@ -1671,6 +1675,15 @@ class AppState {
 	}
 
 	/** Open Settings, optionally on one section (e.g. 'ai' from the harness). */
+	/** Where a note toolbar button sits on this device (Settings → Toolbar). */
+	barSpot(id: BarItem): BarSpot {
+		return spotOf(this.settings.bar, id, this.layout === 'phone', this.touch);
+	}
+
+	setBarSpot(id: BarItem, spot: BarSpot): void {
+		this.updateSettings({ bar: { ...this.settings.bar, [id]: spot } });
+	}
+
 	openSettings(section?: SettingsSection): void {
 		if (section) this.settingsSection = section;
 		this.settingsDrill = !!section;

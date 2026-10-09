@@ -2033,3 +2033,104 @@ test('formatting toolbar: Highlight picks a color for the line; Insert → Table
 		.poll(() => editorText(page))
 		.toContain('first line\n\n|     |     |\n| --- | --- |\n|     |     |');
 });
+
+test('desktop: toolbar buttons move between the bar and its menu', async ({ browser }) => {
+	const { ctx, page } = await desktopPage(browser);
+	await openHello(page);
+	const head = page.locator('.editor-head');
+	const more = head.getByRole('button', { name: 'More actions' });
+	// Every button fits the bar by default: no ⋯.
+	await expect(head.getByRole('button', { name: 'Toggle pin' })).toBeVisible();
+	await expect(more).toHaveCount(0);
+
+	// Right-click a button to move it into ⋯, where it still works.
+	await head.getByRole('button', { name: 'Toggle pin' }).click({ button: 'right' });
+	await page.getByRole('menuitem', { name: 'Move “Pin” to the menu' }).click();
+	await expect(head.getByRole('button', { name: 'Toggle pin' })).toHaveCount(0);
+	await more.click();
+	await page.getByRole('menuitem', { name: 'Pin note' }).click();
+	await expect.poll(() => editorText(page)).toContain('<!-- pinned: true -->');
+	await more.click();
+
+	// ⋯ → Customize: Highlight gets a button of its own, Insert goes into ⋯.
+	await page.getByRole('menuitem', { name: 'Customize toolbar…' }).click();
+	const spot = (item: string, to: string) =>
+		page.getByRole('radiogroup', { name: item, exact: true }).getByRole('radio', { name: to });
+	await expect(spot('Pin', 'Menu')).toHaveAttribute('aria-checked', 'true');
+	await spot('Highlight', 'Bar').click();
+	await spot('Insert', 'Menu').click();
+	await page.keyboard.press('Escape');
+
+	await page.locator('.ProseMirror p', { hasText: 'world' }).click();
+	await expect(head.getByRole('button', { name: 'Insert', exact: true })).toHaveCount(0);
+	await head.getByRole('button', { name: 'Highlight', exact: true }).click();
+	await highlightPicker(page).getByRole('button', { name: 'Green' }).click();
+	await expect.poll(() => editorText(page)).toContain('<!-- highlight: green -->\nworld');
+	await more.click();
+	await expect(page.getByRole('menuitem', { name: 'Table…' })).toBeVisible();
+	await expect(page.getByRole('menuitem', { name: 'Highlight…' })).toHaveCount(0);
+	await page.keyboard.press('Escape');
+
+	// Reset puts everything back.
+	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
+	await page.getByRole('button', { name: /^Toolbar/ }).click();
+	await page.getByRole('button', { name: 'Reset', exact: true }).click();
+	await page.keyboard.press('Escape');
+	await expect(head.getByRole('button', { name: 'Toggle pin' })).toBeVisible();
+	await expect(head.getByRole('button', { name: 'Insert', exact: true })).toBeVisible();
+	await expect(head.getByRole('button', { name: 'Highlight', exact: true })).toHaveCount(0);
+	await expect(more).toHaveCount(0);
+	await ctx.close();
+});
+
+test('toolbar on touch: formatting into ⋯, Highlight into Insert, Image a button, Pin into ⋯', async ({
+	page
+}) => {
+	await openSettings(page);
+	await page
+		.getByRole('navigation', { name: 'Settings sections' })
+		.getByRole('button', { name: /Toolbar/ })
+		.tap();
+	await expect(page.getByRole('heading', { name: 'Formatting toolbar' })).toBeVisible();
+	const spot = (item: string, to: string) =>
+		page.getByRole('radiogroup', { name: item, exact: true }).getByRole('radio', { name: to });
+	// Touch keeps Highlight in the formatting toolbar by default.
+	await expect(spot('Highlight', 'Bar')).toHaveAttribute('aria-checked', 'true');
+	await spot('Highlight', 'Insert').tap();
+	await spot('Image', 'Bar').tap();
+	await spot('Pin', 'Menu').tap();
+	await spot('Tag', 'Menu').tap();
+	await spot('Undo', 'Menu').tap();
+	await page.getByRole('button', { name: 'Close settings' }).tap();
+
+	await openPlan(page);
+	await edit(page);
+	const head = page.locator('.editor-head');
+	await expect(head.getByRole('button', { name: 'Toggle pin' })).toHaveCount(0);
+	await expect(toolbar(page).getByRole('button', { name: 'Highlight', exact: true })).toHaveCount(
+		0
+	);
+	await expect(toolbar(page).getByRole('button', { name: 'Image', exact: true })).toBeVisible();
+
+	await page.locator('.ProseMirror p').last().tap();
+	await toolbar(page).getByRole('button', { name: 'Insert', exact: true }).tap();
+	await page.getByRole('menuitem', { name: 'Highlight…' }).tap();
+	await highlightPicker(page).getByRole('button', { name: 'Pink' }).tap();
+	await expect.poll(() => editorText(page)).toContain('<!-- highlight: pink -->\nfirst line');
+
+	// Formatting moved out of the toolbar runs from its ⋯, and the caret stays in the note.
+	for (const name of ['Tag', 'Undo'])
+		await expect(toolbar(page).getByRole('button', { name, exact: true })).toHaveCount(0);
+	await page.keyboard.press('End');
+	await toolbar(page).getByRole('button', { name: 'More formatting' }).tap();
+	await page.getByRole('menuitem', { name: 'Tag', exact: true }).tap();
+	await expect.poll(() => editorText(page)).toContain('first line #');
+	await expect(page.locator('.ProseMirror')).toBeFocused();
+	await toolbar(page).getByRole('button', { name: 'More formatting' }).tap();
+	await page.getByRole('menuitem', { name: 'Undo', exact: true }).tap();
+	await expect.poll(() => editorText(page)).not.toContain('first line #');
+
+	await head.getByRole('button', { name: 'More actions' }).tap();
+	await expect(page.getByRole('menuitem', { name: 'Pin note' })).toBeVisible();
+	await expect(page.getByRole('menuitem', { name: 'Customize toolbar…' })).toBeVisible();
+});
