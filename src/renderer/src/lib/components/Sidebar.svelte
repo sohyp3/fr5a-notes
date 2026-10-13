@@ -131,6 +131,18 @@
 				>
 				<span>Tags</span>
 			</button>
+			{#if app.tags.length > 0 && app.sidebar.tagsOpen}
+				<div class="actions">
+					<button
+						class="hdr-btn"
+						title="Collapse all tags"
+						aria-label="Collapse all tags"
+						onclick={() => app.collapseTags()}
+					>
+						<Icon name="collapse" size={14} />
+					</button>
+				</div>
+			{/if}
 		</div>
 		{#if app.sidebar.tagsOpen}
 			<div class="tree" transition:slide={{ duration: app.touch ? 0 : 160 }}>

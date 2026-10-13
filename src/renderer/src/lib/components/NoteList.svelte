@@ -112,6 +112,9 @@
 				<span class="crumb current">{crumb.label}</span>
 			{/if}
 		{/each}
+		{#if app.trashOpen && app.trashNotes.length}
+			<button class="empty-trash" onclick={() => void app.emptyTrash()}>Delete all</button>
+		{/if}
 	</nav>
 
 	<div class="list" role="list">
@@ -272,6 +275,19 @@
 	}
 	.scope.trash .crumb.current {
 		color: var(--text-muted);
+	}
+	.empty-trash {
+		flex: 0 0 auto;
+		margin-left: auto;
+		padding: 3px 7px;
+		border-radius: 6px;
+		font-size: 10.5px;
+		color: var(--danger);
+		background: var(--danger-soft);
+	}
+	.empty-trash:hover,
+	.empty-trash:active {
+		filter: brightness(0.94);
 	}
 	.list {
 		flex: 1;

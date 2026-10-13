@@ -376,6 +376,7 @@
 			</span>
 			<span class="time">{relTime(note.mtime)}</span>
 		</div>
+		<div class="filename" title={note.id}>{note.id}</div>
 		<div class="snippet">
 			{note.snippet ||
 				(note.encrypted && !app.vault?.unlocked ? 'Encrypted' : 'No additional text')}
@@ -503,6 +504,15 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+	.filename {
+		margin-top: 2px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-family: var(--font-mono);
+		font-size: 10.5px;
+		color: var(--text-faint);
 	}
 	.tags {
 		display: flex;

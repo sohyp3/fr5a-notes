@@ -196,7 +196,12 @@ function yankLines(view: EditorView, selFrom: number, selTo: number): void {
 
 // --- the keymap -------------------------------------------------------------
 
-function handleNormal(view: EditorView, event: KeyboardEvent, vs: VimPluginState): boolean {
+function handleNormal(
+	view: EditorView,
+	event: KeyboardEvent,
+	vs: VimPluginState,
+	options: VimOptions
+): boolean {
 	const key = event.key;
 	const { state } = view;
 	const ls = lines(state.doc);
@@ -251,6 +256,15 @@ function handleNormal(view: EditorView, event: KeyboardEvent, vs: VimPluginState
 	}
 
 	switch (key) {
+		case '/':
+			options.onSearch?.();
+			return true;
+		case 'n':
+			options.onSearchNext?.(event.shiftKey ? -1 : 1);
+			return true;
+		case 'N':
+			options.onSearchNext?.(-1);
+			return true;
 		case 'h':
 			moveTo(view, clampNormal(line, head - 1), vs.mode, vs.anchor);
 			return true;
@@ -408,13 +422,16 @@ function handleNormal(view: EditorView, event: KeyboardEvent, vs: VimPluginState
 
 export interface VimOptions {
 	onModeChange?: (mode: VimMode) => void;
+	/** Open the editor's find bar (`/`) and repeat it (`n` / `N`). */
+	onSearch?: () => void;
+	onSearchNext?: (direction: 1 | -1) => void;
 }
 
 export const Vim = Extension.create<VimOptions>({
 	name: 'vim',
 
 	addOptions() {
-		return { onModeChange: undefined };
+		return { onModeChange: undefined, onSearch: undefined, onSearchNext: undefined };
 	},
 
 	addProseMirrorPlugins() {
@@ -468,7 +485,7 @@ export const Vim = Extension.create<VimOptions>({
 							event.preventDefault();
 							return true;
 						}
-						const handled = handleNormal(view, event, vs);
+						const handled = handleNormal(view, event, vs, options);
 						if (handled) event.preventDefault();
 						return handled;
 					},

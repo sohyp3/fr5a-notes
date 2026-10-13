@@ -121,7 +121,8 @@
 >
 	<button
 		class={['twist', { hidden: !hasChildren }]}
-		aria-label="Expand"
+		aria-label="{expanded ? 'Collapse' : 'Expand'} folder {node.name}"
+		aria-expanded={hasChildren ? expanded : undefined}
 		onclick={(e) => {
 			e.stopPropagation();
 			app.toggleFolderExpanded(node.path, depth);

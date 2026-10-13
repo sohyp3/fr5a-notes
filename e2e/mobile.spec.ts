@@ -556,6 +556,18 @@ test('trash: deleting forever asks first', async ({ page }) => {
 	await expect.poll(deleted).toEqual(['.fr5a_trash/old.md']);
 });
 
+test('trash: delete all asks once and empties the list', async ({ page }) => {
+	await openFolder(page, /^Trash/);
+	await list(page).getByRole('button', { name: 'Delete all' }).tap();
+	const dialog = page.getByRole('alertdialog');
+	await expect(dialog).toContainText('Delete all forever?');
+	await dialog.getByRole('button', { name: 'Delete all' }).tap();
+	await expect(list(page).getByText('Trash is empty')).toBeVisible();
+	await expect
+		.poll(() => page.evaluate(() => (window as unknown as { __deleted: string[] }).__deleted))
+		.toEqual(['.fr5a_trash/old.md']);
+});
+
 // --- changes (git status) ------------------------------------------------------------
 
 /** Edit Plan (so it differs from the last commit) and open the Changes view on it. */
@@ -887,6 +899,23 @@ test('AI harness: web search turns on from the context panel', async ({ page }) 
 	await expect(harness.locator('.ctx-sum')).toContainText('web');
 });
 
+test('AI harness: Exa parameters appear in the context drawer', async ({ page }) => {
+	await openPlan(page);
+	const harness = await openHarness(page);
+	await harness.locator('.ctx-sum').tap();
+	await harness.getByRole('button', { name: 'Settings…' }).tap();
+	await page.getByRole('radio', { name: /Exa/ }).tap();
+	await page.getByLabel('Search mode').selectOption('deep');
+	await page.getByLabel('Results', { exact: true }).fill('9');
+	await page.getByLabel('Results', { exact: true }).blur();
+	await page.getByRole('button', { name: 'Close settings' }).tap();
+	const params = harness.getByLabel('Exa search parameters');
+	if (!(await params.isVisible())) await harness.locator('.ctx-sum').tap();
+	await expect(params).toContainText('deep');
+	await expect(params).toContainText('9');
+	await expect(params).toContainText('highlights · 600 chars');
+});
+
 test('AI harness: each tab keeps its own unsent draft', async ({ page }) => {
 	await openPlan(page);
 	const harness = await openHarness(page);
@@ -998,6 +1027,53 @@ test('desktop: search clears with its X or Esc; New note stays visible in a narr
 		expect(box.width).toBeGreaterThan(20);
 		expect(box.x + box.width).toBeLessThanOrEqual(listBox.x + listBox.width);
 	}
+	await ctx.close();
+});
+
+test('desktop: find in note highlights matches and steps through them', async ({ browser }) => {
+	const { ctx, page } = await desktopPage(browser);
+	await openHello(page);
+	await page.keyboard.press('Control+f');
+	const find = page.getByRole('textbox', { name: 'Find text' });
+	await find.fill('l');
+	await expect(page.locator('.note-search-hit')).toHaveCount(3);
+	await expect(page.getByText('1 / 3', { exact: true })).toBeVisible();
+	await find.press('Enter');
+	await expect(page.getByText('2 / 3', { exact: true })).toBeVisible();
+	await page.getByRole('button', { name: 'Previous match' }).click();
+	await expect(page.getByText('1 / 3', { exact: true })).toBeVisible();
+	await page.getByRole('button', { name: 'Close find' }).click();
+	await expect(page.locator('.note-search-hit')).toHaveCount(0);
+	await ctx.close();
+});
+
+test('desktop: Vim slash search repeats with n and N', async ({ browser }) => {
+	const { ctx, page } = await desktopPage(browser);
+	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
+	await page
+		.getByRole('navigation', { name: 'Settings sections' })
+		.getByRole('button', { name: /Editor/ })
+		.click();
+	await page.getByRole('switch', { name: 'Vim motions' }).click();
+	await page.getByRole('button', { name: 'Close settings' }).click();
+	await openHello(page);
+	await expect(page.locator('.vim-badge')).toHaveText('NORMAL');
+	await page.keyboard.press('/');
+	const find = page.getByRole('textbox', { name: 'Find text' });
+	await find.fill('l');
+	await find.press('Enter');
+	await expect(find).toHaveCount(0);
+	const active = () =>
+		page.evaluate(() =>
+			[...document.querySelectorAll('.note-search-hit')].findIndex((el) =>
+				el.classList.contains('active')
+			)
+		);
+	await expect.poll(active).toBe(0);
+	await page.keyboard.press('n');
+	await expect.poll(active).toBe(1);
+	await page.keyboard.press('Shift+n');
+	await expect.poll(active).toBe(0);
 	await ctx.close();
 });
 

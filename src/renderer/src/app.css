@@ -211,6 +211,18 @@ button.scrim {
 	transition: none;
 }
 
+.note-search-hit {
+	background: rgba(224, 165, 32, 0.3);
+	border-radius: 2px;
+	box-shadow: 0 0 0 1px rgba(224, 165, 32, 0.14);
+}
+
+.note-search-hit.active {
+	background: #e0a520;
+	color: #1f1705;
+	box-shadow: 0 0 0 1px #e0a520;
+}
+
 /* Placeholder (from @tiptap Placeholder extension) on the first empty line. */
 .ProseMirror p.is-editor-empty:first-child::before {
 	content: attr(data-placeholder);

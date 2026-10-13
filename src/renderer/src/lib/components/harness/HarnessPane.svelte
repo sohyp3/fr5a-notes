@@ -9,6 +9,7 @@
 	import { describeError } from '../../harness/errors';
 	import { flattenTagTree } from '../../editor/TagSuggest';
 	import { OPENCODE_ZEN, SEARCH_KINDS, ZEN_KEY_URL, type SearchProfile } from '../../harness/types';
+	import { exaOptions } from '../../harness/web';
 	import { reducedMotion } from '../../portal';
 	import {
 		formatTokens,
@@ -89,6 +90,24 @@
 		ai.config.search
 			? (SEARCH_KINDS.find((k) => k.kind === ai.config.search?.kind)?.label ?? 'on')
 			: null
+	);
+	const exa = $derived(ai.config.search?.kind === 'exa' ? exaOptions(ai.config.search) : null);
+	const exaContent = $derived(
+		exa
+			? `${exa.content}${exa.content === 'summary' ? '' : ` · ${exa.maxCharacters.toLocaleString()} chars`}`
+			: ''
+	);
+	const exaFreshness = $derived(
+		exa?.maxAgeHours === null
+			? 'Exa default'
+			: exa?.maxAgeHours === -1
+				? 'Cache only'
+				: exa?.maxAgeHours === 0
+					? 'Always fresh'
+					: `${exa?.maxAgeHours}h cache`
+	);
+	const exaCategoryLimitsFilters = $derived(
+		exa?.category === 'company' || exa?.category === 'people'
 	);
 	function toggleWeb(): void {
 		if (ai.config.search) {
@@ -657,6 +676,52 @@
 						</button>
 						<button class="link" onclick={() => app.openSettings('ai')}>Settings…</button>
 					</div>
+					{#if exa}
+						<dl class="search-params" aria-label="Exa search parameters">
+							<div>
+								<dt>Type</dt>
+								<dd>{exa.type}</dd>
+							</div>
+							<div>
+								<dt>Results</dt>
+								<dd>{exa.numResults}</dd>
+							</div>
+							<div>
+								<dt>Content</dt>
+								<dd>{exaContent}</dd>
+							</div>
+							<div>
+								<dt>Freshness</dt>
+								<dd>{exaFreshness}</dd>
+							</div>
+							{#if exa.category}<div>
+									<dt>Category</dt>
+									<dd>{exa.category}</dd>
+								</div>{/if}
+							{#if exa.includeDomains.length}<div class="wide">
+									<dt>Include</dt>
+									<dd>{exa.includeDomains.join(', ')}</dd>
+								</div>{/if}
+							{#if !exaCategoryLimitsFilters && exa.excludeDomains.length}<div class="wide">
+									<dt>Exclude</dt>
+									<dd>{exa.excludeDomains.join(', ')}</dd>
+								</div>{/if}
+							{#if !exaCategoryLimitsFilters && (exa.startPublishedDate || exa.endPublishedDate)}<div
+									class="wide"
+								>
+									<dt>Published</dt>
+									<dd>{exa.startPublishedDate || 'any'} → {exa.endPublishedDate || 'now'}</dd>
+								</div>{/if}
+							{#if exa.userLocation}<div>
+									<dt>Location</dt>
+									<dd>{exa.userLocation}</dd>
+								</div>{/if}
+							{#if exa.moderation}<div>
+									<dt>Moderation</dt>
+									<dd>On</dd>
+								</div>{/if}
+						</dl>
+					{/if}
 					{#if provider && !provider.local}
 						<p class="privacy">
 							<strong>{provider.name}</strong> is a cloud provider. {hiddenCount
@@ -1247,6 +1312,37 @@
 		align-items: center;
 		flex-wrap: wrap;
 		gap: 8px;
+	}
+	.search-params {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 4px 8px;
+		margin: -2px 0 2px 62px;
+		padding: 7px 8px;
+		border-radius: 8px;
+		background: var(--bg-list);
+		font-family: var(--font-mono);
+		font-size: 10.5px;
+	}
+	.search-params div {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr);
+		gap: 5px;
+		min-width: 0;
+	}
+	.search-params .wide {
+		grid-column: 1 / -1;
+	}
+	.search-params dt {
+		color: var(--text-faint);
+	}
+	.search-params dd {
+		margin: 0;
+		color: var(--text-muted);
+		overflow-wrap: anywhere;
+	}
+	:global(html[data-touch]) .search-params {
+		margin-inline-start: 0;
 	}
 	.k {
 		flex: 0 0 54px;

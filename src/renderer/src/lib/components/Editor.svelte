@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { fly, fade } from 'svelte/transition';
+	import { fly, fade, slide } from 'svelte/transition';
 	import { tick, untrack } from 'svelte';
 	import { Editor } from '@tiptap/core';
 	import Document from '@tiptap/extension-document';
@@ -17,6 +17,13 @@
 	import { isHighlightColor, type HighlightColor } from '../editor/highlights';
 	import { imageSource } from '../editor/images';
 	import { TagSuggest, flattenTagTree } from '../editor/TagSuggest';
+	import {
+		SearchBehavior,
+		clearNoteSearch,
+		setNoteSearch,
+		stepNoteSearch,
+		type SearchStatus
+	} from '../editor/SearchBehavior';
 	import { Vim, type VimMode } from '../editor/vim';
 	import {
 		textToDoc,
@@ -55,6 +62,11 @@
 	let vimMode = $state<VimMode>('normal');
 	let scroller = $state<HTMLDivElement | null>(null);
 	let scrolled = $state(false);
+	let findOpen = $state(false);
+	let findFromVim = $state(false);
+	let findQuery = $state('');
+	let findInput = $state<HTMLInputElement | null>(null);
+	let findStatus = $state<SearchStatus>({ index: -1, total: 0 });
 	let moreBtn = $state<HTMLButtonElement | null>(null);
 	let moreAt = $state<{ x: number; y: number } | null>(null);
 	let crumbBtn = $state<HTMLButtonElement | null>(null);
@@ -143,12 +155,19 @@
 			ListBehavior,
 			TableBehavior,
 			ImageBehavior.configure({ save: saveImage }),
+			SearchBehavior.configure({ onUpdate: (status) => (findStatus = status) }),
 			// Fed from the store's tag tree (itself the SQLite index over IPC).
 			TagSuggest.configure({ getTags: () => flattenTagTree(app.tags) })
 		];
 		if (highlights) extensions.push(HighlightBehavior.configure({ color: lastHighlight }));
 		if (vimOn) {
-			extensions.push(Vim.configure({ onModeChange: (m) => (vimMode = m) }));
+			extensions.push(
+				Vim.configure({
+					onModeChange: (m) => (vimMode = m),
+					onSearch: () => void openFind(true),
+					onSearchNext: (direction) => stepFind(direction, true)
+				})
+			);
 		}
 		const canEdit = app.editing && !detectLocked(content);
 		return new Editor({
@@ -179,6 +198,7 @@
 		});
 		editor = ed;
 		app.editor = ed;
+		if (findQuery) findStatus = setNoteSearch(ed.view, findQuery);
 		return () => {
 			app.flush();
 			ed.destroy();
@@ -187,6 +207,51 @@
 			if (editor === ed) editor = undefined;
 			if (app.editor === ed) app.editor = null;
 		};
+	}
+
+	async function openFind(fromVim = false): Promise<void> {
+		if (!editor) return;
+		findFromVim = fromVim;
+		findOpen = true;
+		await tick();
+		findInput?.focus();
+		findInput?.select();
+	}
+
+	function updateFind(): void {
+		if (!editor) return;
+		findStatus = setNoteSearch(editor.view, findQuery);
+	}
+
+	function stepFind(direction: 1 | -1, refocusEditor = false): void {
+		if (!editor || !findQuery.trim()) return;
+		findStatus = stepNoteSearch(editor.view, direction);
+		if (refocusEditor) editor.view.focus();
+	}
+
+	function closeFind(clear = true): void {
+		findOpen = false;
+		findFromVim = false;
+		if (clear && editor) {
+			findQuery = '';
+			findStatus = clearNoteSearch(editor.view);
+		}
+		if (vimOn && editor) editor.view.focus();
+	}
+
+	function onFindWindowKey(e: KeyboardEvent): void {
+		const mod = e.metaKey || e.ctrlKey;
+		const visible = app.view === 'editor' && (app.layout !== 'phone' || app.pane === 'editor');
+		if (mod && !e.shiftKey && e.key.toLowerCase() === 'f' && editor && visible) {
+			e.preventDefault();
+			void openFind(false);
+			return;
+		}
+		if (findOpen && e.key === 'Escape') {
+			e.preventDefault();
+			e.stopImmediatePropagation();
+			closeFind();
+		}
 	}
 
 	/** Attachment: view ⇄ edit without remounting (keeps undo history, scroll and caret). */
@@ -608,6 +673,8 @@
 	const dur = reducedMotion() ? 0 : 1;
 </script>
 
+<svelte:window onkeydown={onFindWindowKey} />
+
 {#snippet barButton(id: BarItem)}
 	{#if id === 'insert'}
 		<button
@@ -856,6 +923,56 @@
 				{/if}
 			</div>
 		</header>
+		{#if findOpen}
+			<div
+				class="findbar"
+				role="search"
+				aria-label="Find in note"
+				transition:slide={{ duration: 120 * dur }}
+			>
+				<Icon name="search" size={14} />
+				<input
+					bind:this={findInput}
+					bind:value={findQuery}
+					aria-label="Find text"
+					placeholder="Find in note"
+					spellcheck="false"
+					oninput={updateFind}
+					onkeydown={(e) => {
+						if (e.key === 'Enter') {
+							e.preventDefault();
+							if (findFromVim) {
+								findOpen = false;
+								findFromVim = false;
+								editor?.view.focus();
+							} else stepFind(e.shiftKey ? -1 : 1);
+						}
+					}}
+				/>
+				<span class={['find-count', { none: !!findQuery && !findStatus.total }]} aria-live="polite">
+					{findQuery
+						? findStatus.total
+							? `${findStatus.index + 1} / ${findStatus.total}`
+							: 'No matches'
+						: ''}
+				</span>
+				<button
+					class="find-step prev"
+					aria-label="Previous match"
+					disabled={!findStatus.total}
+					onclick={() => stepFind(-1)}><Icon name="chevron" size={15} /></button
+				>
+				<button
+					class="find-step"
+					aria-label="Next match"
+					disabled={!findStatus.total}
+					onclick={() => stepFind(1)}><Icon name="chevron" size={15} /></button
+				>
+				<button class="find-close" aria-label="Close find" onclick={() => closeFind()}>
+					<Icon name="close" size={15} />
+				</button>
+			</div>
+		{/if}
 
 		<div class="editor-body">
 			{#key editorKey}
@@ -1006,6 +1123,82 @@
 	}
 	.editor-head.scrolled {
 		box-shadow: 0 1px 0 var(--bg-hover);
+	}
+	.findbar {
+		position: relative;
+		z-index: 4;
+		flex: 0 0 auto;
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		min-height: 40px;
+		padding: 4px 10px 4px 16px;
+		color: var(--text-muted);
+		background: var(--bg-list);
+		box-shadow: inset 0 -1px 0 var(--bg-active);
+	}
+	.findbar input {
+		flex: 1;
+		min-width: 0;
+		height: 30px;
+		padding: 0 8px;
+		border: 1px solid var(--bg-active);
+		border-radius: 7px;
+		outline: none;
+		background: var(--bg-editor);
+		color: var(--text);
+		font: inherit;
+	}
+	.findbar input:focus {
+		border-color: var(--accent);
+	}
+	.find-count {
+		flex: 0 0 auto;
+		min-width: 46px;
+		font-family: var(--font-mono);
+		font-size: 10.5px;
+		text-align: center;
+		color: var(--text-faint);
+	}
+	.find-count.none {
+		min-width: 66px;
+		color: var(--danger);
+	}
+	.find-step,
+	.find-close {
+		display: grid;
+		place-items: center;
+		width: 28px;
+		height: 28px;
+		border-radius: 6px;
+		color: var(--text-muted);
+	}
+	.find-step:hover:not(:disabled),
+	.find-close:hover {
+		background: var(--bg-hover);
+		color: var(--text);
+	}
+	.find-step:disabled {
+		opacity: 0.35;
+	}
+	.find-step :global(.icon) {
+		transform: rotate(90deg);
+	}
+	.find-step.prev :global(.icon) {
+		transform: rotate(-90deg);
+	}
+	:global(html[data-touch]) .findbar {
+		min-height: 52px;
+		padding-inline: 10px 6px;
+	}
+	:global(html[data-touch]) .findbar input {
+		height: 40px;
+		font-size: 16px;
+	}
+	:global(html[data-touch]) .find-step,
+	:global(html[data-touch]) .find-close {
+		width: 40px;
+		height: 40px;
 	}
 	.crumb {
 		flex: 1;

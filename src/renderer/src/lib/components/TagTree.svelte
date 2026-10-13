@@ -18,7 +18,8 @@
 <div class={['tag-row', { selected }]} style:padding-left="{8 + depth * 14}px">
 	<button
 		class={['twist', { hidden: !hasChildren }]}
-		aria-label="Expand"
+		aria-label="{expanded ? 'Collapse' : 'Expand'} tag {node.name}"
+		aria-expanded={hasChildren ? expanded : undefined}
 		onclick={(e) => {
 			e.stopPropagation();
 			app.toggleTagExpanded(node.path, depth);

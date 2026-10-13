@@ -17,6 +17,7 @@ export const SHORTCUTS: Shortcut[] = [
 	{ keys: ['Ctrl', 'Tab'], desc: 'Next tab  ·  ⇧ previous', feature: 'tabs' },
 	{ keys: ['Mod', '\\'], desc: 'Toggle Zen mode' },
 	{ keys: ['Mod', 'J'], desc: 'Toggle the AI harness pane' },
+	{ keys: ['Mod', 'F'], desc: 'Find in the open note' },
 	{ keys: ['Mod', '⇧', 'L'], desc: 'Show / hide the note list' },
 	{ keys: ['Mod', '⇧', 'E'], desc: 'View / edit mode for the open note' },
 	{ keys: ['Mod', ','], desc: 'Open / close Settings' },
@@ -39,5 +40,6 @@ export const VIM_SHORTCUTS: Shortcut[] = [
 	{ keys: ['h', 'j', 'k', 'l'], desc: 'Move  ·  w / b / e by word' },
 	{ keys: ['d', 'd'], desc: 'Delete line  ·  yy yank  ·  p paste' },
 	{ keys: ['v'], desc: 'Visual  ·  gg / G  top / bottom' },
-	{ keys: ['⇧', 'V'], desc: 'Visual Line  ·  whole-line select' }
+	{ keys: ['⇧', 'V'], desc: 'Visual Line  ·  whole-line select' },
+	{ keys: ['/'], desc: 'Find  ·  n next  ·  N previous' }
 ];

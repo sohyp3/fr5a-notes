@@ -359,7 +359,11 @@ class AppState {
 		// Trash is its own list — folder/tag filters don't apply, only search.
 		if (this.trashOpen) {
 			return this.trashNotes.filter(
-				(n) => !q || n.title.toLowerCase().includes(q) || n.snippet.toLowerCase().includes(q)
+				(n) =>
+					!q ||
+					n.id.toLowerCase().includes(q) ||
+					n.title.toLowerCase().includes(q) ||
+					n.snippet.toLowerCase().includes(q)
 			);
 		}
 		// Browsing into a hidden folder (from Settings) shows it; everything else leaves it out.
@@ -380,7 +384,11 @@ class AppState {
 				if (!match) return false;
 			}
 			if (q) {
-				return n.title.toLowerCase().includes(q) || n.snippet.toLowerCase().includes(q);
+				return (
+					n.id.toLowerCase().includes(q) ||
+					n.title.toLowerCase().includes(q) ||
+					n.snippet.toLowerCase().includes(q)
+				);
 			}
 			return true;
 		});
@@ -831,6 +839,22 @@ class AppState {
 		await this.refresh();
 	}
 
+	/** Permanently remove every note in Trash after one explicit confirmation. */
+	async emptyTrash(): Promise<void> {
+		const notes = [...this.trashNotes];
+		if (!notes.length) return;
+		const ok = await this.confirm({
+			title: 'Delete all forever?',
+			body: `${notes.length} ${notes.length === 1 ? 'note' : 'notes'} will be erased from disk. This can't be undone.`,
+			confirm: 'Delete all',
+			danger: true
+		});
+		if (!ok) return;
+		for (const note of notes) await platform.permanentDelete(note.id);
+		await this.refresh();
+		this.notify('ok', 'Trash emptied');
+	}
+
 	// --- cheat sheet -------------------------------------------------------
 
 	toggleCheatSheet(): void {
@@ -999,6 +1023,18 @@ class AppState {
 	/** Collapse every folder and subfolder in the sidebar tree. */
 	collapseFolders(): void {
 		for (const path of this.folders) this.sidebar.folderExpanded[path] = false;
+		this.persistSidebar();
+	}
+
+	/** Collapse every tag and subtag in the sidebar tree. */
+	collapseTags(): void {
+		const visit = (nodes: TagNode[]) => {
+			for (const node of nodes) {
+				this.sidebar.tagExpanded[node.path] = false;
+				visit(node.children);
+			}
+		};
+		visit(this.tags);
 		this.persistSidebar();
 	}
 
