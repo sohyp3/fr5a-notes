@@ -64,12 +64,14 @@ describe('parseSearch', () => {
 			requestId: 'r',
 			results: [
 				{ title: 'E', url: 'https://e', highlights: ['first\npart', 'second'] },
-				{ title: '', url: 'https://bare' }
+				{ title: '', url: 'https://bare', summary: 'short answer' },
+				{ title: 'Text', url: 'https://text', text: 'page body' }
 			]
 		});
 		expect(parseSearch('exa', exa)).toEqual([
 			{ title: 'E', url: 'https://e', snippet: 'first part … second' },
-			{ title: 'https://bare', url: 'https://bare', snippet: '' }
+			{ title: 'https://bare', url: 'https://bare', snippet: 'short answer' },
+			{ title: 'Text', url: 'https://text', snippet: 'page body' }
 		]);
 	});
 });
@@ -140,9 +142,70 @@ describe('webSearch', () => {
 		expect(sent[0].headers?.['x-api-key']).toBe('key');
 		expect(JSON.parse(sent[0].body!)).toEqual({
 			query: 'svelte runes',
+			type: 'auto',
 			numResults: 3,
-			contents: { highlights: { maxCharacters: 300 } }
+			contents: { highlights: { maxCharacters: 600 } }
 		});
+	});
+
+	it('sends Exa mode, category, filters, freshness and result content', async () => {
+		const exa = {
+			kind: 'exa' as const,
+			baseUrl: '',
+			exa: {
+				type: 'deep' as const,
+				category: 'news',
+				numResults: 12,
+				content: 'text' as const,
+				maxCharacters: 1200,
+				includeDomains: ['example.com'],
+				excludeDomains: ['spam.test'],
+				startPublishedDate: '2026-01-01',
+				endPublishedDate: '2026-10-13',
+				userLocation: 'iq',
+				moderation: true,
+				maxAgeHours: 0
+			}
+		};
+		const { sent, http } = fakeHttp({ status: 200, headers: {}, body: '{"results":[]}' });
+		await webSearch(http, exa, 'key', 'today');
+		expect(JSON.parse(sent[0].body!)).toEqual({
+			query: 'today',
+			type: 'deep',
+			numResults: 12,
+			contents: { text: { maxCharacters: 1200 }, maxAgeHours: 0 },
+			category: 'news',
+			includeDomains: ['example.com'],
+			excludeDomains: ['spam.test'],
+			startPublishedDate: '2026-01-01T00:00:00.000Z',
+			endPublishedDate: '2026-10-13T23:59:59.999Z',
+			userLocation: 'IQ',
+			moderation: true
+		});
+	});
+
+	it('omits Exa filters unsupported by company and people categories', async () => {
+		const { sent, http } = fakeHttp({ status: 200, headers: {}, body: '{"results":[]}' });
+		await webSearch(
+			http,
+			{
+				kind: 'exa',
+				baseUrl: '',
+				exa: {
+					category: 'company',
+					excludeDomains: ['x.test'],
+					startPublishedDate: '2026-01-01',
+					endPublishedDate: '2026-02-01'
+				}
+			},
+			'key',
+			'companies'
+		);
+		const body = JSON.parse(sent[0].body!);
+		expect(body.category).toBe('company');
+		expect(body).not.toHaveProperty('excludeDomains');
+		expect(body).not.toHaveProperty('startPublishedDate');
+		expect(body).not.toHaveProperty('endPublishedDate');
 	});
 
 	it("turns Exa's invalid-key error into a pointer to Settings", async () => {

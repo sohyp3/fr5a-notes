@@ -3,7 +3,7 @@ import { formatRecord, parseRecord, type UsageRecord } from './usage';
 import type { ChatMessage } from './types';
 
 /**
- * A harness session is a readable Markdown file in `.fr5a/sessions/`: a
+ * A harness session is a readable Markdown file in `.fr5a/sessions/device/`: a
  * frontmatter header plus turns separated by `<!-- turn: … -->` markers (HTML
  * comments, so the transcript still reads cleanly as Markdown and git diffs
  * stay line-based). Tool turns keep a truncated result for the record.
@@ -12,9 +12,9 @@ import type { ChatMessage } from './types';
 export const SESSIONS_DIR = 'sessions';
 
 /**
- * Chats that read encrypted notes live in `sessions/device/`, which the
- * `sessions/.gitignore` keeps out of every sync (root or nested `.fr5a` repo).
- * "Sync this chat" moves one back. Their keys in a session list: `device/<file>`.
+ * Working chats live in `sessions/device/`, which `sessions/.gitignore` keeps
+ * out of every sync (root or nested `.fr5a` repo). A chat only enters Git when
+ * the user explicitly uses "Save to notes"; its working transcript stays here.
  */
 export const DEVICE_DIR = 'device';
 export const SESSIONS_IGNORE = `${SESSIONS_DIR}/.gitignore`;
@@ -30,7 +30,7 @@ export function withDeviceIgnored(gitignore: string): string | null {
 	const lines = gitignore.split(/\r?\n/).map((l) => l.trim());
 	if (lines.includes(entry) || lines.includes(`/${entry}`)) return null;
 	const head = gitignore.replace(/\s*$/, '');
-	return `${head ? `${head}\n\n` : ''}# fr5a: chats that read encrypted notes stay on this device\n${entry}\n`;
+	return `${head ? `${head}\n\n` : ''}# fr5a: unsaved AI chats stay on this device\n${entry}\n`;
 }
 
 export type TurnRole = 'you' | 'ai' | 'tool';
@@ -52,6 +52,8 @@ export interface Session {
 	/** Note ids attached as context. */
 	notes: string[];
 	turns: Turn[];
+	/** It has received decrypted note content and must be encrypted if saved to notes. */
+	sensitive?: boolean;
 	/** The workspace note this chat was saved to ("Save to notes"). */
 	saved?: string;
 	/** `hashText` of what was last written there, to notice edits made since. */
@@ -87,6 +89,7 @@ export function serializeSession(s: Session): string {
 		provider: s.provider || undefined,
 		skill: s.skill || undefined,
 		notes: s.notes,
+		sensitive: s.sensitive ? 'yes' : 'no',
 		saved: s.saved || undefined,
 		savedHash: s.savedHash || undefined,
 		usage: s.usage?.length ? s.usage.map(formatRecord) : undefined
@@ -124,6 +127,7 @@ export function parseSession(file: string, text: string): Session {
 		skill: str(data.skill),
 		notes: list(data.notes),
 		turns,
+		...(str(data.sensitive) ? { sensitive: str(data.sensitive) === 'yes' } : {}),
 		...(str(data.saved) ? { saved: str(data.saved), savedHash: str(data.savedHash) } : {}),
 		...(data.usage ? { usage: sessionUsage(data.usage) } : {})
 	};

@@ -1,4 +1,10 @@
-import { SEARCH_KINDS, type Http, type SearchProfile } from './types';
+import {
+	DEFAULT_EXA_SEARCH,
+	SEARCH_KINDS,
+	type ExaSearchOptions,
+	type Http,
+	type SearchProfile
+} from './types';
 
 /** Web search + page reading for sources / fact-checking. */
 
@@ -15,10 +21,12 @@ export async function webSearch(
 	profile: SearchProfile,
 	apiKey: string | null,
 	query: string,
-	max = 6
+	max?: number
 ): Promise<SearchResult[]> {
 	const q = encodeURIComponent(query);
 	const kind = SEARCH_KINDS.find((k) => k.kind === profile.kind);
+	const exa = exaOptions(profile);
+	const limit = Math.max(1, Math.min(max ?? (profile.kind === 'exa' ? exa.numResults : 6), 100));
 	if (kind?.needsKey && !apiKey?.trim())
 		throw new Error(`${kind.label} needs an API key: paste it in Settings → AI → Web search.`);
 	let res;
@@ -38,7 +46,7 @@ export async function webSearch(
 			throw new Error(
 				'DuckDuckGo asked for a captcha. Retry later, or pick another provider in Settings → AI.'
 			);
-		return results.slice(0, max);
+		return results.slice(0, limit);
 	} else if (profile.kind === 'searxng') {
 		const base = profile.baseUrl.trim().replace(/\/+$/, '');
 		if (!base) throw new Error('Set your SearXNG URL in Settings → AI.');
@@ -51,7 +59,7 @@ export async function webSearch(
 		// Brave rejects (422) queries over 400 characters / 50 words, and count > 20.
 		const short = encodeURIComponent(query.split(/\s+/).slice(0, 50).join(' ').slice(0, 400));
 		res = await http.httpFetch({
-			url: `https://api.search.brave.com/res/v1/web/search?q=${short}&count=${Math.min(max, 20)}`,
+			url: `https://api.search.brave.com/res/v1/web/search?q=${short}&count=${Math.min(limit, 20)}`,
 			headers: { Accept: 'application/json', 'X-Subscription-Token': apiKey!.trim() },
 			timeoutMs: 30_000
 		});
@@ -60,26 +68,67 @@ export async function webSearch(
 			url: 'https://api.tavily.com/search',
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey!.trim()}` },
-			body: JSON.stringify({ query, max_results: max }),
+			body: JSON.stringify({ query, max_results: limit }),
 			timeoutMs: 30_000
 		});
 	} else {
-		// Highlights: the passages that best match the query, as the snippet.
+		const categoryLimitsFilters = exa.category === 'company' || exa.category === 'people';
+		const contents: Record<string, unknown> = {
+			...(exa.content === 'summary'
+				? { summary: {} }
+				: { [exa.content]: { maxCharacters: exa.maxCharacters } }),
+			...(exa.maxAgeHours === null ? {} : { maxAgeHours: exa.maxAgeHours })
+		};
 		res = await http.httpFetch({
 			url: 'https://api.exa.ai/search',
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey!.trim() },
 			body: JSON.stringify({
 				query,
-				numResults: Math.min(max, 100),
-				contents: { highlights: { maxCharacters: 300 } }
+				type: exa.type,
+				numResults: limit,
+				contents,
+				...(exa.category ? { category: exa.category } : {}),
+				...(exa.includeDomains.length ? { includeDomains: exa.includeDomains } : {}),
+				...(!categoryLimitsFilters && exa.excludeDomains.length
+					? { excludeDomains: exa.excludeDomains }
+					: {}),
+				...(!categoryLimitsFilters && exa.startPublishedDate
+					? { startPublishedDate: `${exa.startPublishedDate}T00:00:00.000Z` }
+					: {}),
+				...(!categoryLimitsFilters && exa.endPublishedDate
+					? { endPublishedDate: `${exa.endPublishedDate}T23:59:59.999Z` }
+					: {}),
+				...(exa.userLocation ? { userLocation: exa.userLocation } : {}),
+				...(exa.moderation ? { moderation: true } : {})
 			}),
 			timeoutMs: 30_000
 		});
 	}
 	if (res.status < 200 || res.status >= 300)
 		throw new Error(`Search failed (${res.status}): ${searchError(res.body)}`);
-	return parseSearch(profile.kind, res.body).slice(0, max);
+	return parseSearch(profile.kind, res.body).slice(0, limit);
+}
+
+/** A complete, bounded Exa config even when loading settings from an older version. */
+export function exaOptions(profile: SearchProfile): ExaSearchOptions {
+	const raw = profile.exa ?? {};
+	return {
+		...DEFAULT_EXA_SEARCH,
+		...raw,
+		numResults: Math.max(1, Math.min(Number(raw.numResults) || DEFAULT_EXA_SEARCH.numResults, 100)),
+		maxCharacters: Math.max(
+			1,
+			Math.min(Number(raw.maxCharacters) || DEFAULT_EXA_SEARCH.maxCharacters, 1_000_000)
+		),
+		includeDomains: Array.isArray(raw.includeDomains) ? raw.includeDomains.filter(Boolean) : [],
+		excludeDomains: Array.isArray(raw.excludeDomains) ? raw.excludeDomains.filter(Boolean) : [],
+		userLocation: (raw.userLocation ?? '').trim().toUpperCase().slice(0, 2),
+		maxAgeHours:
+			raw.maxAgeHours === null || raw.maxAgeHours === undefined
+				? null
+				: Math.max(-1, Math.min(Number(raw.maxAgeHours), 720))
+	};
 }
 
 /**
@@ -154,6 +203,8 @@ export function parseSearch(kind: SearchProfile['kind'], body: string): SearchRe
 		content?: string;
 		description?: string;
 		highlights?: string[];
+		text?: string;
+		summary?: string;
 	}[] = kind === 'brave' ? (j?.web?.results ?? []) : (j?.results ?? []);
 	return rows
 		.filter((r) => r.url)
@@ -161,8 +212,13 @@ export function parseSearch(kind: SearchProfile['kind'], body: string): SearchRe
 			title: stripTags(r.title || r.url || ''),
 			url: r.url!,
 			snippet: stripTags(
-				r.content ?? r.description ?? r.highlights?.join(' … ').replace(/\s+/g, ' ') ?? ''
-			).slice(0, 300)
+				r.highlights?.join(' … ').replace(/\s+/g, ' ') ??
+					r.summary ??
+					r.text ??
+					r.content ??
+					r.description ??
+					''
+			).slice(0, 4000)
 		}));
 }
 

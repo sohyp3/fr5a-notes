@@ -347,20 +347,6 @@
 		flash('Forked — the original is unchanged');
 	}
 
-	/** A device-only chat (it read encrypted notes) joins the sync, once the user agrees. */
-	async function syncChat(): Promise<void> {
-		if (!tab) return;
-		const ok = await app.confirm({
-			title: 'Sync this chat?',
-			body: 'It read encrypted notes, and a chat is saved as plain text: what it quoted or summed up from them goes to your git remote unencrypted.',
-			confirm: 'Sync it'
-		});
-		if (!ok) return;
-		await tab.allowSync();
-		void h.refreshSessions();
-		flash('This chat syncs from now on');
-	}
-
 	function openSessionMenu(): void {
 		if (sessionMenu) {
 			sessionMenu = null;
@@ -404,14 +390,6 @@
 						action: () => void saveChat()
 					}
 				];
-		if (tab?.deviceOnly)
-			items.push({
-				label: 'Sync this chat',
-				icon: 'push',
-				hint: 'on this device',
-				disabled: !!tab.running,
-				action: () => void syncChat()
-			});
 		items.push(
 			{
 				label: 'Fork conversation',
@@ -506,7 +484,7 @@
 			transition:fly={{ y: phone ? 24 : -6, duration: 180 * dur }}
 		>
 			<div class="hist-head">
-				<strong>Sessions</strong>
+				<strong>Sessions <span class="muted">· on this device</span></strong>
 				<span class="muted">{h.sessionFiles.length || ''}</span>
 				<button class="icon" aria-label="Close sessions" onclick={() => (historyOpen = false)}>
 					<Icon name="close" size={15} />
@@ -532,16 +510,11 @@
 							{:else}
 								<button
 									class="hist-open"
-									title={f.startsWith('device/')
-										? 'Kept on this device: it read encrypted notes'
-										: undefined}
+									title="Kept on this device; Save to notes to sync it"
 									onclick={() => {
 										historyOpen = false;
 										void h.openSession(f);
-									}}
-									>{#if f.startsWith('device/')}<span class="device"
-											><Icon name="lock" size={12} stroke={2} /></span
-										>{/if}{sessionLabel(f)}</button
+									}}>{sessionLabel(f)}</button
 								>
 								<button
 									class="icon small"
@@ -553,8 +526,8 @@
 						</div>
 					{:else}
 						<p class="muted pad">
-							No sessions yet. Every chat is kept in <code>.fr5a/sessions/</code>; use ⋯ → Save to
-							notes to put one in your notes.
+							No sessions yet. Working chats stay only on this device; use ⋯ → Save to notes to sync
+							one with your notes.
 						</p>
 					{/each}
 				{/if}
@@ -579,10 +552,10 @@
 					<span class="pill" title={tab.attached.join(', ')}>+{tab.attached.length} attached</span>
 				{/if}
 				{#if skill}<span class="pill accent">/{skill.name}</span>{/if}
-				{#if tab.deviceOnly}<span
+				{#if tab.sensitive}<span
 						class="pill"
-						title="This chat read encrypted notes: it's kept on this device, out of sync. ⋯ → Sync this chat to sync it."
-						><Icon name="lock" size={11} stroke={2} /> device</span
+						title="This chat read encrypted notes; Save to notes will preserve encryption."
+						><Icon name="lock" size={11} stroke={2} /> private context</span
 					>{/if}
 				{#if searchLabel}<span class="pill" title="Web search on"
 						><Icon name="web" size={11} /> web</span
@@ -1638,10 +1611,6 @@
 		background: var(--code-bg);
 		font-family: var(--font-mono);
 		font-size: 11px;
-	}
-	code {
-		font-family: var(--font-mono);
-		font-size: 0.95em;
 	}
 	.muted {
 		color: var(--text-muted);

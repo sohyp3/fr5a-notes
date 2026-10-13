@@ -4,18 +4,22 @@
 	import { platform } from '../../platform';
 	import { getAiSettings } from '../../harness/config.svelte';
 	import { chatCompletion } from '../../harness/openai';
-	import { webSearch } from '../../harness/web';
+	import { exaOptions, webSearch } from '../../harness/web';
 	import { loadSkillTree, type Skill } from '../../harness/skills';
 	import { getHarness } from '../../harness/harness.svelte';
 	import { syncErrorMessage } from '../../sync';
 	import {
 		isBuiltinProvider,
+		DEFAULT_EXA_SEARCH,
+		EXA_CATEGORIES,
+		EXA_SEARCH_TYPES,
 		KEY_URLS,
 		OPENCODE_ZEN,
 		SEARCH_KINDS,
 		ZEN_KEY_URL,
 		type ProviderProfile,
-		type SearchKind
+		type SearchKind,
+		type ExaSearchOptions
 	} from '../../harness/types';
 	import Icon from '../Icon.svelte';
 	import UsagePanel from './UsagePanel.svelte';
@@ -104,6 +108,7 @@
 	let searchKey = $state('');
 	let hasSearchKey = $state(false);
 	let searchMsg = $state<{ kind: 'ok' | 'error'; text: string } | null>(null);
+	const exa = $derived(cfg.search?.kind === 'exa' ? exaOptions(cfg.search) : null);
 
 	// --- skills: own files + packs cloned from git into .fr5a/skills/<name> ---
 	let skills = $state.raw<Skill[]>([]);
@@ -279,10 +284,34 @@
 	}
 
 	function setSearchKind(kind: SearchKind | ''): void {
-		ai.update({ search: kind ? { kind, baseUrl: cfg.search?.baseUrl ?? '' } : null });
+		ai.update({
+			search: kind
+				? {
+						kind,
+						baseUrl: cfg.search?.baseUrl ?? '',
+						...(kind === 'exa' ? { exa: cfg.search?.exa ?? DEFAULT_EXA_SEARCH } : {})
+					}
+				: null
+		});
 		searchKey = '';
 		searchMsg = null;
 		void refreshSearchKey();
+	}
+
+	function updateExa(patch: Partial<ExaSearchOptions>): void {
+		if (cfg.search?.kind !== 'exa') return;
+		ai.update({ search: { ...cfg.search, exa: { ...exaOptions(cfg.search), ...patch } } });
+	}
+
+	function domains(value: string): string[] {
+		return [
+			...new Set(
+				value
+					.split(/[\s,]+/)
+					.map((v) => v.trim())
+					.filter(Boolean)
+			)
+		].slice(0, 1200);
 	}
 
 	/** Saved on Enter, on leaving the field, and before a test — not only via the button. */
@@ -612,6 +641,169 @@
 						<button class="btn" disabled={!searchKey.trim()} onclick={saveSearchKey}>Save</button>
 					</div>
 				</label>
+			{/if}
+			{#if cfg.search.kind === 'exa' && exa}
+				<div class="exa-config">
+					<p class="exa-title">Exa search</p>
+					<div class="exa-grid">
+						<label class="field">
+							<span class="small">Search mode</span>
+							<select
+								value={exa.type}
+								onchange={(e) =>
+									updateExa({
+										type: (e.currentTarget as HTMLSelectElement).value as ExaSearchOptions['type']
+									})}
+							>
+								{#each EXA_SEARCH_TYPES as type (type)}
+									<option value={type}>{type}</option>
+								{/each}
+							</select>
+							<span class="desc"
+								>Instant is quickest; deep modes trade time and cost for research.</span
+							>
+						</label>
+						<label class="field">
+							<span class="small">Data category</span>
+							<input
+								list="exa-categories"
+								value={exa.category}
+								placeholder="Any"
+								onchange={(e) => updateExa({ category: e.currentTarget.value.trim() })}
+							/>
+							<datalist id="exa-categories">
+								{#each EXA_CATEGORIES.filter(Boolean) as category (category)}
+									<option value={category}></option>
+								{/each}
+							</datalist>
+							<span class="desc"
+								>Company, people, news, publications, financial reports—or a custom hint.</span
+							>
+						</label>
+						<label class="field">
+							<span class="small">Results</span>
+							<input
+								type="number"
+								min="1"
+								max="100"
+								value={exa.numResults}
+								onchange={(e) =>
+									updateExa({
+										numResults: Math.max(1, Math.min(Number(e.currentTarget.value), 100))
+									})}
+							/>
+						</label>
+						<label class="field">
+							<span class="small">Result content</span>
+							<select
+								value={exa.content}
+								onchange={(e) =>
+									updateExa({ content: e.currentTarget.value as ExaSearchOptions['content'] })}
+							>
+								<option value="highlights">Relevant highlights</option>
+								<option value="text">Page text</option>
+								<option value="summary">AI summary</option>
+							</select>
+						</label>
+						{#if exa.content !== 'summary'}
+							<label class="field">
+								<span class="small">Characters per result</span>
+								<input
+									type="number"
+									min="1"
+									max="1000000"
+									value={exa.maxCharacters}
+									onchange={(e) =>
+										updateExa({
+											maxCharacters: Math.max(1, Math.min(Number(e.currentTarget.value), 1_000_000))
+										})}
+								/>
+							</label>
+						{/if}
+						<label class="field">
+							<span class="small">Content freshness (hours)</span>
+							<input
+								type="number"
+								min="-1"
+								max="720"
+								value={exa.maxAgeHours ?? ''}
+								placeholder="automatic"
+								onchange={(e) =>
+									updateExa({
+										maxAgeHours:
+											e.currentTarget.value === ''
+												? null
+												: Math.max(-1, Math.min(Number(e.currentTarget.value), 720))
+									})}
+							/>
+							<span class="desc"
+								>Blank: automatic · 0: fetch fresh · -1: cache only · up to 720.</span
+							>
+						</label>
+						<label class="field wide">
+							<span class="small">Only these domains</span>
+							<input
+								value={exa.includeDomains.join(', ')}
+								placeholder="example.com, *.example.org/docs"
+								onchange={(e) => updateExa({ includeDomains: domains(e.currentTarget.value) })}
+							/>
+						</label>
+						<label class="field wide">
+							<span class="small">Exclude domains</span>
+							<input
+								value={exa.excludeDomains.join(', ')}
+								placeholder="pinterest.com, example.net"
+								disabled={exa.category === 'company' || exa.category === 'people'}
+								onchange={(e) => updateExa({ excludeDomains: domains(e.currentTarget.value) })}
+							/>
+							{#if exa.category === 'company' || exa.category === 'people'}
+								<span class="desc"
+									>Exa does not support this filter for company or people searches.</span
+								>
+							{/if}
+						</label>
+						<label class="field">
+							<span class="small">Published after</span>
+							<input
+								type="date"
+								value={exa.startPublishedDate}
+								disabled={exa.category === 'company' || exa.category === 'people'}
+								onchange={(e) => updateExa({ startPublishedDate: e.currentTarget.value })}
+							/>
+						</label>
+						<label class="field">
+							<span class="small">Published before</span>
+							<input
+								type="date"
+								value={exa.endPublishedDate}
+								disabled={exa.category === 'company' || exa.category === 'people'}
+								onchange={(e) => updateExa({ endPublishedDate: e.currentTarget.value })}
+							/>
+						</label>
+						<label class="field">
+							<span class="small">Result country</span>
+							<input
+								maxlength="2"
+								value={exa.userLocation}
+								placeholder="US"
+								onchange={(e) => updateExa({ userLocation: e.currentTarget.value.toUpperCase() })}
+							/>
+							<span class="desc">Optional two-letter country code.</span>
+						</label>
+					</div>
+					<label class="check">
+						<input
+							type="checkbox"
+							checked={exa.moderation}
+							onchange={(e) => updateExa({ moderation: e.currentTarget.checked })}
+						/>
+						<span
+							><span class="name">Content moderation</span><span class="desc"
+								>Ask Exa to filter unsafe search results.</span
+							></span
+						>
+					</label>
+				</div>
 			{/if}
 			<div class="actions start">
 				<button class="btn" onclick={testSearch}>Test search</button>
@@ -976,6 +1168,33 @@
 		flex-direction: column;
 		gap: 10px;
 		margin-top: 12px;
+	}
+	.exa-config {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+		padding: 14px;
+		border-radius: 12px;
+		background: var(--bg-list);
+	}
+	.exa-title {
+		margin: 0;
+		font-size: 12px;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--text-faint);
+	}
+	.exa-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+		gap: 12px;
+	}
+	.exa-grid .wide {
+		grid-column: span 2;
+	}
+	:global(.settings.phone) .exa-grid .wide {
+		grid-column: auto;
 	}
 
 	/* --- shared controls --------------------------------------------------- */

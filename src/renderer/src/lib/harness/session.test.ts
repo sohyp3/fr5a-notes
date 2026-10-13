@@ -20,6 +20,7 @@ const session: Session = {
 	provider: 'deepseek',
 	skill: 'clarify',
 	notes: ['drafts/a.md', 'b c.md'],
+	sensitive: false,
 	turns: [
 		{ role: 'you', text: 'Help me plan\n\n## A heading in my text' },
 		{ role: 'tool', tool: 'web_search', text: '1. Result — https://e.com' },
@@ -41,7 +42,7 @@ describe('session files', () => {
 		expect(slugify('مرحبا بالعالم')).toBe('مرحبا-بالعالم');
 	});
 
-	it('keeps device-only chats in an ignored folder', () => {
+	it('keeps every working chat in an ignored device folder', () => {
 		expect(sessionPath('a.md', false)).toBe('sessions/a.md');
 		expect(sessionPath('a.md', true)).toBe('sessions/device/a.md');
 		const fresh = withDeviceIgnored('')!;
@@ -50,6 +51,11 @@ describe('session files', () => {
 		expect(withDeviceIgnored('/device/\n')).toBeNull();
 		// Someone else's entries stay.
 		expect(withDeviceIgnored('*.tmp\n')).toMatch(/^\*\.tmp\n\n# fr5a: .*\ndevice\/\n$/);
+	});
+
+	it('records whether decrypted note content entered the chat', () => {
+		const privateChat = { ...session, sensitive: true };
+		expect(parseSession('x.md', serializeSession(privateChat)).sensitive).toBe(true);
 	});
 });
 

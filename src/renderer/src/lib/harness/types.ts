@@ -20,10 +20,69 @@ export interface ProviderProfile {
 
 export type SearchKind = 'duckduckgo' | 'searxng' | 'brave' | 'tavily' | 'exa';
 
+export const EXA_SEARCH_TYPES = [
+	'instant',
+	'fast',
+	'auto',
+	'deep-lite',
+	'deep',
+	'deep-reasoning'
+] as const;
+export type ExaSearchType = (typeof EXA_SEARCH_TYPES)[number];
+
+export const EXA_CATEGORIES = [
+	'',
+	'company',
+	'publication',
+	'news',
+	'personal site',
+	'financial report',
+	'people'
+] as const;
+export type ExaCategory = (typeof EXA_CATEGORIES)[number];
+export type ExaContent = 'highlights' | 'text' | 'summary';
+
+export interface ExaSearchOptions {
+	type: ExaSearchType;
+	/** Known category or another Exa category hint. */
+	category: string;
+	numResults: number;
+	content: ExaContent;
+	/** Per-result character budget for highlights / text. */
+	maxCharacters: number;
+	includeDomains: string[];
+	excludeDomains: string[];
+	/** YYYY-MM-DD in settings; converted to ISO instants for Exa. */
+	startPublishedDate: string;
+	endPublishedDate: string;
+	/** Blank country disables localization; otherwise an ISO 3166-1 alpha-2 code. */
+	userLocation: string;
+	moderation: boolean;
+	/** null = Exa default, -1 = cache only, 0 = fresh, otherwise max cache age. */
+	maxAgeHours: number | null;
+}
+
+export const DEFAULT_EXA_SEARCH: ExaSearchOptions = {
+	type: 'auto',
+	category: '',
+	numResults: 6,
+	content: 'highlights',
+	maxCharacters: 600,
+	includeDomains: [],
+	excludeDomains: [],
+	startPublishedDate: '',
+	endPublishedDate: '',
+	userLocation: '',
+	moderation: false,
+	maxAgeHours: null
+};
+
 export interface SearchProfile {
 	kind: SearchKind;
 	/** SearXNG instance URL (ignored by the others). */
 	baseUrl: string;
+	/** Exa-only search and result-content controls. */
+	exa?: Partial<ExaSearchOptions>;
 }
 
 /** Web search choices, in the order Settings lists them. */

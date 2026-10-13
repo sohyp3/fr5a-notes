@@ -49,9 +49,9 @@ import { OPENCODE_ZEN, ZEN_KEY_URL, type ChatMessage, type ProviderProfile } fro
  * Harness runtime: tmux-like tabs, one session each. A run builds the system
  * prompt (skill + attached notes) on-device, drives the agent loop, streams
  * text into the transcript, and pauses for questions / write approvals.
- * Every session is mirrored to `.fr5a/sessions/<file>.md` after each change;
- * one that read an encrypted note to `sessions/device/` (never synced, see
- * session.ts `DEVICE_DIR`) until the user syncs it.
+ * Every session is mirrored to `.fr5a/sessions/device/<file>.md` after each
+ * change. That folder is ignored by Git; only an explicit "Save to notes"
+ * creates synced chat content.
  */
 
 export type Entry =
@@ -109,8 +109,10 @@ export class HarnessTab {
 	attached = $state<string[]>([]);
 	providerId = $state<string | null>(null);
 	skill = $state<string | null>(null);
-	/** It read an encrypted note: saved in `sessions/device/`, out of sync. */
-	deviceOnly = $state(false);
+	/** Working transcript is local-only. False only while migrating legacy sessions. */
+	deviceOnly = $state(true);
+	/** Decrypted note content entered the chat, so saving it should preserve encryption. */
+	sensitive = $state(false);
 
 	private answer: ((a: string[]) => void) | null = null;
 	private decide: ((ok: boolean) => void) | null = null;
@@ -138,6 +140,7 @@ export class HarnessTab {
 		this.session = session;
 		this.history = history;
 		this.deviceOnly = deviceOnly;
+		this.sensitive = session.sensitive ?? (deviceOnly && persisted);
 		this.skill = session.skill || null;
 		this.providerId = session.provider || null;
 		this.attached = session.notes.filter((n) => n !== getAppState().activeId);
@@ -244,6 +247,7 @@ export class HarnessTab {
 		this.session.turns = turns;
 		this.session.skill = this.skill ?? '';
 		this.session.provider = this.providerId ?? '';
+		this.session.sensitive = this.sensitive;
 		const text = serializeSession($state.snapshot(this.session));
 		// Where it goes is decided when the write runs, after any earlier move.
 		await this.queue(async () => {
@@ -255,25 +259,19 @@ export class HarnessTab {
 	}
 
 	/**
-	 * Text from an encrypted note is about to enter the chat: from now on it's
-	 * saved where sync never looks, and the synced copy (saved before) goes.
+	 * Decrypted note text is about to enter the chat. Mark it so an explicit
+	 * "Save to notes" preserves encryption. Legacy synced sessions also move local.
 	 */
 	keepOnDevice(): void {
-		if (this.deviceOnly) return;
+		this.sensitive = true;
+		if (this.deviceOnly) {
+			this.scheduleSave();
+			return;
+		}
 		this.deviceOnly = true;
 		this.savedText = null;
 		const file = this.session.file;
 		void this.queue(() => platform.deleteMeta(sessionPath(file, false)));
-	}
-
-	/** "Sync this chat": back to the synced folder, so the next sync carries it. */
-	async allowSync(): Promise<void> {
-		if (!this.deviceOnly) return;
-		const file = this.session.file;
-		this.deviceOnly = false;
-		this.savedText = null;
-		await this.save();
-		await this.queue(() => platform.deleteMeta(sessionPath(file, true)));
 	}
 
 	private queue(job: () => Promise<void>): Promise<void> {
@@ -309,7 +307,8 @@ function newSession(title = 'New session'): Session {
 		provider: '',
 		skill: '',
 		notes: [],
-		turns: []
+		turns: [],
+		sensitive: false
 	};
 }
 
@@ -386,7 +385,7 @@ class HarnessState {
 	}
 
 	newTab(): void {
-		this.tabs.push(new HarnessTab(newSession()));
+		this.tabs.push(new HarnessTab(newSession(), [], true));
 		this.active = this.tabs.length - 1;
 	}
 
@@ -471,8 +470,8 @@ class HarnessState {
 		// A chat that read encrypted notes is saved encrypted, as is one going into an encrypted folder.
 		const seal =
 			!!app.vault?.hasKey &&
-			(tab.deviceOnly || existing?.encrypted || (!existing && app.folderEncrypted(folder)));
-		if (tab.deviceOnly && !seal) {
+			(tab.sensitive || existing?.encrypted || (!existing && app.folderEncrypted(folder)));
+		if (tab.sensitive && !seal) {
 			const ok = await app.confirm({
 				title: 'Save as plain text?',
 				body: 'This chat read encrypted notes, and encryption is off now: the note is saved as plain text and syncs like any other.',
@@ -562,16 +561,29 @@ class HarnessState {
 	async refreshSessions(): Promise<void> {
 		this.sessionsLoading = true;
 		try {
-			const [synced, device] = await Promise.all([
+			await ensureDeviceIgnored();
+			const [synced, initialDevice] = await Promise.all([
 				platform.listMeta(SESSIONS_DIR),
 				platform.listMeta(`${SESSIONS_DIR}/${DEVICE_DIR}`).catch(() => [] as string[])
 			]);
 			const md = (f: string) => f.endsWith('.md');
-			// Device-only chats first: there are few, and they're the ones to sync or delete.
-			this.sessionFiles = [
-				...device.filter(md).map((f) => `${DEVICE_DIR}/${f}`),
-				...synced.filter(md)
-			];
+			// Older versions wrote ordinary working sessions into Git. Move each one
+			// behind the ignore boundary; a later sync records only their deletion.
+			const device = initialDevice.filter(md);
+			for (const file of synced.filter(md)) {
+				const text = await platform.readMeta(`${SESSIONS_DIR}/${file}`);
+				if (text === null) continue;
+				let local = file;
+				for (let n = 2; device.includes(local); n++)
+					local = file.replace(/\.md$/, `-local-${n}.md`);
+				await platform.writeMeta(sessionPath(local, true), text);
+				await platform.deleteMeta(sessionPath(file, false));
+				device.push(local);
+			}
+			this.sessionFiles = device
+				.sort()
+				.reverse()
+				.map((f) => `${DEVICE_DIR}/${f}`);
 			this.sessionsError = null;
 		} catch (err) {
 			// A missing folder just means no sessions yet.
