@@ -18,6 +18,12 @@ export interface PreparedWrite {
 	apply(): Promise<string>;
 }
 
+/** The note buffer that "current" meant when an AI run started. */
+export interface CurrentWriteTarget {
+	id: string | null;
+	editorSession: number;
+}
+
 /** Index of the line (top-level paragraph) holding the caret, or the last line. */
 function caretLine(): number | null {
 	const ed = getAppState().editor;
@@ -32,8 +38,21 @@ function setEditorText(text: string): void {
 	ed?.commands.setContent(textToDoc(text), { emitUpdate: true });
 }
 
-export async function prepareWrite(p: WriteProposal): Promise<PreparedWrite> {
+export async function prepareWrite(
+	p: WriteProposal,
+	current?: CurrentWriteTarget | null
+): Promise<PreparedWrite> {
 	const app = getAppState();
+	if (p.target === 'current' && current === null)
+		throw new Error('No note was open when this run started.');
+	if (p.target === 'current' && current?.id) p = { ...p, target: current.id };
+	if (
+		p.target === 'current' &&
+		current &&
+		current.id === null &&
+		app.editorSession !== current.editorSession
+	)
+		throw new Error('The note this run started with is no longer open; nothing written.');
 	const isCurrent = p.target === 'current' || (p.target !== 'new' && p.target === app.activeId);
 
 	if (p.target === 'new') {

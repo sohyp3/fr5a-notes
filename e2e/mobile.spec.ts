@@ -882,6 +882,45 @@ test('AI harness: web search turns on from the context panel', async ({ page }) 
 	await expect(harness.locator('.ctx-sum')).toContainText('web');
 });
 
+test('AI harness: each tab keeps its own unsent draft', async ({ page }) => {
+	await openPlan(page);
+	const harness = await openHarness(page);
+	const input = harness.locator('textarea');
+	await input.fill('first tab draft');
+	await harness.getByRole('button', { name: 'New session', exact: true }).tap();
+	await expect(input).toHaveValue('');
+	await input.fill('second tab draft');
+
+	await harness.locator('.tab-name').first().tap();
+	await expect(input).toHaveValue('first tab draft');
+	await harness.locator('.tab-name').nth(1).tap();
+	await expect(input).toHaveValue('second tab draft');
+});
+
+test('AI harness: closing an unchanged tab does not save it again', async ({ page }) => {
+	await openPlan(page);
+	await page.getByRole('button', { name: 'Toggle AI harness' }).click();
+	const harness = page.getByRole('region', { name: 'AI harness' });
+	await expect(harness).toBeVisible();
+	await harness.locator('textarea').fill('md?');
+	await harness.locator('textarea').press('Enter');
+	await expect(harness.locator('.msg.ai .md h1')).toHaveText('Title');
+	const sessionWrites = () =>
+		page.evaluate(
+			() =>
+				(window as unknown as { __metaWrites: string[] }).__metaWrites.filter((p) =>
+					p.startsWith('sessions/')
+				).length
+		);
+	await expect.poll(sessionWrites).toBeGreaterThan(0);
+	const before = await sessionWrites();
+
+	await harness.getByRole('button', { name: 'Close tab' }).tap();
+	await expect(harness.getByRole('tab', { selected: true })).toContainText('New session');
+	await page.waitForTimeout(500);
+	expect(await sessionWrites()).toBe(before);
+});
+
 // --- mouse desktop ---------------------------------------------------------------------
 
 /** A mouse window; `seed` notes are written before the app boots (and again on reloads). */
@@ -971,6 +1010,41 @@ test('desktop: notes open editable; the note menu is anchored, not a sheet', asy
 	await expect(page.locator('.sheet-root')).toHaveCount(0);
 	await page.keyboard.press('Escape');
 	await expect(page.getByRole('menu')).toHaveCount(0);
+	await ctx.close();
+});
+
+test('desktop: an AI tab keeps writing to the note its run started with', async ({ browser }) => {
+	const { ctx, page } = await desktopPage(browser);
+	await sidebar(page)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	await list(page).getByText('Plan', { exact: true }).click();
+	await page.getByRole('button', { name: 'Toggle AI harness' }).click();
+	const harness = page.getByRole('region', { name: 'AI harness' });
+	await expect(harness).toBeVisible();
+	await harness.locator('textarea').fill('help me with tone');
+	await harness.locator('textarea').press('Enter');
+	await expect(harness.getByRole('heading', { name: 'Which tone?' })).toBeVisible();
+
+	// A second AI tab and another open note must not redirect the first run.
+	await harness.getByRole('button', { name: 'New session', exact: true }).click();
+	await harness.locator('textarea').fill('a different topic');
+	await harness.locator('.tab-name').first().click();
+	await list(page).getByText('Hello', { exact: true }).click();
+	await harness.getByRole('button', { name: 'Casual' }).click();
+	const review = harness.getByRole('group', { name: 'Review change' });
+	await expect(review).toContainText('append → Work/plan.md');
+	await review.getByRole('button', { name: 'Apply' }).click();
+	await expect(harness.getByText('Done: Applied to Work/plan.md (append)')).toBeVisible();
+
+	const contents = await page.evaluate(async () => {
+		const api = (window as unknown as { api: FakeApi }).api;
+		return Promise.all([api.readNote('Work/plan.md'), api.readNote('hello.md')]);
+	});
+	expect(contents[0]).toContain('AI line');
+	expect(contents[1]).toBe('# Hello\n\nworld');
+	await harness.locator('.tab-name').nth(1).click();
+	await expect(harness.locator('textarea')).toHaveValue('a different topic');
 	await ctx.close();
 });
 

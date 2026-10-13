@@ -40,7 +40,6 @@
 	const phone = $derived(app.layout === 'phone');
 	const dur = reducedMotion() ? 0 : 1;
 
-	let input = $state('');
 	let inputEl: HTMLTextAreaElement | undefined = $state();
 	let scroller: HTMLDivElement | undefined = $state();
 	let historyOpen = $state(false);
@@ -108,6 +107,7 @@
 	type Suggestion = { label: string; hint: string; insert: string };
 
 	const suggestions = $derived.by((): Suggestion[] => {
+		const input = tab?.draft ?? '';
 		const slash = /^\/([\w-]*)$/.exec(input);
 		if (slash) {
 			const q = slash[1].toLowerCase();
@@ -183,7 +183,7 @@
 	});
 
 	function pick(s: Suggestion): void {
-		input = s.insert;
+		if (tab) tab.draft = s.insert;
 		inputEl?.focus();
 	}
 
@@ -192,14 +192,14 @@
 	async function submit(): Promise<void> {
 		const t = tab;
 		if (!t) return;
-		const text = input.trim();
+		const text = t.draft.trim();
 		if (!text || t.running) return;
 		const before = t.entries.length;
-		input = '';
+		t.draft = '';
 		pinned = true;
-		await h.send(text);
+		await h.send(text, t);
 		// Nothing went out (no provider, unknown skill…): keep the draft.
-		if (!t.entries.slice(before).some((e) => e.kind === 'you') && !input) input = text;
+		if (!t.entries.slice(before).some((e) => e.kind === 'you') && !t.draft) t.draft = text;
 	}
 
 	function retry(): void {
@@ -233,7 +233,7 @@
 
 	/** Attachment: the message box grows with its text, up to 180px. */
 	function autosize(el: HTMLTextAreaElement): void {
-		void input;
+		void tab?.draft;
 		el.style.height = 'auto';
 		el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
 	}
@@ -743,7 +743,7 @@
 									<button
 										class="skill-btn"
 										title={s.description}
-										onclick={() => h.send(`/${s.name}`)}
+										onclick={() => h.send(`/${s.name}`, tab)}
 									>
 										<span>/{s.name}</span><small>{s.description}</small>
 									</button>
@@ -908,7 +908,7 @@
 				<textarea
 					bind:this={inputEl}
 					{@attach autosize}
-					bind:value={input}
+					bind:value={tab.draft}
 					rows="1"
 					dir="auto"
 					aria-label="Message"
@@ -924,7 +924,7 @@
 						class="send"
 						aria-label="Send"
 						title="Send (Enter)"
-						disabled={!input.trim()}
+						disabled={!tab.draft.trim()}
 						onclick={submit}
 					>
 						<Icon name="send" size={15} stroke={2.2} />

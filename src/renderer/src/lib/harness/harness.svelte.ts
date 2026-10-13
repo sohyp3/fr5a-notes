@@ -8,7 +8,7 @@ import { abortable, closeCalls, runLoop } from './loop';
 import { describeError } from './errors';
 import { AbortError, ProviderError, chatCompletion } from './openai';
 import { blockedReason } from './privacy';
-import { prepareWrite, type PreparedWrite } from './apply';
+import { prepareWrite, type CurrentWriteTarget, type PreparedWrite } from './apply';
 import {
 	DEVICE_DIR,
 	forkTitle,
@@ -96,6 +96,8 @@ const MAX_INLINE_NOTES = 25;
 export class HarnessTab {
 	session = $state<Session>() as Session;
 	entries = $state<Entry[]>([]);
+	/** Unsent composer text belongs to this tab, not the pane. */
+	draft = $state('');
 	/** Conversation sent to the model (no system message — rebuilt each run). */
 	history: ChatMessage[] = [];
 	running = $state(false);
@@ -122,8 +124,17 @@ export class HarnessTab {
 	private saveTimer: ReturnType<typeof setTimeout> | null = null;
 	/** Session file writes / moves, in order (a move must not race a save). */
 	private writing: Promise<void> = Promise.resolve();
+	/** Canonical contents already on disk; unchanged saves must not bump its mtime. */
+	private savedText: string | null = null;
+	/** The note/list snapshot used by a stopped run when Retry resumes it. */
+	lastRunContext: RunContext | null = null;
 
-	constructor(session: Session, history: ChatMessage[] = [], deviceOnly = false) {
+	constructor(
+		session: Session,
+		history: ChatMessage[] = [],
+		deviceOnly = false,
+		persisted = false
+	) {
 		this.session = session;
 		this.history = history;
 		this.deviceOnly = deviceOnly;
@@ -137,6 +148,7 @@ export class HarnessTab {
 					? { kind: 'ai', text: t.text, streaming: false }
 					: { kind: 'tool', name: t.tool ?? 'tool', args: '', result: t.text }
 		);
+		if (persisted) this.savedText = serializeSession(session);
 	}
 
 	get title(): string {
@@ -235,8 +247,10 @@ export class HarnessTab {
 		const text = serializeSession($state.snapshot(this.session));
 		// Where it goes is decided when the write runs, after any earlier move.
 		await this.queue(async () => {
+			if (text === this.savedText) return;
 			if (this.deviceOnly) await ensureDeviceIgnored();
 			await platform.writeMeta(sessionPath(this.session.file, this.deviceOnly), text);
+			this.savedText = text;
 		});
 	}
 
@@ -247,6 +261,7 @@ export class HarnessTab {
 	keepOnDevice(): void {
 		if (this.deviceOnly) return;
 		this.deviceOnly = true;
+		this.savedText = null;
 		const file = this.session.file;
 		void this.queue(() => platform.deleteMeta(sessionPath(file, false)));
 	}
@@ -256,6 +271,7 @@ export class HarnessTab {
 		if (!this.deviceOnly) return;
 		const file = this.session.file;
 		this.deviceOnly = false;
+		this.savedText = null;
 		await this.save();
 		await this.queue(() => platform.deleteMeta(sessionPath(file, true)));
 	}
@@ -266,6 +282,12 @@ export class HarnessTab {
 			.catch((err) => console.error('[harness] session save failed', err));
 		return this.writing;
 	}
+}
+
+interface RunContext {
+	current: (CurrentWriteTarget & { content: string; encrypted: boolean }) | null;
+	notes: ReturnType<typeof getAppState>['aiNotes'];
+	tabIds: string[];
 }
 
 /** `sessions/.gitignore` lists the device folder before anything is written there. */
@@ -411,6 +433,7 @@ class HarnessState {
 		copy.skill = tab.skill;
 		copy.providerId = tab.providerId;
 		copy.resumeAt = tab.resumeAt;
+		copy.lastRunContext = tab.lastRunContext;
 		this.tabs.splice(this.active + 1, 0, copy);
 		this.active += 1;
 		void copy.save().then(() => this.refreshSessions());
@@ -497,7 +520,7 @@ class HarnessState {
 		if (text === null) return;
 		const deviceOnly = key.startsWith(`${DEVICE_DIR}/`);
 		const session = parseSession(key.slice(deviceOnly ? DEVICE_DIR.length + 1 : 0), text);
-		const tab = new HarnessTab(session, turnsToMessages(session.turns), deviceOnly);
+		const tab = new HarnessTab(session, turnsToMessages(session.turns), deviceOnly, true);
 		// Reuse an untouched blank tab rather than piling up empties.
 		if (this.tab && !this.tab.entries.length && !this.tab.running) this.tabs[this.active] = tab;
 		else {
@@ -580,27 +603,47 @@ class HarnessState {
 		return expandMentions(tab.attached, app.aiNotes, first, MAX_INLINE_NOTES, app.tabIds);
 	}
 
-	private async gatherNotes(tab: HarnessTab, profile: ProviderProfile): Promise<AttachedNote[]> {
+	private captureRunContext(): RunContext {
 		const app = getAppState();
+		const hasCurrent = !app.aiBlocksActive && (!!app.activeId || app.draft);
+		return {
+			current: hasCurrent
+				? {
+						id: app.activeId,
+						editorSession: app.editorSession,
+						content: app.editor ? docToText(app.editor) : app.activeContent,
+						encrypted: app.activeEncrypted
+					}
+				: null,
+			notes: [...app.aiNotes],
+			tabIds: [...app.tabIds]
+		};
+	}
+
+	private async gatherNotes(
+		tab: HarnessTab,
+		profile: ProviderProfile,
+		run: RunContext
+	): Promise<AttachedNote[]> {
 		const ai = getAiSettings();
-		const ctx = this.context(tab);
+		const first = tab.useCurrent && run.current?.id ? [run.current.id] : [];
+		const ctx = expandMentions(tab.attached, run.notes, first, MAX_INLINE_NOTES, run.tabIds);
 		if (ctx.missing.length) throw new Error(`Nothing matches ${ctx.missing.join(', ')}.`);
 		const notes: AttachedNote[] = [];
 		const skipped: string[] = [];
 		const explicit = [
 			...tab.attached,
-			...(tab.useCurrent && app.aiActiveId ? [app.aiActiveId] : [])
+			...(tab.useCurrent && run.current?.id ? [run.current.id] : [])
 		];
 		for (const id of ctx.ids) {
-			const content =
-				id === app.activeId && app.editor ? docToText(app.editor) : await platform.readNote(id);
+			const content = id === run.current?.id ? run.current.content : await platform.readNote(id);
 			const why = blockedReason(id, content, profile, ai.config);
 			// A note named on its own is an error; one swept in by a folder/tag is just left out.
 			if (why && explicit.includes(id))
 				throw new Error(`${why} Pick a local provider or detach it.`);
 			if (why) skipped.push(id);
 			else {
-				if (app.noteMeta(id)?.encrypted) tab.keepOnDevice();
+				if (run.notes.find((n) => n.id === id)?.encrypted) tab.keepOnDevice();
 				notes.push({ id, content });
 			}
 		}
@@ -627,9 +670,9 @@ class HarnessState {
 					.join(' ')
 			});
 		// An unsaved draft is still "the open note".
-		if (tab.useCurrent && !app.activeId && app.draft && !app.aiBlocksActive && app.editor) {
-			if (app.draftEncrypted) tab.keepOnDevice();
-			notes.unshift({ id: '(unsaved draft)', content: docToText(app.editor) });
+		if (tab.useCurrent && run.current?.id === null) {
+			if (run.current.encrypted) tab.keepOnDevice();
+			notes.unshift({ id: '(unsaved draft)', content: run.current.content });
 		}
 		return notes;
 	}
@@ -647,7 +690,6 @@ class HarnessState {
 	async send(input: string, tab = this.tab): Promise<void> {
 		if (!tab || tab.running) return;
 		const { skill: skillName, text, mentions } = parseInput(input);
-		const app = getAppState();
 
 		if (skillName) {
 			if (!this.skill(skillName)) {
@@ -667,16 +709,18 @@ class HarnessState {
 			return;
 		}
 
+		const run = this.captureRunContext();
+		tab.lastRunContext = run;
 		if (!tab.history.length && tab.session.title === 'New session') {
 			const base = skill
-				? `${skill.name} ${app.aiNotes.find((n) => n.id === app.aiActiveId)?.title ?? ''}`
+				? `${skill.name} ${run.notes.find((n) => n.id === run.current?.id)?.title ?? ''}`
 				: userText;
 			tab.session.title = base.trim().split('\n')[0].slice(0, 60) || 'Session';
 			tab.session.file = sessionFileName(tab.session.title);
 		}
 
 		tab.entries.push({ kind: 'you', text: input.trim(), mark: tab.history.length });
-		await this.run(tab, profile, userText);
+		await this.run(tab, profile, userText, run);
 	}
 
 	/**
@@ -686,9 +730,9 @@ class HarnessState {
 	private async run(
 		tab: HarnessTab,
 		profile: ProviderProfile,
-		userText: string | null
+		userText: string | null,
+		run: RunContext
 	): Promise<void> {
-		const app = getAppState();
 		const ai = getAiSettings();
 		const skill = this.skill(tab.skill);
 		const runStart = tab.entries.length;
@@ -720,7 +764,7 @@ class HarnessState {
 		try {
 			const [notes, apiKey, searchKey] = await abortable(
 				Promise.all([
-					this.gatherNotes(tab, profile),
+					this.gatherNotes(tab, profile, run),
 					ai.apiKey(profile.id),
 					ai.searchKey(ai.config.search?.kind)
 				]),
@@ -733,7 +777,7 @@ class HarnessState {
 						: `${profile.name} has no API key. Add it in Settings → AI → Edit, or mark the provider as local.`
 				);
 			tab.session.notes = [
-				...(app.aiActiveId && tab.useCurrent ? [app.aiActiveId] : []),
+				...(run.current?.id && tab.useCurrent ? [run.current.id] : []),
 				...tab.attached
 			];
 			const system = buildSystemPrompt({
@@ -753,13 +797,15 @@ class HarnessState {
 				createTools({
 					profile,
 					config: ai.config,
-					notes: () => app.aiNotes,
+					notes: () => run.notes,
 					readNote: (id) => {
-						if (app.noteMeta(id)?.encrypted) tab.keepOnDevice();
-						return platform.readNote(id);
+						if (run.notes.find((n) => n.id === id)?.encrypted) tab.keepOnDevice();
+						return id === run.current?.id
+							? Promise.resolve(run.current.content)
+							: platform.readNote(id);
 					},
 					ask: (items) => tab.ask({ items }),
-					proposeWrite: (p) => this.reviewWrite(tab, p),
+					proposeWrite: (p) => this.reviewWrite(tab, p, run.current),
 					search: search ? (q) => webSearch(platform, search, searchKey, q) : undefined,
 					fetchPage: search ? (url) => fetchPage(platform, url) : undefined
 				}),
@@ -884,7 +930,9 @@ class HarnessState {
 			// The error / "Stopped." note and whatever the history doesn't have (a cut-off reply).
 			tab.entries.splice(tab.resumeAt);
 			if (filtered) tab.withholdResults();
-			await this.run(tab, profile, null);
+			const run = tab.lastRunContext ?? this.captureRunContext();
+			tab.lastRunContext = run;
+			await this.run(tab, profile, null, run);
 			return;
 		}
 		let i = tab.entries.length - 1;
@@ -904,10 +952,14 @@ class HarnessState {
 	}
 
 	/** write_note: show the diff card, apply on approval. */
-	private async reviewWrite(tab: HarnessTab, p: WriteProposal): Promise<string> {
+	private async reviewWrite(
+		tab: HarnessTab,
+		p: WriteProposal,
+		current: CurrentWriteTarget | null
+	): Promise<string> {
 		let prepared: PreparedWrite;
 		try {
-			prepared = await prepareWrite(p);
+			prepared = await prepareWrite(p, current);
 		} catch (err) {
 			return `Not written: ${err instanceof Error ? err.message : String(err)}`;
 		}

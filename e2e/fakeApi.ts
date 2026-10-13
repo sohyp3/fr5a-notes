@@ -54,6 +54,7 @@ export function installFakeApi(): void {
 		}
 	};
 	const metaFiles: Record<string, string> = {};
+	const metaWrites: string[] = [];
 	// Saved images (path → byte count); every workspace image shows as a 400×200 SVG.
 	const assets: Record<string, number> = {};
 	(window as unknown as { __assets: typeof assets }).__assets = assets;
@@ -62,6 +63,7 @@ export function installFakeApi(): void {
 	)}`;
 	const secrets: Record<string, string> = {};
 	(window as unknown as { __meta: typeof metaFiles }).__meta = metaFiles;
+	(window as unknown as { __metaWrites: typeof metaWrites }).__metaWrites = metaWrites;
 	// Every reply reports its tokens in a last chunk, like `stream_options.include_usage`.
 	const sse = (obj: unknown, usage: object = { prompt_tokens: 1200, completion_tokens: 34 }) =>
 		`data: ${JSON.stringify(obj)}\n\ndata: ${JSON.stringify({ choices: [], usage })}\n\ndata: [DONE]\n\n`;
@@ -301,6 +303,7 @@ export function installFakeApi(): void {
 		readMeta: async (rel: string) => metaFiles[rel] ?? null,
 		writeMeta: async (rel: string, content: string) => {
 			metaFiles[rel] = content;
+			metaWrites.push(rel);
 		},
 		// Like the real ones: files, then sub-folders as `name/` (not recursive).
 		listMeta: async (dir: string) => {
