@@ -123,6 +123,11 @@ test('layout matches the device', async ({ page }, info) => {
 		await expect(btn).toBeVisible();
 		expect((await btn.boundingBox())!.height).toBeGreaterThanOrEqual(44);
 	}
+	// The frameless desktop controls keep small dots, but their touch targets must be finger-sized.
+	for (const name of ['Minimize', 'Maximize', 'Close']) {
+		const btn = page.getByRole('button', { name, exact: true });
+		expect((await btn.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+	}
 });
 
 test('phone: stacked navigation folder → note → back', async ({ page }) => {

@@ -437,26 +437,39 @@
 	.win-controls {
 		display: flex;
 		align-items: center;
-		gap: 9px;
+		gap: 0;
 		margin-left: 6px;
 		padding-left: 4px;
 	}
 	.win-btn {
+		display: grid;
+		place-items: center;
+		width: 22px;
+		height: 30px;
+		border-radius: 8px;
+	}
+	.titlebar.touch .win-btn {
+		width: 44px;
+		height: 44px;
+	}
+	.win-btn::after {
+		content: '';
 		width: 13px;
 		height: 13px;
 		border-radius: 50%;
+		background: var(--win-color);
 		transition: filter var(--dur-fast) ease;
 	}
-	.win-btn:hover {
+	.win-btn:hover::after {
 		filter: brightness(0.9);
 	}
 	.win-btn.min {
-		background: #f5bd4f;
+		--win-color: #f5bd4f;
 	}
 	.win-btn.max {
-		background: #61c554;
+		--win-color: #61c554;
 	}
 	.win-btn.close {
-		background: #ed6a5e;
+		--win-color: #ed6a5e;
 	}
 </style>

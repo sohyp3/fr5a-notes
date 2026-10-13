@@ -1114,7 +1114,8 @@
 		height: 30px;
 		min-width: 30px;
 		border-radius: 8px;
-		color: var(--text-faint);
+		/* These are active controls, not passive metadata: keep them legible at rest. */
+		color: var(--text-muted);
 		transition:
 			background var(--dur-fast) ease,
 			color var(--dur-fast) ease,

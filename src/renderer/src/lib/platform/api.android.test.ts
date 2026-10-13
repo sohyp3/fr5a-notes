@@ -250,7 +250,7 @@ describe('android platform', () => {
 		expect(a.id).toBe('work/My-Note.md');
 		expect(await api.readNote(a.id)).toBe('# My-Note\n\n');
 		const b = await api.createNote('My/Note', 'work', '# body');
-		expect(b.id).toBe('work/My-Note 2.md');
+		expect(b.id).toBe('work/My-Note_2.md');
 		expect(b.title).toBe('body');
 		const c = await api.createNote(undefined, '../..');
 		expect(c.id).toBe('Untitled.md');
