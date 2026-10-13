@@ -194,9 +194,10 @@ export function installFakeApi(): void {
 		createNote: async (title?: string, folder = '', content?: string) => {
 			// Drafts in the existing tests only need some note back.
 			if (!title) return meta('hello.md');
-			let id = folder ? `${folder}/${title}.md` : `${title}.md`;
+			const stem = title.trim().replace(/\s+/g, '_');
+			let id = folder ? `${folder}/${stem}.md` : `${stem}.md`;
 			for (let n = 2; id in files; n++)
-				id = folder ? `${folder}/${title} ${n}.md` : `${title} ${n}.md`;
+				id = folder ? `${folder}/${stem}_${n}.md` : `${stem}_${n}.md`;
 			files[id] = content ?? `# ${title}\n\n`;
 			if (folder) parentDirs(`${folder}/x`);
 			return meta(id);

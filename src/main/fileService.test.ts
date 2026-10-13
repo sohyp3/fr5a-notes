@@ -68,6 +68,15 @@ describe('FileService move / rename', () => {
 		expect(notes.get('c.md')?.encrypted).toBe(false);
 	});
 
+	it('creates note filenames with underscores instead of spaces', async () => {
+		const first = await svc.create('Project meeting notes');
+		const second = await svc.create('Project meeting notes');
+
+		expect(first.id).toBe('Project_meeting_notes.md');
+		expect(second.id).toBe('Project_meeting_notes_2.md');
+		expect(await readFile(path.join(root, first.id), 'utf8')).toBe('# Project meeting notes\n\n');
+	});
+
 	it('renames and moves notes, keeping the extension and deduping names', async () => {
 		expect(await svc.move('c.md', 'Renamed')).toBe('Renamed.md');
 		expect(await readFile(path.join(root, 'Renamed.md'), 'utf8')).toBe('# C\n');

@@ -3,6 +3,7 @@ import {
 	cleanFolder,
 	cleanName,
 	folderMoveError,
+	noteFileStem,
 	noteMoveError,
 	noteStem,
 	remapPath,
@@ -15,6 +16,12 @@ describe('paths', () => {
 		expect(cleanName('..secret')).toBe('secret');
 		expect(cleanName('   ')).toBe('');
 		expect(cleanFolder('/work//2026/ q3 /')).toBe('work/2026/q3');
+	});
+
+	it('uses underscores instead of spaces in new note filenames', () => {
+		expect(noteFileStem('  Project meeting notes  ')).toBe('Project_meeting_notes');
+		expect(noteFileStem('Project\tmeeting')).toBe('Project_meeting');
+		expect(noteFileStem('   ')).toBe('Untitled');
 	});
 
 	it('keeps or adds the note extension', () => {

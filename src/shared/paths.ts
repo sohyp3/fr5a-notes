@@ -43,6 +43,16 @@ export function cleanName(name: string): string {
 		.trim();
 }
 
+/** A new note's filename stem, derived from its title without spaces. */
+export function noteFileStem(title: string): string {
+	return (
+		title
+			.trim()
+			.replace(/[/\\?%*:|"<>]/g, '-')
+			.replace(/\s+/g, '_') || 'Untitled'
+	);
+}
+
 /** A typed `a/b` folder path, each segment cleaned ('' = workspace root). */
 export function cleanFolder(path: string): string {
 	return path.split('/').map(cleanName).filter(Boolean).join('/');

@@ -10,6 +10,7 @@ import {
 	isHiddenPath,
 	isImagePath,
 	noteExt,
+	noteFileStem,
 	noteMoveError
 } from '../shared/paths';
 import { noteSnippet } from '../shared/snippet';
@@ -230,17 +231,18 @@ export class FileService {
 	 * is first saved — the typed H1 names the file).
 	 */
 	async create(title = 'Untitled', folder = '', content?: string): Promise<NoteMeta> {
-		const base = title.trim().replace(/[/\\?%*:|"<>]/g, '-') || 'Untitled';
+		const base = noteFileStem(title);
+		const heading = title.trim().replace(/[/\\?%*:|"<>]/g, '-') || 'Untitled';
 		// Guard against a folder escaping the workspace (e.g. `..`).
 		const dir = this.safeSubdir(folder);
 		let name = `${base}.md`;
 		let n = 1;
 		// Avoid clobbering an existing file.
 		while (await this.exists(path.join(this.root, dir, name))) {
-			name = `${base} ${++n}.md`;
+			name = `${base}_${++n}.md`;
 		}
 		const id = dir ? `${dir}/${name}` : name;
-		await this.write(id, content ?? `# ${base}\n\n`);
+		await this.write(id, content ?? `# ${heading}\n\n`);
 		const raw = await this.read(id);
 		const stat = await fs.stat(path.join(this.root, id));
 		return this.buildMeta(path.join(this.root, id), raw, stat.mtimeMs);

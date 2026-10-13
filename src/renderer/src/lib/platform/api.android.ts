@@ -34,6 +34,7 @@ import {
 	isHiddenPath,
 	isImagePath,
 	noteExt,
+	noteFileStem,
 	noteMoveError
 } from '../../../../shared/paths';
 import type { PlatformApi } from './types';
@@ -481,13 +482,14 @@ export function createAndroidPlatform(): PlatformApi {
 		},
 		async createNote(title = 'Untitled', folder = '', content) {
 			await ready;
-			const base = title.trim().replace(/[/\\?%*:|"<>]/g, '-') || 'Untitled';
+			const base = noteFileStem(title);
+			const heading = title.trim().replace(/[/\\?%*:|"<>]/g, '-') || 'Untitled';
 			const dir = safeSubdir(folder);
 			let name = `${base}.md`;
 			let n = 1;
-			while (await exists(join(dir, name))) name = `${base} ${++n}.md`;
+			while (await exists(join(dir, name))) name = `${base}_${++n}.md`;
 			const id = join(dir, name);
-			await write(id, content ?? `# ${base}\n\n`);
+			await write(id, content ?? `# ${heading}\n\n`);
 			return index.get(id) ?? metaFor(id);
 		},
 		async deleteNote(id) {
