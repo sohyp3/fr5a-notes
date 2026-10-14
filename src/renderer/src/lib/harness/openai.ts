@@ -1,59 +1,33 @@
-import { createSseParser } from './sse';
 import { readUsage, type Usage } from './usage';
 import {
+	AbortError,
+	ProviderError,
+	apiBase,
+	errorMessage,
+	postStream,
+	providerHeaders,
+	type CompletionRequest,
+	type CompletionResult
+} from './transport';
+import { messagesCompletion } from './anthropic';
+import { responsesCompletion } from './responses';
+import { geminiCompletion } from './gemini';
+import {
 	isOpenRouter,
-	isOpencode,
 	type ChatMessage,
 	type Http,
 	type ModelInfo,
-	type ProviderProfile,
-	type ToolCall,
-	type ToolDef
+	type OtherApi,
+	type ProviderProfile
 } from './types';
 
+export { AbortError, ProviderError, type CompletionRequest, type CompletionResult };
+
 /**
- * Client for OpenAI-compatible `/chat/completions`. Always asks for a stream;
- * hosts that can't stream (Android) hand back the buffered SSE body, which is
- * parsed the same way. A plain JSON completion (servers that ignore `stream`)
- * is accepted too.
+ * Client for OpenAI-compatible `/chat/completions`, and the entry point for
+ * every model call: models served over another API (OpenCode's Claude, GPT
+ * and Gemini ones) go to that API's client instead.
  */
-
-export interface CompletionResult {
-	content: string;
-	toolCalls: ToolCall[];
-	finishReason: string | null;
-	/** Tokens (and cost, if the provider says) — null when the provider didn't report. */
-	usage: Usage | null;
-}
-
-export interface CompletionRequest {
-	profile: ProviderProfile;
-	apiKey: string | null;
-	messages: ChatMessage[];
-	tools?: ToolDef[];
-	/** Each text delta as it arrives (once, whole, on non-streaming hosts). */
-	onDelta?: (text: string) => void;
-	signal?: AbortSignal;
-	/** A stable id for the chat (OpenCode routes and caches by it; Go refuses requests without). */
-	session?: string;
-	/** Names the app, e.g. `fr5a/1.2.0`, where the provider asks clients to (OpenCode). */
-	client?: string;
-}
-
-export class ProviderError extends Error {
-	constructor(
-		message: string,
-		readonly status?: number
-	) {
-		super(message);
-	}
-}
-
-export class AbortError extends Error {
-	constructor() {
-		super('Stopped');
-	}
-}
 
 export function completionsUrl(baseUrl: string): string {
 	const base = baseUrl.trim().replace(/\/+$/, '');
@@ -137,17 +111,6 @@ export function createAccumulator(onDelta?: (text: string) => void) {
 	};
 }
 
-function errorMessage(status: number, body: string): string {
-	try {
-		const j = JSON.parse(body);
-		const msg = j?.error?.message ?? j?.message ?? j?.detail;
-		if (typeof msg === 'string') return `${status}: ${msg}`;
-	} catch {
-		/* not JSON */
-	}
-	return `${status}: ${body.slice(0, 300) || 'request failed'}`;
-}
-
 /** Ids that aren't chat models (OpenAI lists embeddings, audio, images… too). */
 const NOT_CHAT =
 	/embed|tts|whisper|dall-e|gpt-image|image|audio|moderation|realtime|transcribe|davinci|babbage|search|computer-use/i;
@@ -186,12 +149,8 @@ export async function listModels(
 	profile: Pick<ProviderProfile, 'baseUrl'>,
 	apiKey: string | null
 ): Promise<ModelInfo[]> {
-	const base = profile.baseUrl
-		.trim()
-		.replace(/\/+$/, '')
-		.replace(/\/chat\/completions$/, '');
 	const res = await http.httpFetch({
-		url: `${base}/models`,
+		url: `${apiBase(profile.baseUrl)}/models`,
 		headers: {
 			Accept: 'application/json',
 			...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
@@ -215,26 +174,46 @@ export async function listModels(
 	return [...out.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
-/** Headers a provider asks for beyond the key: OpenCode wants the chat's id and the client named. */
-export function providerHeaders(
-	baseUrl: string,
-	req: Pick<CompletionRequest, 'session' | 'client'>
-): Record<string, string> {
-	if (!isOpencode(baseUrl)) return {};
-	return {
-		...(req.session ? { 'x-opencode-session': req.session } : {}),
-		...(req.client ? { 'User-Agent': req.client } : {})
-	};
-}
-
-let seq = 0;
 /** Endpoints that refused `stream_options`: asked without it from then on. */
 const noStreamOptions = new Set<string>();
 
+const NATIVE: Record<OtherApi, (http: Http, req: CompletionRequest) => Promise<CompletionResult>> =
+	{
+		messages: messagesCompletion,
+		responses: responsesCompletion,
+		gemini: geminiCompletion
+	};
+
+/** Statuses of a native request a gateway may still answer over chat completions. */
+const TRY_CHAT = new Set([400, 404, 405, 415, 422]);
+/** `url|model` pairs whose native API was refused but chat completions answered. */
+const viaChat = new Set<string>();
+
+/** One model call, over the API the model is served with. */
 export async function chatCompletion(
 	http: Http,
 	req: CompletionRequest
 ): Promise<CompletionResult> {
+	const api = req.profile.api;
+	const key = `${completionsUrl(req.profile.baseUrl)}|${req.profile.model}`;
+	if (!api || viaChat.has(key)) return chatCompletions(http, req);
+	try {
+		return await NATIVE[api](http, req);
+	} catch (err) {
+		// A gateway that also translates chat completions for this model (OpenCode does for some).
+		if (!(err instanceof ProviderError) || !TRY_CHAT.has(err.status ?? 0)) throw err;
+		try {
+			const res = await chatCompletions(http, req);
+			viaChat.add(key);
+			return res;
+		} catch (again) {
+			// Stopped meanwhile; otherwise the native API's error says more.
+			throw again instanceof AbortError ? again : err;
+		}
+	}
+}
+
+async function chatCompletions(http: Http, req: CompletionRequest): Promise<CompletionResult> {
 	const url = completionsUrl(req.profile.baseUrl);
 	try {
 		return await complete(http, req, !noStreamOptions.has(url));
@@ -253,12 +232,7 @@ async function complete(
 	askUsage: boolean
 ): Promise<CompletionResult> {
 	const { profile } = req;
-	if (req.signal?.aborted) throw new AbortError();
-	const headers: Record<string, string> = {
-		'Content-Type': 'application/json',
-		Accept: 'text/event-stream',
-		...providerHeaders(profile.baseUrl, req)
-	};
+	const headers: Record<string, string> = providerHeaders(profile.baseUrl, req);
 	if (req.apiKey) headers.Authorization = `Bearer ${req.apiKey}`;
 	const body: Record<string, unknown> = {
 		model: profile.model,
@@ -271,46 +245,7 @@ async function complete(
 	if (req.tools?.length && profile.tools) {
 		body.tools = req.tools.map((t) => ({ type: 'function', function: t }));
 	}
-	const httpReq = {
-		url: completionsUrl(profile.baseUrl),
-		method: 'POST' as const,
-		headers,
-		body: JSON.stringify(body),
-		timeoutMs: 300_000
-	};
-
 	const acc = createAccumulator(req.onDelta);
-	let parseErr: unknown = null;
-	const sse = createSseParser((data) => {
-		try {
-			acc.push(data);
-		} catch (err) {
-			parseErr ??= err;
-		}
-	});
-
-	const id = `llm-${Date.now()}-${seq++}`;
-	const onAbort = () => void http.httpAbort?.(id);
-	req.signal?.addEventListener('abort', onAbort);
-	let res;
-	try {
-		res = http.httpStream
-			? await http.httpStream(id, httpReq, (t) => sse.feed(t))
-			: await http.httpFetch(httpReq);
-	} catch (err) {
-		if (req.signal?.aborted) throw new AbortError();
-		throw new ProviderError(err instanceof Error ? err.message : String(err));
-	} finally {
-		req.signal?.removeEventListener('abort', onAbort);
-	}
-	if (req.signal?.aborted) throw new AbortError();
-	if (res.status < 200 || res.status >= 300)
-		throw new ProviderError(errorMessage(res.status, res.body), res.status);
-
-	const rest = res.body.trim();
-	if (rest.startsWith('{')) acc.push(rest);
-	else if (rest) sse.feed(res.body);
-	sse.end();
-	if (parseErr) throw parseErr;
+	await postStream(http, req, { url: completionsUrl(profile.baseUrl), headers, body }, acc.push);
 	return acc.result();
 }

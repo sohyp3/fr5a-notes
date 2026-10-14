@@ -117,6 +117,7 @@ describe('model prices (models.dev)', () => {
 		expect(catalogModel(cache, at, 'kimi-k2.5')).toEqual({
 			name: 'Kimi K2.5',
 			context: 262144,
+			output: 32768,
 			tools: true,
 			price: { input: 0.6, output: 3 }
 		});

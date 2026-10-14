@@ -34,7 +34,7 @@
 	import { folderPrivacy } from '../../harness/privacy';
 	import { cleanFolder } from '../../../../../shared/paths';
 	import { reducedMotion } from '../../portal';
-	import { catalogPrice } from '../../harness/prices';
+	import { catalogModel, catalogPrice } from '../../harness/prices';
 	import { formatTokens } from '../../harness/usage';
 
 	const app = getAppState();
@@ -226,14 +226,14 @@
 			.sort((a, b) => rank(a) - rank(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 	}
 
-	/** "Kimi K2.6 · 262k context · $0.95 in · $4 out", what's known of it. */
+	/** "kimi-k2.6 · 262k context · $0.95 in · $4 out", what's known of it. */
 	function modelMeta(m: ModelInfo): string {
-		if (m.api) return `Uses ${OTHER_API_NAMES[m.api]}, which fr5a doesn't speak yet`;
 		return [
 			m.name ? m.id : '',
 			m.context ? `${formatTokens(m.context)} context` : '',
 			m.price ? priceText(m.price.input, m.price.output) : '',
-			m.tools === false ? 'no tools' : ''
+			m.tools === false ? 'no tools' : '',
+			m.api ? OTHER_API_NAMES[m.api] : ''
 		]
 			.filter(Boolean)
 			.join(' · ');
@@ -332,8 +332,10 @@
 		message = null;
 		try {
 			const key = draft.apiKey.trim() || (await ai.apiKey(draft.id));
+			const profile = profileOf(draft);
+			const api = catalogModel(ai.prices, profile.baseUrl, profile.model)?.api;
 			const res = await chatCompletion(platform, {
-				profile: { ...profileOf(draft), tools: false },
+				profile: { ...profile, tools: false, ...(api ? { api } : {}) },
 				apiKey: key,
 				messages: [{ role: 'user', content: 'Reply with just: OK' }]
 			});
@@ -485,10 +487,7 @@
 									{#if !models.some((m) => m.id === p.model)}<option value={p.model}
 											>{p.model}</option
 										>{/if}
-									{#each models as m (m.id)}<option
-											value={m.id}
-											disabled={!!m.api && m.id !== p.model}>{m.id}</option
-										>{/each}
+									{#each models as m (m.id)}<option value={m.id}>{m.id}</option>{/each}
 								</select>
 								<button
 									class="btn icon"
@@ -530,9 +529,8 @@
 									{#each rows as m (m.id)}
 										{@const fav = ai.isFavorite(p.id, m.id)}
 										<button
-											class={['mrow', { on: fav, off: !!m.api }]}
+											class={['mrow', { on: fav }]}
 											aria-pressed={fav}
-											disabled={!!m.api && !fav}
 											title={fav ? 'Unstar' : 'Star: offer it in the AI pane'}
 											onclick={() => ai.toggleFavorite(p.id, m.id)}
 										>
@@ -622,8 +620,7 @@
 						<span class="desc"
 							>OpenCode needs a key from
 							<a href={OPENCODE_KEY_URL} target="_blank" rel="noreferrer">opencode.ai/console</a>;
-							its free models only answer inside the OpenCode app. Models it serves over other APIs
-							(its GPT, Claude, Gemini) are greyed out in the model list.</span
+							its free models only answer inside the OpenCode app.</span
 						>
 					{/if}<span class="desc"
 						>localhost, your LAN or VPN. Local providers may read notes hidden from cloud AI.</span
@@ -1277,7 +1274,7 @@
 		text-align: start;
 		color: var(--text-main);
 	}
-	.mrow:hover:not(:disabled) {
+	.mrow:hover {
 		background: var(--bg-hover);
 	}
 	.mrow :global(.icon) {
@@ -1286,9 +1283,6 @@
 	.mrow.on :global(.icon) {
 		color: var(--accent);
 		fill: currentColor;
-	}
-	.mrow.off {
-		opacity: 0.55;
 	}
 	:global(html[data-touch]) .mrow {
 		min-height: 44px;

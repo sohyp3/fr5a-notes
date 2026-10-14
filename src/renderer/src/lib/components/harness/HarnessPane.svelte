@@ -90,8 +90,7 @@
 			if (!ai.usable(p) && !current) continue;
 			add(p, p.model);
 			if (current && provider) add(p, provider.model);
-			for (const f of ai.config.favorites)
-				if (f.provider === p.id && !ai.modelInfo(p.id, f.model).api) add(p, f.model);
+			for (const f of ai.config.favorites) if (f.provider === p.id) add(p, f.model);
 		}
 		return out;
 	});

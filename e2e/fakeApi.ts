@@ -145,6 +145,50 @@ export function installFakeApi(): void {
 			return call('write_note', { target: 'current', mode: 'append', content: 'AI line' });
 		return say(`Done: ${last.content}`);
 	};
+	/** The same script over the Responses API (OpenCode's GPT models): its input in, its events out. */
+	const viaResponses = (body: string): string => {
+		const b = JSON.parse(body) as { instructions?: string; input: Record<string, unknown>[] };
+		const messages = [
+			...(b.instructions ? [{ role: 'system', content: b.instructions }] : []),
+			...b.input.map((i) =>
+				i.type === 'function_call_output'
+					? { role: 'tool', content: String(i.output) }
+					: i.type === 'function_call'
+						? { role: 'assistant', content: '' }
+						: { role: String(i.role), content: String(i.content) }
+			)
+		];
+		const out: string[] = [];
+		const ev = (e: { type: string } & Record<string, unknown>) =>
+			out.push(`event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`);
+		let usage = {};
+		for (const [, data] of fakeModel(JSON.stringify({ messages })).matchAll(/^data: (.*)$/gm)) {
+			if (data === '[DONE]') continue;
+			const chunk = JSON.parse(data);
+			const delta = chunk.choices?.[0]?.delta ?? {};
+			if (delta.content)
+				ev({ type: 'response.output_text.delta', output_index: 0, delta: delta.content });
+			for (const [n, t] of (delta.tool_calls ?? []).entries())
+				ev({
+					type: 'response.output_item.done',
+					output_index: n + 1,
+					item: {
+						type: 'function_call',
+						call_id: t.id,
+						name: t.function.name,
+						arguments: t.function.arguments
+					}
+				});
+			if (chunk.usage)
+				usage = {
+					input_tokens: chunk.usage.prompt_tokens,
+					output_tokens: chunk.usage.completion_tokens
+				};
+		}
+		ev({ type: 'response.completed', response: { status: 'completed', usage } });
+		return out.join('');
+	};
+
 	/** "flaky?" fails the first request like a dropped connection. */
 	let flaky = 0;
 	const maybeFail = (body: string) => {
@@ -297,7 +341,9 @@ export function installFakeApi(): void {
 						error: { message: 'Input data may contain inappropriate content.' }
 					})
 				};
-			const text = fakeModel(req.body ?? '{}');
+			const text = req.url.endsWith('/responses')
+				? viaResponses(req.body ?? '{}')
+				: fakeModel(req.body ?? '{}');
 			for (let i = 0; i < text.length; i += 16) onChunk(text.slice(i, i + 16));
 			return { status: 200, headers: {}, body: '' };
 		},

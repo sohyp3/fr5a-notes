@@ -1711,7 +1711,7 @@ test('desktop: models starred in Settings are offered in the AI pane, per chat',
 	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
 	await page.getByRole('button', { name: 'AI assistant' }).click();
 
-	// OpenCode: a key, then its list (models.dev says gpt-5-nano needs the Responses API).
+	// OpenCode: a key, then its list (models.dev says gpt-5-nano is served over the Responses API).
 	await page.getByRole('button', { name: 'Show OpenCode details' }).click();
 	const opencode = page.locator('.provider', { hasText: 'OpenCode' });
 	await opencode.locator('#key-opencode-zen').fill('oc-test');
@@ -1719,14 +1719,14 @@ test('desktop: models starred in Settings are offered in the AI pane, per chat',
 	const ocModels = opencode.getByRole('group', { name: 'OpenCode models' });
 	await expect(ocModels.getByRole('button')).toHaveCount(3);
 	const nano = ocModels.getByRole('button', { name: /gpt-5-nano/ });
-	await expect(nano).toBeDisabled();
-	await expect(nano).toContainText('Uses the OpenAI Responses API');
+	await expect(nano).toContainText('OpenAI Responses API');
+	await nano.click();
 	await ocModels.getByRole('button', { name: /^m\b/ }).click();
 	await expect(ocModels.getByRole('button', { name: /^m\b/ })).toHaveAttribute(
 		'aria-pressed',
 		'true'
 	);
-	await expect(opencode.locator('.badge', { hasText: '1 starred' })).toBeVisible();
+	await expect(opencode.locator('.badge', { hasText: '2 starred' })).toBeVisible();
 
 	// The local provider: filter its list, star one.
 	await page.getByRole('button', { name: 'Show Fake details' }).click();
@@ -1747,6 +1747,7 @@ test('desktop: models starred in Settings are offered in the AI pane, per chat',
 	const picker = harness.getByLabel('Model', { exact: true });
 	await expect(picker.locator('option')).toHaveText([
 		'OpenCode · big-pickle',
+		'OpenCode · gpt-5-nano',
 		'OpenCode · m',
 		'Fake · m',
 		'Fake · gpt-5-nano'
@@ -1783,6 +1784,21 @@ test('desktop: models starred in Settings are offered in the AI pane, per chat',
 			)
 		)
 		.toMatch(/^provider: opencode-zen\nmodel: m$/m);
+
+	// OpenCode's GPT model: over the Responses API, history and all.
+	await harness.locator('.ctx-sum').click();
+	await picker.selectOption({ label: 'OpenCode · gpt-5-nano' });
+	await input.fill('md?');
+	await input.press('Enter');
+	await expect(harness.locator('.usage')).toHaveCount(2);
+	const viaResponses = await page.evaluate(
+		() => (window as unknown as { __llm: { url: string; body: string }[] }).__llm[1]
+	);
+	expect(viaResponses.url).toBe('https://opencode.ai/inference/v1/responses');
+	const body = JSON.parse(viaResponses.body);
+	expect(body).toMatchObject({ model: 'gpt-5-nano', store: false });
+	expect(body.input.filter((i: { role?: string }) => i.role === 'user')).toHaveLength(2);
+	await expect(harness.locator('.msg.ai').last()).not.toBeEmpty();
 
 	// A new chat starts on the default provider's own model.
 	await harness.getByRole('button', { name: 'New session' }).click();

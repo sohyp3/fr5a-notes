@@ -64,14 +64,14 @@ const OTHER_APIS: Record<string, OtherApi> = {
 type CatalogEntry = {
 	cost?: unknown;
 	name?: unknown;
-	limit?: { context?: unknown };
+	limit?: { context?: unknown; output?: unknown };
 	tool_call?: unknown;
 	provider?: { npm?: unknown };
 };
 
 /**
  * One catalog entry, cut down. A model whose package differs from its
- * OpenAI-compatible provider's (OpenCode's Claude, GPT and Gemini) is only
+ * OpenAI-compatible provider's (OpenCode's Claude, GPT and Gemini) is
  * served over that other API.
  */
 function modelOf(id: string, m: CatalogEntry, providerNpm: unknown): CatalogModel | null {
@@ -79,6 +79,8 @@ function modelOf(id: string, m: CatalogEntry, providerNpm: unknown): CatalogMode
 	if (typeof m.name === 'string' && m.name && m.name !== id) out.name = m.name;
 	const context = m.limit?.context;
 	if (typeof context === 'number' && context > 0) out.context = context;
+	const output = m.limit?.output;
+	if (typeof output === 'number' && output > 0) out.output = output;
 	if (typeof m.tool_call === 'boolean') out.tools = m.tool_call;
 	const npm = m.provider?.npm;
 	if (providerNpm === '@ai-sdk/openai-compatible' && typeof npm === 'string' && OTHER_APIS[npm])

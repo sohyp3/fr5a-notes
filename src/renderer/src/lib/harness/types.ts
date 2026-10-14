@@ -16,6 +16,10 @@ export interface ProviderProfile {
 	contextTokens: number;
 	/** USD per 1M tokens, for the cost of chats (used when the provider doesn't report one). */
 	price?: Price;
+	/** Set per run from the model, never saved: the API it's served over, when not chat completions. */
+	api?: OtherApi;
+	/** Set per run from the model, never saved: its longest reply in tokens, when known. */
+	maxOutput?: number;
 }
 
 export type SearchKind = 'duckduckgo' | 'searxng' | 'brave' | 'tavily' | 'exa';
@@ -102,15 +106,15 @@ export interface FavoriteModel {
 }
 
 /**
- * APIs other than chat completions. OpenCode serves its GPT, Claude and
- * Gemini models over these only, so they can't be picked here.
+ * APIs other than chat completions. OpenCode serves its GPT, Claude, Gemini
+ * (and on Go some Qwen / MiniMax) models over these; each has its client.
  */
 export type OtherApi = 'responses' | 'messages' | 'gemini';
 
 export const OTHER_API_NAMES: Record<OtherApi, string> = {
-	responses: 'the OpenAI Responses API',
-	messages: 'the Anthropic Messages API',
-	gemini: 'the Gemini API'
+	responses: 'OpenAI Responses API',
+	messages: 'Anthropic Messages API',
+	gemini: 'Gemini API'
 };
 
 /** What a provider's model list (or models.dev) says about one model. */
@@ -120,9 +124,11 @@ export interface ModelInfo {
 	name?: string;
 	/** Context window in tokens. */
 	context?: number;
+	/** Longest reply in tokens. */
+	output?: number;
 	/** Tool calling: false = known not to support it. */
 	tools?: boolean;
-	/** Only served over another API: not usable with this client. */
+	/** Served over another API than chat completions. */
 	api?: OtherApi;
 	/** USD per 1M tokens, from the provider's own list (OpenRouter) or models.dev. */
 	price?: Price;
@@ -241,6 +247,8 @@ export interface ToolCall {
 	name: string;
 	/** Raw JSON arguments as the model sent them. */
 	arguments: string;
+	/** Gemini's thought signature for the call, which must go back with it. */
+	signature?: string;
 }
 
 export type ChatMessage =

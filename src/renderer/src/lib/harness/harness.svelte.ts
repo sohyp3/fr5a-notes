@@ -611,7 +611,7 @@ class HarnessState {
 		const ai = getAiSettings();
 		const p = ai.provider(tab.providerId ?? (this.skill(tab.skill)?.provider || null));
 		// The model was picked with its provider: not carried over to another.
-		return p && p.id === tab.providerId ? ai.withModel(p, tab.model) : p;
+		return p && ai.withModel(p, p.id === tab.providerId ? tab.model : null);
 	}
 
 	/** Notes that will be inlined on the next send (open note first, folders/tags expanded). */

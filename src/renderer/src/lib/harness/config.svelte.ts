@@ -167,16 +167,23 @@ class AiSettings {
 	}
 
 	/**
-	 * The profile running `model` instead of its own: the model's context
-	 * window when smaller than the profile's budget, and no tools when it's
-	 * known not to take them.
+	 * The profile as a run uses it, on `model` (null: its own): the API the
+	 * model is served over and its reply limit; for another model than the
+	 * profile's, also its context window when smaller than the profile's
+	 * budget, and no tools when it's known not to take them.
 	 */
 	withModel(p: ProviderProfile, model: string | null | undefined): ProviderProfile {
-		if (!model || model === p.model) return p;
-		const info = this.modelInfo(p.id, model);
-		return {
+		const m = model || p.model;
+		const info = this.modelInfo(p.id, m);
+		const run = {
 			...p,
-			model,
+			...(info.api ? { api: info.api } : {}),
+			...(info.output ? { maxOutput: info.output } : {})
+		};
+		if (m === p.model) return run;
+		return {
+			...run,
+			model: m,
 			contextTokens: info.context ? Math.min(info.context, p.contextTokens) : p.contextTokens,
 			tools: p.tools && info.tools !== false
 		};
