@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { chatCompletion, completionsUrl } from './openai';
-import type { Http, ProviderProfile } from './types';
+import { chatCompletion, completionsUrl, listModels } from './openai';
+import { OPENCODE, currentBaseUrl, type Http, type ProviderProfile } from './types';
 
 const profile: ProviderProfile = {
 	id: 'p',
@@ -123,15 +123,93 @@ describe('listModels', () => {
 				};
 			}
 		};
-		const { listModels } = await import('./openai');
 		expect(await listModels(http, { baseUrl: 'https://x/v1/' }, 'k')).toEqual([
-			'big-pickle',
-			'gpt-4o'
+			{ id: 'big-pickle' },
+			{ id: 'gpt-4o' }
 		]);
 		expect(seen).toMatchObject({
 			url: 'https://x/v1/models',
 			headers: { Authorization: 'Bearer k' }
 		});
+	});
+
+	it("keeps what OpenRouter's list says: name, context, tools, price per 1M tokens", async () => {
+		const http: Http = {
+			httpFetch: async () => ({
+				status: 200,
+				headers: {},
+				body: JSON.stringify({
+					data: [
+						{
+							id: 'deepseek/deepseek-chat',
+							name: 'DeepSeek: DeepSeek V3',
+							context_length: 163840,
+							pricing: { prompt: '0.00000032', completion: '0.00000089' },
+							supported_parameters: ['max_tokens', 'tools', 'tool_choice']
+						},
+						// Price varies with the routed model: none.
+						{
+							id: 'openrouter/auto',
+							name: 'Auto Router',
+							pricing: { prompt: '-1', completion: '-1' }
+						},
+						{ id: 'sao10k/l3-lunaris-8b', supported_parameters: ['max_tokens'] },
+						{ id: 'deepseek/deepseek-chat', name: 'duplicate' }
+					]
+				})
+			})
+		};
+		expect(await listModels(http, { baseUrl: 'https://openrouter.ai/api/v1' }, null)).toEqual([
+			{
+				id: 'deepseek/deepseek-chat',
+				name: 'DeepSeek: DeepSeek V3',
+				context: 163840,
+				tools: true,
+				price: { input: 0.32, output: 0.89 }
+			},
+			{ id: 'openrouter/auto', name: 'Auto Router' },
+			{ id: 'sao10k/l3-lunaris-8b', tools: false }
+		]);
+	});
+});
+
+describe('OpenCode', () => {
+	it('moves the endpoints of before its v2 console to the current ones', () => {
+		expect(currentBaseUrl('https://opencode.ai/zen/v1')).toBe('https://opencode.ai/inference/v1');
+		expect(currentBaseUrl('https://opencode.ai/zen/go/v1/')).toBe(
+			'https://opencode.ai/inference/go/v1/'
+		);
+		expect(currentBaseUrl('https://opencode.ai/inference/v1')).toBe(
+			'https://opencode.ai/inference/v1'
+		);
+		expect(currentBaseUrl('https://example.com/zen/v1')).toBe('https://example.com/zen/v1');
+		expect(OPENCODE.baseUrl).toBe('https://opencode.ai/inference/v1');
+	});
+
+	it('sends the chat id and the client name to OpenCode only', async () => {
+		const seen: Record<string, string>[] = [];
+		const http: Http = {
+			httpFetch: async (req) => {
+				seen.push(req.headers ?? {});
+				return { status: 200, headers: {}, body: sse({ choices: [{ delta: { content: 'ok' } }] }) };
+			}
+		};
+		const req = { apiKey: 'k', messages: [], session: 'fr5a-abc', client: 'fr5a/1.0.0' };
+		await chatCompletion(http, {
+			...req,
+			profile: { ...profile, baseUrl: 'https://opencode.ai/inference/go/v1' }
+		});
+		await chatCompletion(http, {
+			...req,
+			profile: { ...profile, baseUrl: 'https://api.deepseek.com/v1' }
+		});
+		expect(seen[0]).toMatchObject({
+			'x-opencode-session': 'fr5a-abc',
+			'User-Agent': 'fr5a/1.0.0',
+			Authorization: 'Bearer k'
+		});
+		expect(seen[1]).not.toHaveProperty('x-opencode-session');
+		expect(seen[1]).not.toHaveProperty('User-Agent');
 	});
 });
 

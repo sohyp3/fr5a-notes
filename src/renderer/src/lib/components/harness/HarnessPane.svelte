@@ -8,7 +8,13 @@
 	import { fromKey, mentionText, type Mention } from '../../harness/mentions';
 	import { describeError } from '../../harness/errors';
 	import { flattenTagTree } from '../../editor/TagSuggest';
-	import { OPENCODE_ZEN, SEARCH_KINDS, ZEN_KEY_URL, type SearchProfile } from '../../harness/types';
+	import {
+		OPENCODE,
+		OPENCODE_KEY_URL,
+		SEARCH_KINDS,
+		type ProviderProfile,
+		type SearchProfile
+	} from '../../harness/types';
 	import { exaOptions } from '../../harness/web';
 	import { reducedMotion } from '../../portal';
 	import {
@@ -64,12 +70,39 @@
 	const replyUsage = (u: UsageRecord) =>
 		usageLine(u.input, u.output, recordCost(u, priced(u.provider, u.model)));
 
-	// The default (OpenCode Zen) and other cloud providers need a key; say so up front.
+	// The default (OpenCode) and other cloud providers need a key; say so up front.
 	const keyMissing = $derived(!!provider && ai.loaded && !ai.usable(provider));
-	// The model picker offers providers that are set up (plus the tab's own, to show it).
-	const pickable = $derived(
-		ai.config.providers.filter((p) => ai.usable(p) || p.id === provider?.id)
-	);
+
+	type Choice = { key: string; provider: ProviderProfile; model: string };
+	const choiceKey = (providerId: string, model: string) => `${providerId}|${model}`;
+	/**
+	 * The model picker: each provider that's set up with its own model, then
+	 * the models starred for it in Settings → AI (plus the tab's pick, to show it).
+	 */
+	const choices = $derived.by((): Choice[] => {
+		const out: Choice[] = [];
+		const add = (p: ProviderProfile, model: string) => {
+			const key = choiceKey(p.id, model);
+			if (model && !out.some((c) => c.key === key)) out.push({ key, provider: p, model });
+		};
+		for (const p of ai.config.providers) {
+			const current = p.id === provider?.id;
+			if (!ai.usable(p) && !current) continue;
+			add(p, p.model);
+			if (current && provider) add(p, provider.model);
+			for (const f of ai.config.favorites)
+				if (f.provider === p.id && !ai.modelInfo(p.id, f.model).api) add(p, f.model);
+		}
+		return out;
+	});
+
+	function pickModel(key: string): void {
+		const c = choices.find((x) => x.key === key);
+		if (!c || !tab) return;
+		tab.providerId = c.provider.id;
+		// The provider's own model: follow it when it's changed in Settings.
+		tab.model = c.model === c.provider.model ? null : c.model;
+	}
 
 	/** Context details unfolded; a question or a change to review folds them to make room. */
 	let ctxOpen = $derived.by(() => {
@@ -596,22 +629,29 @@
 			</button>
 			{#if ctxOpen}
 				<div class="ctx-more" transition:slide={{ duration: 160 * dur }}>
-					<label class="ctx-row">
+					<div class="ctx-row">
 						<span class="k">Model</span>
 						<select
 							class="provider"
-							aria-label="Provider"
-							value={provider?.id ?? ''}
-							onchange={(e) =>
-								(tab.providerId = (e.currentTarget as HTMLSelectElement).value || null)}
+							aria-label="Model"
+							value={provider ? choiceKey(provider.id, provider.model) : ''}
+							onchange={(e) => pickModel((e.currentTarget as HTMLSelectElement).value)}
 						>
-							{#each pickable as p (p.id)}
-								<option value={p.id}>{p.name} · {p.model}{ai.usable(p) ? '' : ' (no key)'}</option>
+							{#each choices as c (c.key)}
+								<option value={c.key}
+									>{c.provider.name} · {c.model}{ai.usable(c.provider) ? '' : ' (no key)'}</option
+								>
 							{:else}
 								<option value="">No provider</option>
 							{/each}
 						</select>
-					</label>
+						<button
+							class="chip"
+							title="Star models in Settings → AI to pick them here"
+							onclick={() => app.openSettings('ai')}
+							><Icon name="star" size={12} stroke={2} /> Models…</button
+						>
+					</div>
 					<div class="ctx-row">
 						<span class="k">Context</span>
 						<div class="chips">
@@ -745,14 +785,12 @@
 					<div class="welcome" in:fade={{ duration: 160 * dur }}>
 						{#if keyMissing && provider}
 							<p class="lead">
-								{provider.name} needs an API key{provider.id === OPENCODE_ZEN.id
-									? ' (free — big-pickle costs nothing)'
-									: ''}.
+								{provider.name} needs an API key.
 							</p>
-							{#if provider.id === OPENCODE_ZEN.id}
+							{#if provider.id === OPENCODE.id}
 								<p class="muted">
-									Get one at <a href={ZEN_KEY_URL} target="_blank" rel="noreferrer"
-										>opencode.ai/zen</a
+									Get one at <a href={OPENCODE_KEY_URL} target="_blank" rel="noreferrer"
+										>opencode.ai/console</a
 									>, then paste it in Settings → AI.
 								</p>
 							{/if}

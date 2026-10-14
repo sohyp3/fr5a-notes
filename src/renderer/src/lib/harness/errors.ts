@@ -32,6 +32,15 @@ export function describeError(message: string, status?: number, online = true): 
 			retry: true,
 			settings: false
 		};
+	// A 403, but no key fixes it: OpenCode's free models answer only inside the OpenCode app.
+	if (/free tier can only be used from within opencode/i.test(m))
+		return {
+			kind: 'setup',
+			title: 'OpenCode’s free models only work in the OpenCode app',
+			hint: 'Pick a paid model: star one under Settings → AI → OpenCode → Models, then choose it here.',
+			retry: false,
+			settings: true
+		};
 	// Before auth: some providers refuse flagged input with a 403.
 	if (FILTERED.test(m))
 		return {
@@ -41,6 +50,9 @@ export function describeError(message: string, status?: number, online = true): 
 			retry: true,
 			settings: false
 		};
+	// The app's own "no key yet" messages, before they'd read as a refused key.
+	if (/add an ai provider|no provider|needs an? (?:free )?api key|has no api key/i.test(m))
+		return { kind: 'setup', title: 'Setup needed', hint: '', retry: false, settings: true };
 	if (status === 401 || status === 403 || /api key|unauthori[sz]ed|forbidden|invalid.*key/i.test(m))
 		return {
 			kind: 'auth',
@@ -68,7 +80,5 @@ export function describeError(message: string, status?: number, online = true): 
 			retry: true,
 			settings: false
 		};
-	if (/add an ai provider|no provider|needs a free api key|has no api key/i.test(m))
-		return { kind: 'setup', title: 'Setup needed', hint: '', retry: false, settings: true };
 	return { kind: 'other', title: 'The run failed', hint: '', retry: true, settings: false };
 }

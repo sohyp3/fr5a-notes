@@ -95,7 +95,40 @@ export const SEARCH_KINDS: { kind: SearchKind; label: string; hint: string; need
 		{ kind: 'exa', label: 'Exa', hint: 'API key', needsKey: true }
 	];
 
-/** Persisted under the `ai` state key. API keys live in secrets, never here. */
+/** A model starred in Settings → AI: offered in the AI pane's model picker. */
+export interface FavoriteModel {
+	provider: string;
+	model: string;
+}
+
+/**
+ * APIs other than chat completions. OpenCode serves its GPT, Claude and
+ * Gemini models over these only, so they can't be picked here.
+ */
+export type OtherApi = 'responses' | 'messages' | 'gemini';
+
+export const OTHER_API_NAMES: Record<OtherApi, string> = {
+	responses: 'the OpenAI Responses API',
+	messages: 'the Anthropic Messages API',
+	gemini: 'the Gemini API'
+};
+
+/** What a provider's model list (or models.dev) says about one model. */
+export interface ModelInfo {
+	id: string;
+	/** Display name, when it isn't just the id. */
+	name?: string;
+	/** Context window in tokens. */
+	context?: number;
+	/** Tool calling: false = known not to support it. */
+	tools?: boolean;
+	/** Only served over another API: not usable with this client. */
+	api?: OtherApi;
+	/** USD per 1M tokens, from the provider's own list (OpenRouter) or models.dev. */
+	price?: Price;
+}
+
+/** Persisted under the `ai` state key (so per device). API keys live in secrets, never here. */
 export interface AiConfig {
 	providers: ProviderProfile[];
 	defaultProvider: string | null;
@@ -106,23 +139,53 @@ export interface AiConfig {
 	chatsFolder: string;
 	/** Max model round-trips per run (tool calls each cost one). */
 	maxSteps: number;
+	/** Starred models, in the order they were starred. */
+	favorites: FavoriteModel[];
 }
 
 /**
- * Default provider: OpenCode Zen's free `big-pickle` model. Zen still needs a
- * (free) API key from https://opencode.ai/zen — paste it in Settings → AI.
+ * Default provider: OpenCode's pay-as-you-go models (the OpenCode Console,
+ * formerly Zen). Needs an API key from https://opencode.ai/console — its free
+ * models only answer inside the OpenCode app itself.
  */
-export const OPENCODE_ZEN: ProviderProfile = {
+export const OPENCODE: ProviderProfile = {
 	id: 'opencode-zen',
-	name: 'OpenCode Zen',
-	baseUrl: 'https://opencode.ai/zen/v1',
+	name: 'OpenCode',
+	baseUrl: 'https://opencode.ai/inference/v1',
 	model: 'big-pickle',
 	local: false,
 	tools: true,
 	contextTokens: 128_000
 };
 
-export const ZEN_KEY_URL = 'https://opencode.ai/zen';
+export const OPENCODE_KEY_URL = 'https://opencode.ai/console';
+
+/** OpenCode's subscription plan: same console key, its own endpoint. */
+export const OPENCODE_GO_URL = 'https://opencode.ai/inference/go/v1';
+
+/**
+ * OpenCode's endpoints before its v2 console (`/zen/v1`, `/zen/go/v1`) →
+ * the current ones (`/inference/v1`, `/inference/go/v1`). Others as they are.
+ */
+export function currentBaseUrl(url: string): string {
+	return url.replace(/^(\s*https?:\/\/(?:www\.)?opencode\.ai)\/zen(?=\/)/i, '$1/inference');
+}
+
+/** OpenCode's endpoints (Console and Go). */
+export const isOpencode = (baseUrl: string) =>
+	/^\s*https?:\/\/(?:www\.)?opencode\.ai\//i.test(baseUrl);
+
+export const isOpenRouter = (baseUrl: string) => /^\s*https?:\/\/openrouter\.ai\//i.test(baseUrl);
+
+export const OPENROUTER: ProviderProfile = {
+	id: 'openrouter',
+	name: 'OpenRouter',
+	baseUrl: 'https://openrouter.ai/api/v1',
+	model: 'openrouter/auto',
+	local: false,
+	tools: true,
+	contextTokens: 128_000
+};
 
 export const OPENAI: ProviderProfile = {
 	id: 'openai',
@@ -145,23 +208,25 @@ export const DEEPSEEK: ProviderProfile = {
 };
 
 /** Always listed in Settings → AI (just add a key); custom ones come after. */
-export const BUILTIN_PROVIDERS = [OPENCODE_ZEN, OPENAI, DEEPSEEK];
+export const BUILTIN_PROVIDERS = [OPENCODE, OPENROUTER, OPENAI, DEEPSEEK];
 export const isBuiltinProvider = (id: string) => BUILTIN_PROVIDERS.some((p) => p.id === id);
 
 /** Where to get a key, per built-in provider. */
 export const KEY_URLS: Record<string, string> = {
-	[OPENCODE_ZEN.id]: ZEN_KEY_URL,
+	[OPENCODE.id]: OPENCODE_KEY_URL,
+	[OPENROUTER.id]: 'https://openrouter.ai/settings/keys',
 	[OPENAI.id]: 'https://platform.openai.com/api-keys',
 	[DEEPSEEK.id]: 'https://platform.deepseek.com/api_keys'
 };
 
 export const DEFAULT_AI_CONFIG: AiConfig = {
 	providers: [...BUILTIN_PROVIDERS],
-	defaultProvider: OPENCODE_ZEN.id,
+	defaultProvider: OPENCODE.id,
 	search: null,
 	localOnlyFolders: [],
 	chatsFolder: 'AI chats',
-	maxSteps: 8
+	maxSteps: 8,
+	favorites: []
 };
 
 /** Secret names for API keys. */

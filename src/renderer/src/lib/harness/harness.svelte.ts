@@ -43,7 +43,7 @@ import { addUsage, runRecord, type ChatUsage, type Usage, type UsageRecord } fro
 import { expandMentions, mentionKey, parseMentions, remapKey } from './mentions';
 import { fetchPage, webSearch } from './web';
 import type { QuestionItem } from './questions';
-import { OPENCODE_ZEN, ZEN_KEY_URL, type ChatMessage, type ProviderProfile } from './types';
+import { OPENCODE, OPENCODE_KEY_URL, type ChatMessage, type ProviderProfile } from './types';
 
 /**
  * Harness runtime: tmux-like tabs, one session each. A run builds the system
@@ -108,6 +108,8 @@ export class HarnessTab {
 	/** Mention keys attached with @: note ids, `@folder/`, `#tag` (see mentions.ts). */
 	attached = $state<string[]>([]);
 	providerId = $state<string | null>(null);
+	/** A model picked in the pane for this chat; null = the provider's own. */
+	model = $state<string | null>(null);
 	skill = $state<string | null>(null);
 	/** Working transcript is local-only. False only while migrating legacy sessions. */
 	deviceOnly = $state(true);
@@ -143,6 +145,7 @@ export class HarnessTab {
 		this.sensitive = session.sensitive ?? (deviceOnly && persisted);
 		this.skill = session.skill || null;
 		this.providerId = session.provider || null;
+		this.model = session.model || null;
 		this.attached = session.notes.filter((n) => n !== getAppState().activeId);
 		this.entries = session.turns.map((t): Entry =>
 			t.role === 'you'
@@ -247,6 +250,7 @@ export class HarnessTab {
 		this.session.turns = turns;
 		this.session.skill = this.skill ?? '';
 		this.session.provider = this.providerId ?? '';
+		this.session.model = this.model ?? undefined;
 		this.session.sensitive = this.sensitive;
 		const text = serializeSession($state.snapshot(this.session));
 		// Where it goes is decided when the write runs, after any earlier move.
@@ -431,6 +435,7 @@ class HarnessState {
 		copy.useCurrent = tab.useCurrent;
 		copy.skill = tab.skill;
 		copy.providerId = tab.providerId;
+		copy.model = tab.model;
 		copy.resumeAt = tab.resumeAt;
 		copy.lastRunContext = tab.lastRunContext;
 		this.tabs.splice(this.active + 1, 0, copy);
@@ -601,10 +606,12 @@ class HarnessState {
 		return name ? (this.skills.find((s) => s.name === name) ?? null) : null;
 	}
 
-	/** The provider a tab will use: its pick, else the skill's, else the default. */
+	/** The provider a tab will use: its pick, else the skill's, else the default (with the tab's model). */
 	providerFor(tab: HarnessTab): ProviderProfile | null {
 		const ai = getAiSettings();
-		return ai.provider(tab.providerId ?? (this.skill(tab.skill)?.provider || null));
+		const p = ai.provider(tab.providerId ?? (this.skill(tab.skill)?.provider || null));
+		// The model was picked with its provider: not carried over to another.
+		return p && p.id === tab.providerId ? ai.withModel(p, tab.model) : p;
 	}
 
 	/** Notes that will be inlined on the next send (open note first, folders/tags expanded). */
@@ -758,6 +765,8 @@ class HarnessState {
 		tab.resumeAt = null;
 		tab.ctl = new AbortController();
 		const signal = tab.ctl.signal;
+		// Stable per chat and opaque (OpenCode routes and caches by it).
+		const chatId = `fr5a-${hashText(tab.session.created || tab.session.file)}`;
 
 		// Stream batching: one DOM update per frame, not per token.
 		let current: Extract<Entry, { kind: 'ai' }> | null = null;
@@ -784,8 +793,8 @@ class HarnessState {
 			);
 			if (!apiKey && !profile.local)
 				throw new Error(
-					profile.id === OPENCODE_ZEN.id
-						? `${profile.name} needs a free API key: get one at ${ZEN_KEY_URL}, then paste it in Settings → AI → Edit.`
+					profile.id === OPENCODE.id
+						? `${profile.name} needs an API key: get one at ${OPENCODE_KEY_URL}, then paste it in Settings → AI.`
 						: `${profile.name} has no API key. Add it in Settings → AI → Edit, or mark the provider as local.`
 				);
 			tab.session.notes = [
@@ -832,7 +841,13 @@ class HarnessState {
 				signal,
 				complete: async (req) => {
 					startAi();
-					const res = await chatCompletion(platform, { ...req, profile, apiKey });
+					const res = await chatCompletion(platform, {
+						...req,
+						profile,
+						apiKey,
+						session: chatId,
+						client: `fr5a/${__APP_VERSION__}`
+					});
 					if (res.usage) used = addUsage(used, res.usage);
 					return res;
 				},

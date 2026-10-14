@@ -48,6 +48,8 @@ export interface Session {
 	title: string;
 	created: string;
 	provider: string;
+	/** A model picked for this chat in place of the provider's own. */
+	model?: string;
 	skill: string;
 	/** Note ids attached as context. */
 	notes: string[];
@@ -87,6 +89,7 @@ export function serializeSession(s: Session): string {
 		title: s.title,
 		created: s.created,
 		provider: s.provider || undefined,
+		model: s.model || undefined,
 		skill: s.skill || undefined,
 		notes: s.notes,
 		sensitive: s.sensitive ? 'yes' : 'no',
@@ -124,6 +127,7 @@ export function parseSession(file: string, text: string): Session {
 		title: str(data.title) || file.replace(/\.md$/, ''),
 		created: str(data.created),
 		provider: str(data.provider),
+		...(str(data.model) ? { model: str(data.model) } : {}),
 		skill: str(data.skill),
 		notes: list(data.notes),
 		turns,

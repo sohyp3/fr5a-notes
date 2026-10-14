@@ -1,18 +1,39 @@
 import { describe, expect, it } from 'vitest';
-import { CATALOG_MAX_AGE, catalogPrice, endpointKey, pickPrices, pricesStale } from './prices';
+import {
+	CATALOG_MAX_AGE,
+	catalogModel,
+	catalogPrice,
+	endpointKey,
+	pickPrices,
+	pricesStale
+} from './prices';
 
 /** A slice of models.dev's api.json. */
 const catalog = {
 	opencode: {
-		api: 'https://opencode.ai/zen/v1',
+		api: 'https://opencode.ai/inference/v1',
+		npm: '@ai-sdk/openai-compatible',
 		models: {
 			'big-pickle': { cost: { input: 0, output: 0 } },
-			'kimi-k2.5': { cost: { input: 0.6, output: 3, cache_read: 0.08 } },
+			'kimi-k2.5': {
+				name: 'Kimi K2.5',
+				tool_call: true,
+				limit: { context: 262144, output: 32768 },
+				cost: { input: 0.6, output: 3, cache_read: 0.08 }
+			},
+			'claude-haiku-5-5': {
+				name: 'Claude Haiku 5.5',
+				provider: { npm: '@ai-sdk/anthropic' },
+				cost: { input: 1, output: 5 }
+			},
+			'gpt-6-luna': { provider: { npm: '@ai-sdk/openai' } },
+			'gemini-4-argon': { provider: { npm: '@ai-sdk/google' } },
+			'mistral-large-4': { provider: { npm: '@ai-sdk/mistral' } },
 			'image-thing': {}
 		}
 	},
 	'opencode-go': {
-		api: 'https://opencode.ai/zen/go/v1',
+		api: 'https://opencode.ai/inference/go/v1',
 		models: { 'glm-5.3': { cost: { input: 1.4, output: 4.4 } } }
 	},
 	deepseek: {
@@ -26,15 +47,15 @@ const catalog = {
 
 describe('model prices (models.dev)', () => {
 	it('keys endpoints by host + path, without scheme, slash or version', () => {
-		expect(endpointKey('https://opencode.ai/zen/v1/')).toBe('opencode.ai/zen');
-		expect(endpointKey('https://opencode.ai/zen/go/v1')).toBe('opencode.ai/zen/go');
+		expect(endpointKey('https://opencode.ai/inference/v1/')).toBe('opencode.ai/inference');
+		expect(endpointKey('https://opencode.ai/inference/go/v1')).toBe('opencode.ai/inference/go');
 		expect(endpointKey('https://API.deepseek.com/v1')).toBe('api.deepseek.com');
 		expect(endpointKey('https://api.deepseek.com')).toBe('api.deepseek.com');
 	});
 
 	it('keeps only the endpoints in use, per model', () => {
 		const keys = [
-			'https://opencode.ai/zen/v1',
+			'https://opencode.ai/inference/v1',
 			'https://api.deepseek.com/v1',
 			'https://api.openai.com/v1',
 			'http://10.0.0.2:8080/v1'
@@ -44,20 +65,21 @@ describe('model prices (models.dev)', () => {
 		expect(Object.keys(cache.prices).sort()).toEqual([
 			'api.deepseek.com',
 			'api.openai.com',
-			'opencode.ai/zen'
+			'opencode.ai/inference'
 		]);
-		expect(cache.prices['opencode.ai/zen']).toEqual({
+		expect(cache.prices['opencode.ai/inference']).toEqual({
 			'big-pickle': [0, 0],
-			'kimi-k2.5': [0.6, 3]
+			'kimi-k2.5': [0.6, 3],
+			'claude-haiku-5-5': [1, 5]
 		});
 		// Looked up but not listed: remembered, so it isn't fetched again for it.
 		expect(cache.checked).toContain('10.0.0.2:8080');
 
-		expect(catalogPrice(cache, 'https://opencode.ai/zen/v1', 'kimi-k2.5')).toEqual({
+		expect(catalogPrice(cache, 'https://opencode.ai/inference/v1', 'kimi-k2.5')).toEqual({
 			input: 0.6,
 			output: 3
 		});
-		expect(catalogPrice(cache, 'https://opencode.ai/zen/v1', 'big-pickle')).toEqual({
+		expect(catalogPrice(cache, 'https://opencode.ai/inference/v1', 'big-pickle')).toEqual({
 			input: 0,
 			output: 0
 		});
@@ -69,19 +91,52 @@ describe('model prices (models.dev)', () => {
 			input: 0.05,
 			output: 0.4
 		});
-		expect(catalogPrice(cache, 'https://opencode.ai/zen/v1', 'unknown')).toBeNull();
-		expect(catalogPrice(cache, 'https://opencode.ai/zen/go/v1', 'glm-5.3')).toBeNull();
-		expect(catalogPrice(null, 'https://opencode.ai/zen/v1', 'kimi-k2.5')).toBeNull();
+		expect(catalogPrice(cache, 'https://opencode.ai/inference/v1', 'unknown')).toBeNull();
+		expect(catalogPrice(cache, 'https://opencode.ai/inference/go/v1', 'glm-5.3')).toBeNull();
+		expect(catalogPrice(null, 'https://opencode.ai/inference/v1', 'kimi-k2.5')).toBeNull();
 		expect(pickPrices('not json', keys).prices).toEqual({});
 	});
 
 	it('fetches again when the cache is missing, old, or lacks an endpoint', () => {
-		const keys = ['opencode.ai/zen'];
+		const keys = ['opencode.ai/inference'];
 		const cache = pickPrices(catalog, keys, 1000);
 		expect(pricesStale(null, keys, 1000)).toBe(true);
+		// Cached before model details were kept.
+		const { models: _models, ...old } = cache;
+		void _models;
+		expect(pricesStale(old, keys, 2000)).toBe(true);
 		expect(pricesStale(null, [], 1000)).toBe(false);
 		expect(pricesStale(cache, keys, 2000)).toBe(false);
 		expect(pricesStale(cache, keys, 1000 + CATALOG_MAX_AGE + 1)).toBe(true);
 		expect(pricesStale(cache, [...keys, 'api.deepseek.com'], 2000)).toBe(true);
+	});
+
+	it('keeps what the catalog says about each model, and which API serves it', () => {
+		const cache = pickPrices(catalog, ['opencode.ai/inference'], 1000);
+		const at = 'https://opencode.ai/inference/v1';
+		expect(catalogModel(cache, at, 'kimi-k2.5')).toEqual({
+			name: 'Kimi K2.5',
+			context: 262144,
+			tools: true,
+			price: { input: 0.6, output: 3 }
+		});
+		// OpenCode serves these only over the Messages / Responses / Gemini APIs.
+		expect(catalogModel(cache, at, 'claude-haiku-5-5')?.api).toBe('messages');
+		expect(catalogModel(cache, at, 'gpt-6-luna')?.api).toBe('responses');
+		expect(catalogModel(cache, at, 'gemini-4-argon')?.api).toBe('gemini');
+		expect(catalogModel(cache, at, 'mistral-large-4')).toBeNull();
+		expect(catalogModel(cache, at, 'big-pickle')).toEqual({ price: { input: 0, output: 0 } });
+		expect(catalogModel(cache, at, 'unknown')).toBeNull();
+		// A provider that isn't OpenAI-compatible itself: its package says nothing about the API.
+		const openai = pickPrices(
+			{
+				openai: {
+					npm: '@ai-sdk/openai',
+					models: { 'gpt-5': { provider: { npm: '@ai-sdk/openai' } } }
+				}
+			},
+			['api.openai.com']
+		);
+		expect(catalogModel(openai, 'https://api.openai.com/v1', 'gpt-5')).toBeNull();
 	});
 });

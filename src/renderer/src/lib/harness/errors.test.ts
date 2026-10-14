@@ -19,6 +19,18 @@ describe('describeError', () => {
 			settings: true
 		});
 		expect(describeError('OpenCode Zen needs a free API key: get one…').settings).toBe(true);
+		expect(describeError('OpenCode needs an API key: get one…')).toMatchObject({
+			kind: 'setup',
+			settings: true
+		});
+	});
+
+	it("tells OpenCode's app-only free tier from a refused key", () => {
+		const free = describeError(
+			"403: OpenCode's free tier can only be used from within OpenCode. Download it at https://opencode.ai and keep building.",
+			403
+		);
+		expect(free).toMatchObject({ kind: 'setup', retry: false, settings: true });
 	});
 
 	it('marks rate limits and server errors retryable', () => {

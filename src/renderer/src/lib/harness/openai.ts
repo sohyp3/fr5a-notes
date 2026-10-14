@@ -1,6 +1,15 @@
 import { createSseParser } from './sse';
 import { readUsage, type Usage } from './usage';
-import type { ChatMessage, Http, ProviderProfile, ToolCall, ToolDef } from './types';
+import {
+	isOpenRouter,
+	isOpencode,
+	type ChatMessage,
+	type Http,
+	type ModelInfo,
+	type ProviderProfile,
+	type ToolCall,
+	type ToolDef
+} from './types';
 
 /**
  * Client for OpenAI-compatible `/chat/completions`. Always asks for a stream;
@@ -25,6 +34,10 @@ export interface CompletionRequest {
 	/** Each text delta as it arrives (once, whole, on non-streaming hosts). */
 	onDelta?: (text: string) => void;
 	signal?: AbortSignal;
+	/** A stable id for the chat (OpenCode routes and caches by it; Go refuses requests without). */
+	session?: string;
+	/** Names the app, e.g. `fr5a/1.2.0`, where the provider asks clients to (OpenCode). */
+	client?: string;
 }
 
 export class ProviderError extends Error {
@@ -139,12 +152,40 @@ function errorMessage(status: number, body: string): string {
 const NOT_CHAT =
 	/embed|tts|whisper|dall-e|gpt-image|image|audio|moderation|realtime|transcribe|davinci|babbage|search|computer-use/i;
 
-/** Chat model ids from an OpenAI-compatible `GET /models`, sorted. */
+type ModelRow = {
+	id?: unknown;
+	name?: unknown;
+	context_length?: unknown;
+	supported_parameters?: unknown;
+	pricing?: { prompt?: unknown; completion?: unknown };
+};
+
+/** USD per token as text (OpenRouter's `pricing`) → per 1M tokens; null when absent or variable (-1). */
+function perMillion(v: unknown): number | null {
+	const n = typeof v === 'string' ? Number(v) : v;
+	return typeof n === 'number' && Number.isFinite(n) && n >= 0
+		? Number((n * 1e6).toFixed(6))
+		: null;
+}
+
+/** What a `/models` row says beyond the id (OpenRouter lists names, context, tools and prices). */
+function modelInfo(id: string, r: ModelRow): ModelInfo {
+	const out: ModelInfo = { id };
+	if (typeof r.name === 'string' && r.name && r.name !== id) out.name = r.name;
+	if (typeof r.context_length === 'number' && r.context_length > 0) out.context = r.context_length;
+	if (Array.isArray(r.supported_parameters)) out.tools = r.supported_parameters.includes('tools');
+	const input = perMillion(r.pricing?.prompt);
+	const output = perMillion(r.pricing?.completion);
+	if (input !== null && output !== null) out.price = { input, output };
+	return out;
+}
+
+/** Chat models from an OpenAI-compatible `GET /models`, sorted by id. */
 export async function listModels(
 	http: Http,
 	profile: Pick<ProviderProfile, 'baseUrl'>,
 	apiKey: string | null
-): Promise<string[]> {
+): Promise<ModelInfo[]> {
 	const base = profile.baseUrl
 		.trim()
 		.replace(/\/+$/, '')
@@ -159,15 +200,31 @@ export async function listModels(
 	});
 	if (res.status < 200 || res.status >= 300)
 		throw new ProviderError(errorMessage(res.status, res.body), res.status);
-	let rows: { id?: string; name?: string }[];
+	let rows: ModelRow[];
 	try {
 		const j = JSON.parse(res.body);
 		rows = j?.data ?? j?.models ?? [];
 	} catch {
 		throw new ProviderError('The provider returned a model list that is not JSON.');
 	}
-	const ids = rows.map((r) => r.id ?? r.name ?? '').filter(Boolean);
-	return [...new Set(ids.filter((id) => !NOT_CHAT.test(id)))].sort();
+	const out = new Map<string, ModelInfo>();
+	for (const r of Array.isArray(rows) ? rows : []) {
+		const id = typeof r?.id === 'string' && r.id ? r.id : typeof r?.name === 'string' ? r.name : '';
+		if (id && !NOT_CHAT.test(id) && !out.has(id)) out.set(id, modelInfo(id, r));
+	}
+	return [...out.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+/** Headers a provider asks for beyond the key: OpenCode wants the chat's id and the client named. */
+export function providerHeaders(
+	baseUrl: string,
+	req: Pick<CompletionRequest, 'session' | 'client'>
+): Record<string, string> {
+	if (!isOpencode(baseUrl)) return {};
+	return {
+		...(req.session ? { 'x-opencode-session': req.session } : {}),
+		...(req.client ? { 'User-Agent': req.client } : {})
+	};
 }
 
 let seq = 0;
@@ -199,7 +256,8 @@ async function complete(
 	if (req.signal?.aborted) throw new AbortError();
 	const headers: Record<string, string> = {
 		'Content-Type': 'application/json',
-		Accept: 'text/event-stream'
+		Accept: 'text/event-stream',
+		...providerHeaders(profile.baseUrl, req)
 	};
 	if (req.apiKey) headers.Authorization = `Bearer ${req.apiKey}`;
 	const body: Record<string, unknown> = {
@@ -209,7 +267,7 @@ async function complete(
 	};
 	// Token counts in the last chunk; OpenRouter also puts the cost in it.
 	if (askUsage) body.stream_options = { include_usage: true };
-	if (/openrouter\.ai/i.test(profile.baseUrl)) body.usage = { include: true };
+	if (isOpenRouter(profile.baseUrl)) body.usage = { include: true };
 	if (req.tools?.length && profile.tools) {
 		body.tools = req.tools.map((t) => ({ type: 'function', function: t }));
 	}

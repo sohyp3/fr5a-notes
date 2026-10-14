@@ -2,6 +2,7 @@ import { platform } from '../platform';
 import { remapPath } from '../../../../shared/paths';
 import {
 	CATALOG_URL,
+	catalogModel,
 	catalogPrice,
 	endpointKey,
 	pickPrices,
@@ -14,9 +15,13 @@ import {
 	DEFAULT_AI_CONFIG,
 	LEGACY_SEARCH_KEY_NAME,
 	SEARCH_KINDS,
+	currentBaseUrl,
+	isOpenRouter,
 	providerKeyName,
 	searchKeyName,
 	type AiConfig,
+	type FavoriteModel,
+	type ModelInfo,
 	type ProviderProfile,
 	type SearchKind
 } from './types';
@@ -34,14 +39,28 @@ class AiSettings {
 		return (this.loading ??= (async () => {
 			const stored = await platform.getState<Partial<AiConfig>>('ai');
 			if (stored) {
-				const providers = stored.providers ?? [];
-				// Built-ins always exist (older configs may predate one), in front.
-				const missing = BUILTIN_PROVIDERS.filter((b) => !providers.some((p) => p.id === b.id));
+				// OpenCode's endpoints moved with its v2 console (`/zen/…` → `/inference/…`).
+				let moved = false;
+				const providers = (stored.providers ?? []).map((p) => {
+					const baseUrl = currentBaseUrl(p.baseUrl);
+					if (baseUrl === p.baseUrl) return p;
+					moved = true;
+					return { ...p, baseUrl, ...(p.name === 'OpenCode Zen' ? { name: 'OpenCode' } : {}) };
+				});
+				// Built-ins always exist (older configs may predate one), in front; an
+				// OpenRouter added by hand before it was built in stands in for it.
+				const missing = BUILTIN_PROVIDERS.filter(
+					(b) =>
+						!providers.some(
+							(p) => p.id === b.id || (isOpenRouter(b.baseUrl) && isOpenRouter(p.baseUrl))
+						)
+				);
 				this.config = {
 					...DEFAULT_AI_CONFIG,
 					...stored,
 					providers: [...missing, ...providers]
 				};
+				if (moved) void platform.setState('ai', $state.snapshot(this.config));
 			}
 			await this.checkKeys();
 			this.loaded = true;
@@ -69,14 +88,14 @@ class AiSettings {
 	private pricesTried = 0;
 
 	/**
-	 * Fill the price cache for the cloud providers in use that have no price
-	 * of their own. Fetches models.dev at most every few minutes, and only
-	 * when the cache is old or misses an endpoint.
+	 * Fill the price cache (and model details) for the cloud providers in use.
+	 * Fetches models.dev at most every few minutes, and only when the cache is
+	 * old or misses an endpoint.
 	 */
 	async loadPrices(): Promise<void> {
 		this.prices ??= await platform.getState<PriceCache>('aiPrices');
 		const wanted = this.config.providers
-			.filter((p) => !p.local && !p.price && this.keys[p.id])
+			.filter((p) => !p.local && this.keys[p.id])
 			.map((p) => endpointKey(p.baseUrl));
 		if (!pricesStale(this.prices, wanted) || Date.now() - this.pricesTried < 10 * 60_000) return;
 		this.pricesTried = Date.now();
@@ -94,19 +113,20 @@ class AiSettings {
 	priced(providerId: string, model?: string): Priced | undefined {
 		const p = this.config.providers.find((x) => x.id === providerId);
 		if (!p || p.local || p.price) return p;
-		const auto = catalogPrice(this.prices, p.baseUrl, model || p.model);
+		const auto = this.modelInfo(p.id, model || p.model).price;
 		return auto ? { price: auto } : p;
 	}
 
-	/** Where `priced` gets its price: set by you, models.dev, local (free), or none. */
-	priceSource(p: ProviderProfile): 'local' | 'own' | 'catalog' | null {
+	/** Where `priced` gets its price: set by you, the provider's model list, models.dev, local (free), or none. */
+	priceSource(p: ProviderProfile): 'local' | 'own' | 'listed' | 'catalog' | null {
 		if (p.local) return 'local';
 		if (p.price) return 'own';
+		if (this.models[p.id]?.find((m) => m.id === p.model)?.price) return 'listed';
 		return catalogPrice(this.prices, p.baseUrl, p.model) ? 'catalog' : null;
 	}
 
-	/** Model ids per provider, fetched from its `/models` endpoint (not persisted). */
-	models = $state<Record<string, string[]>>({});
+	/** Models per provider, fetched from its `/models` endpoint (not persisted). */
+	models = $state.raw<Record<string, ModelInfo[]>>({});
 	modelErrors = $state<Record<string, string>>({});
 
 	async fetchModels(id: string): Promise<void> {
@@ -115,8 +135,8 @@ class AiSettings {
 		try {
 			// Loaded on demand: the rest of the app reads this config without the client.
 			const { listModels } = await import('./openai');
-			const ids = await listModels(platform, p, await this.apiKey(id));
-			this.models = { ...this.models, [id]: ids };
+			const list = await listModels(platform, p, await this.apiKey(id));
+			this.models = { ...this.models, [id]: list };
 			const { [id]: _drop, ...rest } = this.modelErrors;
 			void _drop;
 			this.modelErrors = rest;
@@ -131,6 +151,50 @@ class AiSettings {
 	setModel(id: string, model: string): void {
 		const p = this.config.providers.find((x) => x.id === id);
 		if (p && model) this.saveProvider({ ...p, model });
+	}
+
+	/** What the provider's list and models.dev say about one model (the list wins). */
+	modelInfo(providerId: string, model: string): ModelInfo {
+		const p = this.config.providers.find((x) => x.id === providerId);
+		const listed = this.models[providerId]?.find((m) => m.id === model);
+		const known = p ? catalogModel(this.prices, p.baseUrl, model) : null;
+		return { ...known, ...listed, id: model };
+	}
+
+	/** Every model the provider lists, with what's known about each. */
+	modelList(providerId: string): ModelInfo[] {
+		return (this.models[providerId] ?? []).map((m) => this.modelInfo(providerId, m.id));
+	}
+
+	/**
+	 * The profile running `model` instead of its own: the model's context
+	 * window when smaller than the profile's budget, and no tools when it's
+	 * known not to take them.
+	 */
+	withModel(p: ProviderProfile, model: string | null | undefined): ProviderProfile {
+		if (!model || model === p.model) return p;
+		const info = this.modelInfo(p.id, model);
+		return {
+			...p,
+			model,
+			contextTokens: info.context ? Math.min(info.context, p.contextTokens) : p.contextTokens,
+			tools: p.tools && info.tools !== false
+		};
+	}
+
+	// --- favorites: models starred in Settings, offered in the AI pane ----------
+
+	isFavorite(providerId: string, model: string): boolean {
+		return this.config.favorites.some((f) => f.provider === providerId && f.model === model);
+	}
+
+	toggleFavorite(providerId: string, model: string): void {
+		const on = this.isFavorite(providerId, model);
+		const rest = this.config.favorites.filter(
+			(f) => !(f.provider === providerId && f.model === model)
+		);
+		const favorites: FavoriteModel[] = on ? rest : [...rest, { provider: providerId, model }];
+		this.update({ favorites });
 	}
 
 	update(patch: Partial<AiConfig>): void {
@@ -175,6 +239,7 @@ class AiSettings {
 		const providers = this.config.providers.filter((p) => p.id !== id);
 		this.update({
 			providers,
+			favorites: this.config.favorites.filter((f) => f.provider !== id),
 			defaultProvider:
 				this.config.defaultProvider === id
 					? (providers[0]?.id ?? null)

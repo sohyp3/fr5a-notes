@@ -53,6 +53,12 @@ describe('session files', () => {
 		expect(withDeviceIgnored('*.tmp\n')).toMatch(/^\*\.tmp\n\n# fr5a: .*\ndevice\/\n$/);
 	});
 
+	it('keeps the model picked for the chat (OpenRouter ids have slashes and colons)', () => {
+		const picked = { ...session, provider: 'openrouter', model: 'deepseek/deepseek-chat:free' };
+		expect(parseSession('x.md', serializeSession(picked))).toEqual(picked);
+		expect(serializeSession(session)).not.toContain('model:');
+	});
+
 	it('records whether decrypted note content entered the chat', () => {
 		const privateChat = { ...session, sensitive: true };
 		expect(parseSession('x.md', serializeSession(privateChat)).sensitive).toBe(true);

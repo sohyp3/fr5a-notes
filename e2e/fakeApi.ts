@@ -63,6 +63,8 @@ export function installFakeApi(): void {
 	)}`;
 	const secrets: Record<string, string> = {};
 	(window as unknown as { __meta: typeof metaFiles }).__meta = metaFiles;
+	// Every model request (url, headers, body), oldest first.
+	(window as unknown as { __llm: unknown[] }).__llm = [];
 	(window as unknown as { __metaWrites: typeof metaWrites }).__metaWrites = metaWrites;
 	// Every reply reports its tokens in a last chunk, like `stream_options.include_usage`.
 	const sse = (obj: unknown, usage: object = { prompt_tokens: 1200, completion_tokens: 34 }) =>
@@ -268,11 +270,22 @@ export function installFakeApi(): void {
 							deepseek: {
 								api: 'https://api.deepseek.com',
 								models: { 'deepseek-chat': { cost: { input: 0.28, output: 0.42 } } }
+							},
+							// OpenCode serves this one over the Responses API only.
+							opencode: {
+								api: 'https://opencode.ai/inference/v1',
+								npm: '@ai-sdk/openai-compatible',
+								models: { 'gpt-5-nano': { provider: { npm: '@ai-sdk/openai' } } }
 							}
 						})
 					: fakeModel(req.body ?? '{}')
 		}),
-		httpStream: async (_id: string, req: { body?: string }, onChunk: (t: string) => void) => {
+		httpStream: async (
+			_id: string,
+			req: { url: string; headers?: Record<string, string>; body?: string },
+			onChunk: (t: string) => void
+		) => {
+			(window as unknown as { __llm: (typeof req)[] }).__llm.push(req);
 			maybeFail(req.body ?? '');
 			// "hang?" never answers, and the abort is a no-op (like Android's buffered requests).
 			if (req.body?.includes('hang?')) return new Promise<never>(() => {});

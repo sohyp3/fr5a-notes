@@ -14,9 +14,16 @@
 		EXA_CATEGORIES,
 		EXA_SEARCH_TYPES,
 		KEY_URLS,
-		OPENCODE_ZEN,
+		OPENCODE,
+		OPENCODE_GO_URL,
+		OPENCODE_KEY_URL,
+		OPENROUTER,
+		OTHER_API_NAMES,
 		SEARCH_KINDS,
-		ZEN_KEY_URL,
+		currentBaseUrl,
+		isOpenRouter,
+		isOpencode,
+		type ModelInfo,
 		type ProviderProfile,
 		type SearchKind,
 		type ExaSearchOptions
@@ -28,6 +35,7 @@
 	import { cleanFolder } from '../../../../../shared/paths';
 	import { reducedMotion } from '../../portal';
 	import { catalogPrice } from '../../harness/prices';
+	import { formatTokens } from '../../harness/usage';
 
 	const app = getAppState();
 	const ai = getAiSettings();
@@ -37,13 +45,23 @@
 	const PRESETS: { label: string; p: Partial<ProviderProfile> }[] = [
 		{ label: 'Custom', p: {} },
 		{
-			label: 'OpenCode Zen (free big-pickle)',
+			label: 'OpenCode (pay as you go)',
 			p: {
-				name: OPENCODE_ZEN.name,
-				baseUrl: OPENCODE_ZEN.baseUrl,
-				model: OPENCODE_ZEN.model,
+				name: OPENCODE.name,
+				baseUrl: OPENCODE.baseUrl,
+				model: 'kimi-k2.6',
 				local: false,
-				contextTokens: OPENCODE_ZEN.contextTokens
+				contextTokens: OPENCODE.contextTokens
+			}
+		},
+		{
+			label: 'OpenCode Go (subscription)',
+			p: {
+				name: 'OpenCode Go',
+				baseUrl: OPENCODE_GO_URL,
+				model: 'kimi-k2.6',
+				local: false,
+				contextTokens: OPENCODE.contextTokens
 			}
 		},
 		{
@@ -57,7 +75,13 @@
 		},
 		{
 			label: 'OpenRouter',
-			p: { name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: '', local: false }
+			p: {
+				name: OPENROUTER.name,
+				baseUrl: OPENROUTER.baseUrl,
+				model: OPENROUTER.model,
+				local: false,
+				contextTokens: OPENROUTER.contextTokens
+			}
 		},
 		{
 			label: 'Ollama (local / VPN)',
@@ -159,20 +183,61 @@
 		await refreshModels(id);
 	}
 
+	/** OpenCode and OpenRouter list their models without a key. */
+	const listsWithoutKey = (p: ProviderProfile) => isOpencode(p.baseUrl) || isOpenRouter(p.baseUrl);
+	const canList = (p: ProviderProfile) => !!ai.keys[p.id] || p.local || listsWithoutKey(p);
+
+	function toggle(p: ProviderProfile): void {
+		expanded = expanded === p.id ? null : p.id;
+		// Keyless lists (OpenRouter's is big) load once the provider is opened.
+		if (expanded && canList(p) && !ai.models[p.id] && !loadingModels[p.id])
+			void refreshModels(p.id);
+	}
+
 	onMount(async () => {
 		await ai.load();
 		await ai.checkKeys();
 		void ai.loadPrices();
 		await refreshSearchKey();
-		// Fetch model lists for providers that can answer (key saved, local, or Zen's public list).
+		// Fetch model lists for providers that can answer (key saved, or local).
 		await Promise.all(
 			cfg.providers.map(async (p) => {
-				if ((ai.keys[p.id] || p.local || p.id === OPENCODE_ZEN.id) && !ai.models[p.id])
-					await refreshModels(p.id);
+				if ((ai.keys[p.id] || p.local) && !ai.models[p.id]) await refreshModels(p.id);
 			})
 		);
 		await loadSkills();
 	});
+
+	// --- all models of a provider, starred ones offered in the AI pane --------
+
+	let modelQuery = $state<Record<string, string>>({});
+
+	/** Starred first, then the provider's own model, then by id; filtered by name or id. */
+	function modelRows(p: ProviderProfile, query: string): ModelInfo[] {
+		const listed = ai.modelList(p.id);
+		// Starred models the list no longer has stay, so they can be unstarred.
+		const gone = cfg.favorites
+			.filter((f) => f.provider === p.id && !listed.some((m) => m.id === f.model))
+			.map((f) => ai.modelInfo(p.id, f.model));
+		const q = query.trim().toLowerCase();
+		const rank = (m: ModelInfo) => (ai.isFavorite(p.id, m.id) ? 0 : m.id === p.model ? 1 : 2);
+		return [...gone, ...listed]
+			.filter((m) => !q || m.id.toLowerCase().includes(q) || m.name?.toLowerCase().includes(q))
+			.sort((a, b) => rank(a) - rank(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+	}
+
+	/** "Kimi K2.6 · 262k context · $0.95 in · $4 out", what's known of it. */
+	function modelMeta(m: ModelInfo): string {
+		if (m.api) return `Uses ${OTHER_API_NAMES[m.api]}, which fr5a doesn't speak yet`;
+		return [
+			m.name ? m.id : '',
+			m.context ? `${formatTokens(m.context)} context` : '',
+			m.price ? priceText(m.price.input, m.price.output) : '',
+			m.tools === false ? 'no tools' : ''
+		]
+			.filter(Boolean)
+			.join(' · ');
+	}
 
 	function blank(): Draft {
 		return {
@@ -221,8 +286,9 @@
 		const price = ai.priced(p.id, p.model)?.price;
 		if (source === 'local') return 'Free: runs on your hardware';
 		if (price && source === 'own') return `${priceText(price.input, price.output)} (set by you)`;
+		if (price && source === 'listed') return `${priceText(price.input, price.output)} (${p.name})`;
 		if (price) return `${priceText(price.input, price.output)} (models.dev)`;
-		return p.id === 'openrouter' || p.baseUrl.includes('openrouter.ai')
+		return isOpenRouter(p.baseUrl)
 			? 'Reported by OpenRouter with each reply'
 			: 'Unknown: models.dev doesn’t list this model. Edit… to set one.';
 	}
@@ -238,7 +304,7 @@
 		return {
 			id: d.id,
 			name: d.name.trim() || d.model || 'Provider',
-			baseUrl: d.baseUrl.trim(),
+			baseUrl: currentBaseUrl(d.baseUrl.trim()),
 			model: d.model.trim(),
 			local: d.local,
 			tools: d.tools,
@@ -349,8 +415,9 @@
 	<p class="lead">The selected provider is the default; each AI tab can switch.</p>
 	<div class="providers" role="radiogroup" aria-label="Default provider">
 		{#each cfg.providers as p (p.id)}
-			{@const models = ai.models[p.id] ?? []}
+			{@const models = ai.modelList(p.id)}
 			{@const open = expanded === p.id}
+			{@const starred = cfg.favorites.filter((f) => f.provider === p.id).length}
 			<div class={['provider', { open, 'is-default': cfg.defaultProvider === p.id }]}>
 				<div class="phead">
 					<label class="pick">
@@ -366,6 +433,7 @@
 						</span>
 					</label>
 					<span class="badges">
+						{#if starred}<span class="badge" title="Starred models">{starred} starred</span>{/if}
 						{#if p.local}<span class="badge">local</span>{/if}
 						{#if !p.local && !ai.keys[p.id]}<span class="badge warn">no key</span>{/if}
 					</span>
@@ -373,7 +441,7 @@
 						class="btn icon"
 						aria-expanded={open}
 						aria-label="{open ? 'Hide' : 'Show'} {p.name} details"
-						onclick={() => (expanded = open ? null : p.id)}
+						onclick={() => toggle(p)}
 					>
 						<span class={['chev', { open }]}><Icon name="chevron" size={15} /></span>
 					</button>
@@ -414,8 +482,13 @@
 									value={p.model}
 									onchange={(e) => ai.setModel(p.id, (e.currentTarget as HTMLSelectElement).value)}
 								>
-									{#if !models.includes(p.model)}<option value={p.model}>{p.model}</option>{/if}
-									{#each models as m (m)}<option value={m}>{m}</option>{/each}
+									{#if !models.some((m) => m.id === p.model)}<option value={p.model}
+											>{p.model}</option
+										>{/if}
+									{#each models as m (m.id)}<option
+											value={m.id}
+											disabled={!!m.api && m.id !== p.model}>{m.id}</option
+										>{/each}
 								</select>
 								<button
 									class="btn icon"
@@ -431,12 +504,51 @@
 								>{ai.modelErrors[p.id]
 									? `Couldn't list models: ${ai.modelErrors[p.id]}`
 									: models.length
-										? `${models.length} models`
-										: ai.keys[p.id] || p.local || p.id === OPENCODE_ZEN.id
+										? `${models.length} models. The default for new chats.`
+										: canList(p)
 											? 'Loading models…'
 											: 'Save a key to list models'}</span
 							>
 						</label>
+						{#if models.length || starred}
+							{@const rows = modelRows(p, modelQuery[p.id] ?? '')}
+							<div class="field all-models">
+								<div class="mhead">
+									<span class="small">All models</span>
+									<span class="desc"
+										>Star the ones to pick from in the AI pane (kept on this device).</span
+									>
+								</div>
+								<input
+									type="search"
+									autocomplete="off"
+									aria-label="Filter {p.name} models"
+									placeholder="Filter {models.length} models"
+									bind:value={modelQuery[p.id]}
+								/>
+								<div class="models" role="group" aria-label="{p.name} models">
+									{#each rows as m (m.id)}
+										{@const fav = ai.isFavorite(p.id, m.id)}
+										<button
+											class={['mrow', { on: fav, off: !!m.api }]}
+											aria-pressed={fav}
+											disabled={!!m.api && !fav}
+											title={fav ? 'Unstar' : 'Star: offer it in the AI pane'}
+											onclick={() => ai.toggleFavorite(p.id, m.id)}
+										>
+											<Icon name="star" size={15} />
+											<span class="mname">
+												<span class="mid">{m.name ?? m.id}</span>
+												{#if modelMeta(m)}<span class="desc">{modelMeta(m)}</span>{/if}
+											</span>
+											{#if m.id === p.model}<span class="badge">default</span>{/if}
+										</button>
+									{:else}
+										<p class="desc pad">No model matches.</p>
+									{/each}
+								</div>
+							</div>
+						{/if}
 						<div class="field">
 							<span class="small">Price per 1M tokens</span>
 							<span class="desc">{priceLine(p)}</span>
@@ -506,10 +618,12 @@
 				<input type="checkbox" bind:checked={draft.local} />
 				<span
 					><span class="name">Runs on my hardware (local)</span>
-					{#if draft.baseUrl.includes('opencode.ai/zen')}
+					{#if isOpencode(draft.baseUrl)}
 						<span class="desc"
-							>Zen models (incl. free <code>big-pickle</code>) need a key from
-							<a href={ZEN_KEY_URL} target="_blank" rel="noreferrer">opencode.ai/zen</a>.</span
+							>OpenCode needs a key from
+							<a href={OPENCODE_KEY_URL} target="_blank" rel="noreferrer">opencode.ai/console</a>;
+							its free models only answer inside the OpenCode app. Models it serves over other APIs
+							(its GPT, Claude, Gemini) are greyed out in the model list.</span
 						>
 					{/if}<span class="desc"
 						>localhost, your LAN or VPN. Local providers may read notes hidden from cloud AI.</span
@@ -1133,6 +1247,70 @@
 		padding: 14px;
 		border-radius: 12px;
 		background: var(--bg-list);
+	}
+	.all-models {
+		grid-column: 1 / -1;
+	}
+	.mhead {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 2px 10px;
+	}
+	.models {
+		display: flex;
+		flex-direction: column;
+		max-height: 320px;
+		overflow-y: auto;
+		overscroll-behavior: contain;
+		padding: 4px;
+		border-radius: 10px;
+		background: var(--bg-secondary);
+	}
+	.mrow {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		min-height: 36px;
+		padding: 4px 8px;
+		border-radius: 7px;
+		text-align: start;
+		color: var(--text-main);
+	}
+	.mrow:hover:not(:disabled) {
+		background: var(--bg-hover);
+	}
+	.mrow :global(.icon) {
+		color: var(--text-faint);
+	}
+	.mrow.on :global(.icon) {
+		color: var(--accent);
+		fill: currentColor;
+	}
+	.mrow.off {
+		opacity: 0.55;
+	}
+	:global(html[data-touch]) .mrow {
+		min-height: 44px;
+	}
+	.mname {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+	}
+	.mid {
+		font-size: 13px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.mname .desc {
+		font-size: 11.5px;
+	}
+	.models .pad {
+		margin: 0;
+		padding: 8px;
 	}
 
 	/* --- web search -------------------------------------------------------- */

@@ -62,6 +62,7 @@ import Settings from '@lucide/svelte/icons/settings';
 import Shield from '@lucide/svelte/icons/shield';
 import Sparkles from '@lucide/svelte/icons/sparkles';
 import Square from '@lucide/svelte/icons/square';
+import Star from '@lucide/svelte/icons/star';
 import SquarePen from '@lucide/svelte/icons/square-pen';
 import Sun from '@lucide/svelte/icons/sun';
 import Table from '@lucide/svelte/icons/table';
@@ -137,6 +138,7 @@ export const ICONS = {
 	usage: ReceiptText,
 	on: CircleDot,
 	off: Circle,
+	star: Star,
 	// arrows
 	chevron: ChevronRight,
 	back: ChevronLeft,

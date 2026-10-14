@@ -1675,8 +1675,8 @@ test('desktop: the model picker lists providers that are set up; models.dev pric
 	await page.getByRole('button', { name: 'Toggle AI harness' }).click();
 	const harness = page.getByRole('region', { name: 'AI harness' });
 	await harness.locator('.ctx-sum').click();
-	const picker = harness.getByLabel('Provider');
-	// OpenCode Zen, OpenAI and DeepSeek have no key: not offered.
+	const picker = harness.getByLabel('Model', { exact: true });
+	// OpenCode, OpenRouter, OpenAI and DeepSeek have no key: not offered.
 	await expect(picker.locator('option')).toHaveText(['Fake · m']);
 
 	// A key for DeepSeek: offered now, priced from models.dev. (The sidebar
@@ -1695,12 +1695,98 @@ test('desktop: the model picker lists providers that are set up; models.dev pric
 	await toggle.click();
 
 	await expect(picker.locator('option')).toHaveText(['DeepSeek · deepseek-chat', 'Fake · m']);
-	await picker.selectOption('deepseek');
+	await picker.selectOption({ label: 'DeepSeek · deepseek-chat' });
 	const input = harness.locator('textarea');
 	await input.fill('md?');
 	await input.press('Enter');
 	// 1200 in × $0.28 + 34 out × $0.42 per 1M tokens.
 	await expect(harness.locator('.usage')).toHaveText('1.2k in · 34 out · $0.0004');
+	await ctx.close();
+});
+
+test('desktop: models starred in Settings are offered in the AI pane, per chat', async ({
+	browser
+}) => {
+	const { ctx, page } = await desktopPage(browser);
+	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
+	await page.getByRole('button', { name: 'AI assistant' }).click();
+
+	// OpenCode: a key, then its list (models.dev says gpt-5-nano needs the Responses API).
+	await page.getByRole('button', { name: 'Show OpenCode details' }).click();
+	const opencode = page.locator('.provider', { hasText: 'OpenCode' });
+	await opencode.locator('#key-opencode-zen').fill('oc-test');
+	await opencode.getByRole('button', { name: 'Save', exact: true }).click();
+	const ocModels = opencode.getByRole('group', { name: 'OpenCode models' });
+	await expect(ocModels.getByRole('button')).toHaveCount(3);
+	const nano = ocModels.getByRole('button', { name: /gpt-5-nano/ });
+	await expect(nano).toBeDisabled();
+	await expect(nano).toContainText('Uses the OpenAI Responses API');
+	await ocModels.getByRole('button', { name: /^m\b/ }).click();
+	await expect(ocModels.getByRole('button', { name: /^m\b/ })).toHaveAttribute(
+		'aria-pressed',
+		'true'
+	);
+	await expect(opencode.locator('.badge', { hasText: '1 starred' })).toBeVisible();
+
+	// The local provider: filter its list, star one.
+	await page.getByRole('button', { name: 'Show Fake details' }).click();
+	const fake = page.locator('.provider', { hasText: 'Fake' });
+	await fake.getByLabel('Filter Fake models').fill('nano');
+	const fakeModels = fake.getByRole('group', { name: 'Fake models' });
+	await expect(fakeModels.getByRole('button')).toHaveCount(1);
+	await fakeModels.getByRole('button', { name: /gpt-5-nano/ }).click();
+	await page.getByRole('button', { name: 'Close settings' }).click();
+
+	await sidebar(page)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	await list(page).getByText('Plan', { exact: true }).click();
+	await page.getByRole('button', { name: 'Toggle AI harness' }).click();
+	const harness = page.getByRole('region', { name: 'AI harness' });
+	await harness.locator('.ctx-sum').click();
+	const picker = harness.getByLabel('Model', { exact: true });
+	await expect(picker.locator('option')).toHaveText([
+		'OpenCode · big-pickle',
+		'OpenCode · m',
+		'Fake · m',
+		'Fake · gpt-5-nano'
+	]);
+
+	// This chat runs on OpenCode's m: the new endpoint, with a chat id and the app named.
+	await picker.selectOption({ label: 'OpenCode · m' });
+	await expect(harness.locator('.ctx-sum .prov')).toHaveText('OpenCode · m');
+	const input = harness.locator('textarea');
+	await input.fill('md?');
+	await input.press('Enter');
+	await expect(harness.locator('.usage')).toBeVisible();
+	const sent = await page.evaluate(
+		() =>
+			(
+				window as unknown as {
+					__llm: { url: string; headers: Record<string, string>; body: string }[];
+				}
+			).__llm
+	);
+	expect(sent).toHaveLength(1);
+	expect(sent[0].url).toBe('https://opencode.ai/inference/v1/chat/completions');
+	expect(JSON.parse(sent[0].body).model).toBe('m');
+	expect(sent[0].headers['x-opencode-session']).toMatch(/^fr5a-/);
+	expect(sent[0].headers['User-Agent']).toMatch(/^fr5a\//);
+	// Kept with the chat.
+	await expect
+		.poll(() =>
+			page.evaluate(() =>
+				Object.entries((window as unknown as { __meta: Record<string, string> }).__meta)
+					.filter(([k]) => k.startsWith('sessions/device/'))
+					.map(([, v]) => v)
+					.join('\n')
+			)
+		)
+		.toMatch(/^provider: opencode-zen\nmodel: m$/m);
+
+	// A new chat starts on the default provider's own model.
+	await harness.getByRole('button', { name: 'New session' }).click();
+	await expect(harness.locator('.ctx-sum .prov')).toHaveText('Fake · m');
 	await ctx.close();
 });
 
