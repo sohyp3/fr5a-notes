@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-	CATALOG_MAX_AGE,
-	catalogModel,
-	catalogPrice,
-	endpointKey,
-	pickPrices,
-	pricesStale
-} from './prices';
+import { catalogModel, catalogPrice, endpointKey, pickPrices, pricesStale } from './prices';
 
 /** A slice of models.dev's api.json. */
 const catalog = {
@@ -97,18 +90,19 @@ describe('model prices (models.dev)', () => {
 		expect(pickPrices('not json', keys).prices).toEqual({});
 	});
 
-	it('fetches again when the cache is missing, old, or lacks an endpoint', () => {
+	it('fetches again only when the cache is missing, predates model details, or lacks an endpoint', () => {
 		const keys = ['opencode.ai/inference'];
 		const cache = pickPrices(catalog, keys, 1000);
-		expect(pricesStale(null, keys, 1000)).toBe(true);
+		expect(pricesStale(null, keys)).toBe(true);
 		// Cached before model details were kept.
 		const { models: _models, ...old } = cache;
 		void _models;
-		expect(pricesStale(old, keys, 2000)).toBe(true);
-		expect(pricesStale(null, [], 1000)).toBe(false);
-		expect(pricesStale(cache, keys, 2000)).toBe(false);
-		expect(pricesStale(cache, keys, 1000 + CATALOG_MAX_AGE + 1)).toBe(true);
-		expect(pricesStale(cache, [...keys, 'api.deepseek.com'], 2000)).toBe(true);
+		expect(pricesStale(old, keys)).toBe(true);
+		expect(pricesStale(null, [])).toBe(false);
+		expect(pricesStale(cache, keys)).toBe(false);
+		// However old: a cached catalog stays (no fetch on a schedule).
+		expect(pricesStale({ ...cache, fetched: 0 }, keys)).toBe(false);
+		expect(pricesStale(cache, [...keys, 'api.deepseek.com'])).toBe(true);
 	});
 
 	it('keeps what the catalog says about each model, and which API serves it', () => {

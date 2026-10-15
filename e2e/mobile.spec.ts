@@ -1664,7 +1664,7 @@ const metaKeys = (page: Page) =>
 		Object.keys((window as unknown as { __meta: Record<string, string> }).__meta).sort()
 	);
 
-test('desktop: the model picker lists providers that are set up; models.dev prices the rest', async ({
+test('desktop: the model picker offers starred models of providers set up; models.dev prices them', async ({
 	browser
 }) => {
 	const { ctx, page } = await desktopPage(browser);
@@ -1676,11 +1676,11 @@ test('desktop: the model picker lists providers that are set up; models.dev pric
 	const harness = page.getByRole('region', { name: 'AI harness' });
 	await harness.locator('.ctx-sum').click();
 	const picker = harness.getByLabel('Model', { exact: true });
-	// OpenCode, OpenRouter, OpenAI and DeepSeek have no key: not offered.
+	// Nothing starred: only the model this chat uses.
 	await expect(picker.locator('option')).toHaveText(['Fake · m']);
 
-	// A key for DeepSeek: offered now, priced from models.dev. (The sidebar
-	// steps aside for the AI pane: close it to reach Settings.)
+	// A key for DeepSeek and a model starred: offered now, priced from
+	// models.dev. (The sidebar steps aside for the AI pane: close it to reach Settings.)
 	const toggle = page.getByRole('button', { name: 'Toggle AI harness' });
 	await toggle.click();
 	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
@@ -1691,11 +1691,15 @@ test('desktop: the model picker lists providers that are set up; models.dev pric
 	await deepseek.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(deepseek.locator('.badge.warn')).toHaveCount(0);
 	await expect(deepseek.getByText('$0.28 in · $0.42 out (models.dev)')).toBeVisible();
+	await deepseek
+		.getByRole('group', { name: 'DeepSeek models' })
+		.getByRole('button', { name: /^m\b/ })
+		.click();
 	await page.getByRole('button', { name: 'Close settings' }).click();
 	await toggle.click();
 
-	await expect(picker.locator('option')).toHaveText(['DeepSeek · deepseek-chat', 'Fake · m']);
-	await picker.selectOption({ label: 'DeepSeek · deepseek-chat' });
+	await expect(picker.locator('option')).toHaveText(['DeepSeek · m', 'Fake · m']);
+	await picker.selectOption({ label: 'DeepSeek · m' });
 	const input = harness.locator('textarea');
 	await input.fill('md?');
 	await input.press('Enter');
@@ -1745,12 +1749,12 @@ test('desktop: models starred in Settings are offered in the AI pane, per chat',
 	const harness = page.getByRole('region', { name: 'AI harness' });
 	await harness.locator('.ctx-sum').click();
 	const picker = harness.getByLabel('Model', { exact: true });
+	// Starred models only, plus the one this chat uses (the default provider's own).
 	await expect(picker.locator('option')).toHaveText([
-		'OpenCode · big-pickle',
 		'OpenCode · gpt-5-nano',
 		'OpenCode · m',
-		'Fake · m',
-		'Fake · gpt-5-nano'
+		'Fake · gpt-5-nano',
+		'Fake · m'
 	]);
 
 	// This chat runs on OpenCode's m: the new endpoint, with a chat id and the app named.
@@ -1803,6 +1807,51 @@ test('desktop: models starred in Settings are offered in the AI pane, per chat',
 	// A new chat starts on the default provider's own model.
 	await harness.getByRole('button', { name: 'New session' }).click();
 	await expect(harness.locator('.ctx-sum .prov')).toHaveText('Fake · m');
+	await ctx.close();
+});
+
+test('desktop: model lists and models.dev are fetched once, then read from storage', async ({
+	browser
+}) => {
+	const { ctx, page } = await desktopPage(browser);
+	const fetched = (p: Page) => p.evaluate(() => (window as unknown as { __http: string[] }).__http);
+	const openAiSettings = async (p: Page) => {
+		await sidebar(p).getByRole('button', { name: 'Settings', exact: true }).click();
+		await p.getByRole('button', { name: 'AI assistant' }).click();
+	};
+	// First visit: the local provider's list and the catalog (for every cloud provider).
+	await openAiSettings(page);
+	await expect
+		.poll(() => fetched(page))
+		.toEqual(expect.arrayContaining(['https://models.dev/api.json', 'http://fake/v1/models']));
+	const stored = await page.evaluate(async () => {
+		const api = (window as unknown as { api: { getState(k: string): Promise<unknown> } }).api;
+		return { models: await api.getState('aiModels'), prices: await api.getState('aiPrices') };
+	});
+	expect(stored.models).toHaveProperty('fake');
+	expect(stored.prices).toHaveProperty('models');
+
+	// The next launch: everything comes from storage, nothing is fetched.
+	const next = await ctx.newPage();
+	await next.addInitScript(installFakeApi);
+	await next.addInitScript((s) => {
+		const api = (window as unknown as { api: { setState(k: string, v: unknown): void } }).api;
+		api.setState('aiModels', s.models);
+		api.setState('aiPrices', s.prices);
+	}, stored);
+	await next.goto('/');
+	await openAiSettings(next);
+	await next.getByRole('button', { name: 'Show Fake details' }).click();
+	await expect(next.getByRole('group', { name: 'Fake models' }).getByRole('button')).toHaveCount(3);
+	await next.getByRole('button', { name: 'Close settings' }).click();
+	await sidebar(next)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	await list(next).getByText('Plan', { exact: true }).click();
+	await next.getByRole('button', { name: 'Toggle AI harness' }).click();
+	await expect(next.getByRole('region', { name: 'AI harness' })).toBeVisible();
+	await next.waitForTimeout(300);
+	expect(await fetched(next)).toEqual([]);
 	await ctx.close();
 });
 

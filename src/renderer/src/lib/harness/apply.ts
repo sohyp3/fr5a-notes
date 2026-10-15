@@ -104,6 +104,8 @@ export async function prepareWrite(
 	}
 
 	const id = p.target;
+	// The open note named by path: its last keystrokes may still be waiting to save.
+	if (id === app.activeId) await app.flush();
 	const before = await platform.readNote(id);
 	if (detectLocked(before)) throw new Error(`${id} is locked.`);
 	const after =

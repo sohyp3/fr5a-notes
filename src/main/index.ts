@@ -44,6 +44,8 @@ interface StoreSchema {
 	ai?: unknown;
 	/** models.dev prices of the AI providers in use (a disposable cache). */
 	aiPrices?: unknown;
+	/** Each AI provider's `/models` list, fetched once (a disposable cache). */
+	aiModels?: unknown;
 	/** safeStorage-encrypted secrets (API keys), base64. */
 	secrets?: Record<string, string>;
 }
@@ -58,7 +60,8 @@ const RENDERER_KEYS = new Set<StateKey>([
 	'settings',
 	'theme',
 	'ai',
-	'aiPrices'
+	'aiPrices',
+	'aiModels'
 ]);
 
 // Workspace images in notes load as `fr5a://workspace/<path>` (see `assetPath`).

@@ -1,12 +1,11 @@
 import { Extension } from '@tiptap/core';
-import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
+import { Plugin, PluginKey, TextSelection, type Transaction } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
-import type { Node as PMNode } from '@tiptap/pm/model';
 import type { EditorState } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
-import { cellRanges, findTables, pipeOffsets, tableHtml } from './tables';
+import { cellRanges, findTables, pipeOffsets, tableHtml, type TableRow } from './tables';
 import { codeLines } from './blocks';
-import { findImages } from './images';
+import { findImages, type ImageBlock } from './images';
 import { imageWidget } from './imageView';
 import {
 	coveredRanges,
@@ -338,129 +337,281 @@ const key = new PluginKey('markdownSyntax');
 /** Events a block widget (table, picture) handles itself, not ProseMirror. */
 const widgetEvent = (e: Event) => /^(mouse|touch|pointer|drag|dblclick)/.test(e.type);
 
-function buildDecorations(
-	state: EditorState,
-	editable: boolean,
-	opts: MarkdownSyntaxOptions
-): DecorationSet {
-	const decorations: Decoration[] = [];
-	const { from: selFrom, to: selTo } = state.selection;
-	// Tables span lines, so find them over the whole document first.
+/**
+ * What the whole-document pass knows about each line. Only string scans, so
+ * cheap (about 0.5 ms for 1 500 lines); it runs on every edit, while the
+ * decorations themselves are rebuilt only for the lines that need it.
+ */
+interface Scan {
+	lines: string[];
+	/** Position of each line's node, plus the document's end. */
+	starts: number[];
+	tables: Map<number, TableRow>;
+	/** Image lines (not in a table): the picture shows above them. */
+	images: Map<number, ImageBlock>;
+	/** Lines of a picture: its own line and its size comment. */
+	imageRows: Map<number, { size: boolean }>;
+	/** The table / picture each such line belongs to: [first, last] line. */
+	blocks: Map<number, [number, number]>;
+	/** Highlight comment lines (hidden unless the caret is on one). */
+	comments: Set<number>;
+	/** Stretches marked on a line, per comment naming it. */
+	marks: Map<number, Ranges[]>;
+	/**
+	 * Per line, what its decorations take from other lines (table row, picture
+	 * line, highlight comment, the stretches marked on it). A line whose text
+	 * and signature stay the same keeps its decorations across an edit.
+	 */
+	sig: string[];
+}
+
+function scan(state: EditorState, opts: MarkdownSyntaxOptions): Scan {
 	const lines: string[] = [];
 	const starts: number[] = [];
 	state.doc.forEach((node, pos) => {
 		lines.push(node.textContent);
 		starts.push(pos);
 	});
+	starts.push(state.doc.content.size);
+	// Tables span lines, so find them over the whole document first.
 	const tables = findTables(lines);
-	/** Per table row: show it as source (caret inside, editable) or hide it behind the widget. */
-	const source = new Map<number, boolean>();
+	const blocks = new Map<number, [number, number]>();
 	for (const [i, row] of tables) {
 		if (row.role !== 'head') continue;
 		let end = i;
 		while (!tables.get(end)?.last) end++;
-		const from = starts[i];
-		const to = starts[end] + state.doc.child(end).nodeSize;
-		const raw = editable && selTo >= from && selFrom <= to;
-		for (let k = i; k <= end; k++) source.set(k, raw);
-		if (!raw) {
-			const html = tableHtml(lines.slice(i, end + 1));
-			decorations.push(
-				Decoration.widget(from, (view, getPos) => tableWidget(view, getPos, html), {
-					side: -1,
-					key: `table:${html}`,
-					stopEvent: (e) => e.type.startsWith('mouse') || e.type.startsWith('touch')
-				})
-			);
-		}
+		for (let k = i; k <= end; k++) blocks.set(k, [i, end]);
 	}
-
 	// Images: the picture sits above its line; the line (and its size comment)
 	// show as source only while the caret is in them.
-	const imageRows = new Map<number, { raw: boolean; size: boolean }>();
+	const images = new Map<number, ImageBlock>();
+	const imageRows = new Map<number, { size: boolean }>();
 	for (const [i, img] of findImages(lines)) {
 		if (tables.has(i)) continue;
-		const last = img.sizeLine ?? i;
-		const raw =
-			editable && selTo >= starts[i] && selFrom <= starts[last] + state.doc.child(last).nodeSize;
-		imageRows.set(i, { raw, size: false });
-		if (img.sizeLine !== null) imageRows.set(img.sizeLine, { raw, size: true });
-		const url = opts.imageUrl(img.src);
-		const view = { url, src: img.src, alt: img.alt, size: img.size };
-		decorations.push(
-			Decoration.widget(starts[i], (v, getPos) => imageWidget(v, getPos, view), {
+		images.set(i, img);
+		const block: [number, number] = [i, img.sizeLine ?? i];
+		imageRows.set(i, { size: false });
+		blocks.set(i, block);
+		if (img.sizeLine !== null && !tables.has(img.sizeLine)) {
+			imageRows.set(img.sizeLine, { size: true });
+			blocks.set(img.sizeLine, block);
+		}
+	}
+	// Highlights: stretches per marked line; their comment lines are hidden.
+	const code = opts.highlights ? codeLines(lines) : null;
+	const marks = new Map<number, Ranges[]>();
+	const comments = new Set<number>();
+	if (code) {
+		for (const h of findHighlights(lines))
+			marks.set(h.target, [...(marks.get(h.target) ?? []), h.ranges]);
+		lines.forEach((text, i) => {
+			if (!code[i] && !tables.has(i) && !imageRows.has(i) && isHighlightComment(text))
+				comments.add(i);
+		});
+	}
+	const sig = lines.map((_, i) => {
+		const row = tables.get(i);
+		if (row) return `t${row.role}${row.last ? 1 : 0}`;
+		const img = imageRows.get(i);
+		if (img) return img.size ? 's' : `i${images.get(i)?.sizeLine === null ? 0 : 1}`;
+		if (comments.has(i)) return 'h';
+		const m = marks.get(i);
+		return m ? `m${JSON.stringify(m)}` : '';
+	});
+	return { lines, starts, tables, images, imageRows, blocks, comments, marks, sig };
+}
+
+/** The line holding `pos` (a position between two lines counts as the later one). */
+function lineAt(s: Scan, pos: number): number {
+	let lo = 0;
+	let hi = s.lines.length - 1;
+	while (lo < hi) {
+		const mid = (lo + hi + 1) >> 1;
+		if (s.starts[mid] <= pos) lo = mid;
+		else hi = mid - 1;
+	}
+	return lo;
+}
+
+/** Line `i`'s decorations, plus the table / picture widget when it starts one. */
+function lineDecorations(
+	i: number,
+	s: Scan,
+	state: EditorState,
+	editable: boolean,
+	opts: MarkdownSyntaxOptions,
+	out: Decoration[]
+): void {
+	const { from: selFrom, to: selTo } = state.selection;
+	const pos = s.starts[i];
+	const end = s.starts[i + 1];
+	const block = s.blocks.get(i);
+	/** Its table / picture shows as source: the caret is inside (and editable). */
+	const raw =
+		!!block && editable && selTo >= s.starts[block[0]] && selFrom <= s.starts[block[1] + 1];
+	const row = s.tables.get(i);
+
+	if (row?.role === 'head' && !raw) {
+		const html = tableHtml(s.lines.slice(i, block![1] + 1));
+		out.push(
+			Decoration.widget(pos, (view, getPos) => tableWidget(view, getPos, html), {
 				side: -1,
-				key: `img:${img.size}:${url}:${img.alt}:${img.src}`,
+				key: `table:${html}`,
+				stopEvent: (e) => e.type.startsWith('mouse') || e.type.startsWith('touch')
+			})
+		);
+	}
+	const image = s.images.get(i);
+	if (image) {
+		const url = opts.imageUrl(image.src);
+		const view = { url, src: image.src, alt: image.alt, size: image.size };
+		out.push(
+			Decoration.widget(pos, (v, getPos) => imageWidget(v, getPos, view), {
+				side: -1,
+				key: `img:${image.size}:${url}:${image.alt}:${image.src}`,
 				stopEvent: widgetEvent
 			})
 		);
 	}
 
-	// Highlights: stretches per marked line; their comment lines are hidden.
-	const code = opts.highlights ? codeLines(lines) : null;
-	const marks = new Map<number, Ranges[]>();
-	if (opts.highlights)
-		for (const h of findHighlights(lines))
-			marks.set(h.target, [...(marks.get(h.target) ?? []), h.ranges]);
+	if (!state.doc.child(i).isTextblock) return;
+	const text = s.lines[i];
+	const contentStart = pos + 1;
 
-	let line = -1;
+	const img = row ? undefined : s.imageRows.get(i);
+	if (img) {
+		const cls = raw ? `md-img-src${img.size ? ' md-img-size' : ''}` : 'md-img-hidden';
+		out.push(Decoration.node(pos, end, { class: cls }));
+		return;
+	}
+	if (s.comments.has(i)) {
+		// Shown (as source) only with the caret on it — or with Ghost Syntax off (CSS).
+		const open = editable && selTo > pos && selFrom < end;
+		out.push(
+			Decoration.node(pos, end, { class: open ? 'md-hl-comment md-hl-open' : 'md-hl-comment' })
+		);
+		return;
+	}
 
-	state.doc.forEach((node: PMNode, pos: number) => {
-		line++;
-		if (!node.isTextblock) return;
-		const text = node.textContent;
-		const contentStart = pos + 1;
-		const row = tables.get(line);
-		const end = pos + node.nodeSize;
+	let tokens: Token[];
+	if (row && !raw) {
+		out.push(Decoration.node(pos, end, { class: 'md-trow-hidden' }));
+		return;
+	} else if (row) {
+		const cls = `md-trow md-trow-${row.role}${row.role === 'head' ? ' md-trow-first' : ''}${row.last ? ' md-trow-last' : ''}`;
+		out.push(Decoration.node(pos, end, { class: cls }));
+		tokens = tokenizeTableSource(text, contentStart, row.role === 'sep');
+	} else {
+		const t = tokenizeLine(text, contentStart);
+		tokens = t.tokens;
+		if (t.nodeClass) out.push(Decoration.node(pos, end, { class: t.nodeClass }));
+	}
 
-		const img = row ? undefined : imageRows.get(line);
-		if (img) {
-			const cls = img.raw ? `md-img-src${img.size ? ' md-img-size' : ''}` : 'md-img-hidden';
-			decorations.push(Decoration.node(pos, end, { class: cls }));
-			return;
+	// Symbols Ghost Syntax collapses (no caret in their token), as line offsets.
+	const ghosted: [number, number][] = [];
+	for (const token of tokens) {
+		// A token is active when the selection overlaps its outer span.
+		const active = selTo >= token.outerFrom && selFrom <= token.outerTo;
+		for (const d of token.decos) {
+			const cls = d.syntax && active ? `${d.class} md-active` : d.class;
+			out.push(Decoration.inline(d.from, d.to, { class: cls }));
+			if (d.syntax && !active) ghosted.push([d.from - contentStart, d.to - contentStart]);
 		}
-		if (code && !code[line] && !row && isHighlightComment(text)) {
-			// Shown (as source) only with the caret on it — or with Ghost Syntax off (CSS).
-			const open = editable && selTo > pos && selFrom < end;
-			const cls = open ? 'md-hl-comment md-hl-open' : 'md-hl-comment';
-			decorations.push(Decoration.node(pos, end, { class: cls }));
-			return;
+	}
+
+	const hl = row ? undefined : s.marks.get(i);
+	if (hl)
+		for (const stretch of coveredRanges(text, hl))
+			out.push(...markDecos(contentStart, stretch, ghosted));
+}
+
+/** Every line's decorations. */
+function buildAll(
+	state: EditorState,
+	s: Scan,
+	editable: boolean,
+	opts: MarkdownSyntaxOptions
+): SyntaxState {
+	const out: Decoration[] = [];
+	for (let i = 0; i < s.lines.length; i++) lineDecorations(i, s, state, editable, opts, out);
+	return { set: DecorationSet.create(state.doc, out), editable, scan: s };
+}
+
+/** Lines `from`..`to` (positions) touch, into `dirty`. */
+function addLines(dirty: Set<number>, s: Scan, from: number, to: number): void {
+	const last = lineAt(s, to);
+	for (let i = lineAt(s, Math.max(0, from - 1)); i <= last; i++) dirty.add(i);
+}
+
+/**
+ * The decorations after `tr`, rebuilding only the lines that may differ: the
+ * lines the edit touched, those whose context changed (signature), the old
+ * and the new selection's, and the whole table / picture of any of them.
+ * Every other line keeps its decorations, mapped. Typing in a long note then
+ * costs about one line, not the whole document.
+ */
+function updateDecorations(
+	tr: Transaction,
+	old: SyntaxState,
+	oldState: EditorState,
+	state: EditorState,
+	opts: MarkdownSyntaxOptions
+): SyntaxState {
+	const s = tr.docChanged ? scan(state, opts) : old.scan;
+	const n = s.lines.length;
+	const dirty = new Set<number>();
+	let set = old.set;
+	if (tr.docChanged) {
+		set = set.map(tr.mapping, tr.doc);
+		// What the steps replaced, in the new document.
+		let from = Infinity;
+		let to = -Infinity;
+		tr.mapping.maps.forEach((map, m) => {
+			const rest = tr.mapping.slice(m + 1);
+			map.forEach((_a, _b, start, stop) => {
+				from = Math.min(from, rest.map(start, -1));
+				to = Math.max(to, rest.map(stop, 1));
+			});
+		});
+		let first = n;
+		let last = -1;
+		if (from <= to) {
+			first = lineAt(s, Math.max(0, from - 1));
+			last = lineAt(s, to);
+			for (let i = first; i <= last; i++) dirty.add(i);
 		}
+		// Untouched lines whose context changed: before the edit they line up
+		// with the old ones by index, after it from the end.
+		const prev = old.scan.sig;
+		for (let i = 0; i < Math.min(first, prev.length); i++) if (prev[i] !== s.sig[i]) dirty.add(i);
+		for (let j = n - 1, k = prev.length - 1; j > last && k >= 0; j--, k--)
+			if (prev[k] !== s.sig[j]) dirty.add(j);
+		const sel = oldState.selection;
+		addLines(dirty, s, tr.mapping.map(sel.from, -1), tr.mapping.map(sel.to, 1));
+	} else addLines(dirty, s, oldState.selection.from, oldState.selection.to);
+	addLines(dirty, s, state.selection.from, state.selection.to);
+	// A table / picture is drawn from all its lines.
+	for (const i of [...dirty]) {
+		const block = s.blocks.get(i);
+		if (block) for (let k = block[0]; k <= block[1]; k++) dirty.add(k);
+	}
+	if (dirty.size * 4 > n) return buildAll(state, s, old.editable, opts);
 
-		let tokens: Token[];
-		if (row && !source.get(line)) {
-			decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: 'md-trow-hidden' }));
-			return;
-		} else if (row) {
-			const cls = `md-trow md-trow-${row.role}${row.role === 'head' ? ' md-trow-first' : ''}${row.last ? ' md-trow-last' : ''}`;
-			decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: cls }));
-			tokens = tokenizeTableSource(text, contentStart, row.role === 'sep');
-		} else {
-			const t = tokenizeLine(text, contentStart);
-			tokens = t.tokens;
-			if (t.nodeClass)
-				decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: t.nodeClass }));
-		}
-
-		// Symbols Ghost Syntax collapses (no caret in their token), as line offsets.
-		const ghosted: [number, number][] = [];
-		for (const token of tokens) {
-			// A token is active when the selection overlaps its outer span.
-			const active = selTo >= token.outerFrom && selFrom <= token.outerTo;
-			for (const d of token.decos) {
-				const cls = d.syntax && active ? `${d.class} md-active` : d.class;
-				decorations.push(Decoration.inline(d.from, d.to, { class: cls }));
-				if (d.syntax && !active) ghosted.push([d.from - contentStart, d.to - contentStart]);
-			}
-		}
-
-		const hl = row ? undefined : marks.get(line);
-		if (hl)
-			for (const stretch of coveredRanges(text, hl))
-				decorations.push(...markDecos(contentStart, stretch, ghosted));
-	});
-
-	return DecorationSet.create(state.doc, decorations);
+	const lines = [...dirty].sort((a, b) => a - b);
+	const gone: Decoration[] = [];
+	const fresh: Decoration[] = [];
+	for (let r = 0; r < lines.length;) {
+		let e = r;
+		while (e + 1 < lines.length && lines[e + 1] === lines[e] + 1) e++;
+		const a = s.starts[lines[r]];
+		const b = s.starts[lines[e] + 1];
+		// What lies on these lines; a widget at `b` belongs to the next line.
+		for (const d of set.find(a, b))
+			if (d.from === d.to ? d.from >= a && d.from < b : d.from < b && d.to > a) gone.push(d);
+		r = e + 1;
+	}
+	for (const i of lines) lineDecorations(i, s, state, old.editable, opts, fresh);
+	return { set: set.remove(gone).add(state.doc, fresh), editable: old.editable, scan: s };
 }
 
 /**
@@ -495,6 +646,7 @@ interface SyntaxState {
 	set: DecorationSet;
 	/** The view is editable: tables holding the caret show their source. */
 	editable: boolean;
+	scan: Scan;
 }
 
 export const MarkdownSyntax = Extension.create<MarkdownSyntaxOptions>({
@@ -510,16 +662,21 @@ export const MarkdownSyntax = Extension.create<MarkdownSyntaxOptions>({
 			new Plugin<SyntaxState>({
 				key,
 				state: {
-					init: (_config, state) => ({
-						set: buildDecorations(state, true, opts),
-						editable: true
-					}),
-					// Recompute on any doc or selection change so hover/active track live,
-					// and when the view flips between view and edit mode.
-					apply: (tr, old, _oldState, newState) => {
+					init: (_config, state) => buildAll(state, scan(state, opts), true, opts),
+					// Update on any doc or selection change so hover/active track live
+					// (the lines that changed); all of it when the view flips between
+					// view and edit mode.
+					apply: (tr, old, oldState, newState) => {
 						const editable = (tr.getMeta(key) as boolean | undefined) ?? old.editable;
-						return tr.docChanged || tr.selectionSet || editable !== old.editable
-							? { set: buildDecorations(newState, editable, opts), editable }
+						if (editable !== old.editable)
+							return buildAll(
+								newState,
+								tr.docChanged ? scan(newState, opts) : old.scan,
+								editable,
+								opts
+							);
+						return tr.docChanged || tr.selectionSet
+							? updateDecorations(tr, old, oldState, newState, opts)
 							: old;
 					}
 				},

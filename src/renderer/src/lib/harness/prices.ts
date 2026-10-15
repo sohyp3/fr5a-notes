@@ -11,8 +11,6 @@ import type { ModelInfo, OtherApi } from './types';
  */
 
 export const CATALOG_URL = 'https://models.dev/api.json';
-/** A cached catalog is fetched again after this long. */
-export const CATALOG_MAX_AGE = 3 * 24 * 3600 * 1000;
 
 export interface PriceCache {
 	/** When the catalog was fetched (ms). */
@@ -132,11 +130,12 @@ export function catalogModel(
 	baseUrl: string,
 	model: string
 ): Omit<ModelInfo, 'id'> | null {
+	if (!cache) return null;
 	const key = endpointKey(baseUrl);
-	const about = cache?.models?.[key]?.[model];
-	const price = catalogPrice(cache, baseUrl, model);
-	if (!about && !price) return null;
-	return { ...about, ...(price ? { price } : {}) };
+	const about = cache.models?.[key]?.[model];
+	const p = cache.prices[key]?.[model];
+	if (!about && !p) return null;
+	return { ...about, ...(p ? { price: { input: p[0], output: p[1] } } : {}) };
 }
 
 /** The catalog's price for `model` at `baseUrl`, or null when it doesn't list one. */
@@ -150,11 +149,12 @@ export function catalogPrice(
 }
 
 /**
- * Fetch again: nothing cached, too old, from before model details were kept,
- * or an endpoint the last fetch didn't look up.
+ * Fetch (again): nothing cached, cached before model details were kept, or an
+ * endpoint the last fetch didn't look up. Never for age alone: the catalog is
+ * 5.6 MB, too much to parse on a tablet's UI thread on a schedule.
  */
-export function pricesStale(cache: PriceCache | null, keys: string[], now = Date.now()): boolean {
+export function pricesStale(cache: PriceCache | null, keys: string[]): boolean {
 	if (!keys.length) return false;
-	if (!cache?.models || now - cache.fetched > CATALOG_MAX_AGE) return true;
+	if (!cache?.models) return true;
 	return keys.some((k) => !cache.checked.includes(k));
 }

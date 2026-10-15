@@ -213,8 +213,7 @@
 	let modelQuery = $state<Record<string, string>>({});
 
 	/** Starred first, then the provider's own model, then by id; filtered by name or id. */
-	function modelRows(p: ProviderProfile, query: string): ModelInfo[] {
-		const listed = ai.modelList(p.id);
+	function modelRows(p: ProviderProfile, listed: ModelInfo[], query: string): ModelInfo[] {
 		// Starred models the list no longer has stay, so they can be unstarred.
 		const gone = cfg.favorites
 			.filter((f) => f.provider === p.id && !listed.some((m) => m.id === f.model))
@@ -417,7 +416,6 @@
 	<p class="lead">The selected provider is the default; each AI tab can switch.</p>
 	<div class="providers" role="radiogroup" aria-label="Default provider">
 		{#each cfg.providers as p (p.id)}
-			{@const models = ai.modelList(p.id)}
 			{@const open = expanded === p.id}
 			{@const starred = cfg.favorites.filter((f) => f.provider === p.id).length}
 			<div class={['provider', { open, 'is-default': cfg.defaultProvider === p.id }]}>
@@ -449,6 +447,7 @@
 					</button>
 				</div>
 				{#if open}
+					{@const models = ai.modelList(p.id)}
 					<div class="pbody">
 						<label class="field" for="key-{p.id}">
 							<span class="small">API key</span>
@@ -510,7 +509,7 @@
 							>
 						</label>
 						{#if models.length || starred}
-							{@const rows = modelRows(p, modelQuery[p.id] ?? '')}
+							{@const rows = modelRows(p, models, modelQuery[p.id] ?? '')}
 							<div class="field all-models">
 								<div class="mhead">
 									<span class="small">All models</span>

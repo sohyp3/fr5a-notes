@@ -37,7 +37,11 @@ class AiSettings {
 
 	load(): Promise<void> {
 		return (this.loading ??= (async () => {
-			const stored = await platform.getState<Partial<AiConfig>>('ai');
+			const [stored, models] = await Promise.all([
+				platform.getState<Partial<AiConfig>>('ai'),
+				platform.getState<Record<string, ModelInfo[]>>('aiModels')
+			]);
+			if (models) this.models = models;
 			if (stored) {
 				// OpenCode's endpoints moved with its v2 console (`/zen/…` → `/inference/…`).
 				let moved = false;
@@ -88,15 +92,14 @@ class AiSettings {
 	private pricesTried = 0;
 
 	/**
-	 * Fill the price cache (and model details) for the cloud providers in use.
-	 * Fetches models.dev at most every few minutes, and only when the cache is
-	 * old or misses an endpoint.
+	 * Fill the price cache (and model details) for the cloud providers. Fetches
+	 * models.dev once, for every cloud provider set up (key or not, so adding a
+	 * key later fetches nothing), and again only for a provider added since; a
+	 * failed fetch is retried after a few minutes.
 	 */
 	async loadPrices(): Promise<void> {
 		this.prices ??= await platform.getState<PriceCache>('aiPrices');
-		const wanted = this.config.providers
-			.filter((p) => !p.local && this.keys[p.id])
-			.map((p) => endpointKey(p.baseUrl));
+		const wanted = this.config.providers.filter((p) => !p.local).map((p) => endpointKey(p.baseUrl));
 		if (!pricesStale(this.prices, wanted) || Date.now() - this.pricesTried < 10 * 60_000) return;
 		this.pricesTried = Date.now();
 		try {
@@ -121,13 +124,36 @@ class AiSettings {
 	priceSource(p: ProviderProfile): 'local' | 'own' | 'listed' | 'catalog' | null {
 		if (p.local) return 'local';
 		if (p.price) return 'own';
-		if (this.models[p.id]?.find((m) => m.id === p.model)?.price) return 'listed';
+		if (this.listed(p.id, p.model)?.price) return 'listed';
 		return catalogPrice(this.prices, p.baseUrl, p.model) ? 'catalog' : null;
 	}
 
-	/** Models per provider, fetched from its `/models` endpoint (not persisted). */
+	/**
+	 * Models per provider, from its `/models` endpoint: fetched once and kept in
+	 * the `aiModels` state key (OpenRouter's list is 770 KB); Reload in
+	 * Settings → AI, a new key or an edited provider fetch it again.
+	 */
 	models = $state.raw<Record<string, ModelInfo[]>>({});
 	modelErrors = $state<Record<string, string>>({});
+	/** `models` by id, per provider. */
+	private modelIndex = $derived(
+		Object.fromEntries(
+			Object.entries(this.models).map(([id, list]) => [
+				id,
+				Object.fromEntries(list.map((m) => [m.id, m]))
+			])
+		)
+	);
+
+	private listed(providerId: string, model: string): ModelInfo | undefined {
+		const byId = this.modelIndex[providerId];
+		return byId && Object.prototype.hasOwnProperty.call(byId, model) ? byId[model] : undefined;
+	}
+
+	private saveModels(models: Record<string, ModelInfo[]>): void {
+		this.models = models;
+		void platform.setState('aiModels', models);
+	}
 
 	async fetchModels(id: string): Promise<void> {
 		const p = this.config.providers.find((x) => x.id === id);
@@ -136,7 +162,7 @@ class AiSettings {
 			// Loaded on demand: the rest of the app reads this config without the client.
 			const { listModels } = await import('./openai');
 			const list = await listModels(platform, p, await this.apiKey(id));
-			this.models = { ...this.models, [id]: list };
+			this.saveModels({ ...this.models, [id]: list });
 			const { [id]: _drop, ...rest } = this.modelErrors;
 			void _drop;
 			this.modelErrors = rest;
@@ -156,9 +182,8 @@ class AiSettings {
 	/** What the provider's list and models.dev say about one model (the list wins). */
 	modelInfo(providerId: string, model: string): ModelInfo {
 		const p = this.config.providers.find((x) => x.id === providerId);
-		const listed = this.models[providerId]?.find((m) => m.id === model);
 		const known = p ? catalogModel(this.prices, p.baseUrl, model) : null;
-		return { ...known, ...listed, id: model };
+		return { ...known, ...this.listed(providerId, model), id: model };
 	}
 
 	/** Every model the provider lists, with what's known about each. */
@@ -191,8 +216,11 @@ class AiSettings {
 
 	// --- favorites: models starred in Settings, offered in the AI pane ----------
 
+	/** Plain strings: read per model row, without walking the config's proxy. */
+	private favoriteKeys = $derived(this.config.favorites.map((f) => `${f.provider}|${f.model}`));
+
 	isFavorite(providerId: string, model: string): boolean {
-		return this.config.favorites.some((f) => f.provider === providerId && f.model === model);
+		return this.favoriteKeys.includes(`${providerId}|${model}`);
 	}
 
 	toggleFavorite(providerId: string, model: string): void {
@@ -256,6 +284,11 @@ class AiSettings {
 		const { [id]: _gone, ...keys } = this.keys;
 		void _gone;
 		this.keys = keys;
+		if (this.models[id]) {
+			const { [id]: _list, ...models } = this.models;
+			void _list;
+			this.saveModels(models);
+		}
 	}
 
 	apiKey(providerId: string): Promise<string | null> {

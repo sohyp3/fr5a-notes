@@ -76,8 +76,8 @@
 	type Choice = { key: string; provider: ProviderProfile; model: string };
 	const choiceKey = (providerId: string, model: string) => `${providerId}|${model}`;
 	/**
-	 * The model picker: each provider that's set up with its own model, then
-	 * the models starred for it in Settings → AI (plus the tab's pick, to show it).
+	 * The model picker: the models starred in Settings → AI of providers that
+	 * are set up, plus the one this chat uses (to show it).
 	 */
 	const choices = $derived.by((): Choice[] => {
 		const out: Choice[] = [];
@@ -86,11 +86,9 @@
 			if (model && !out.some((c) => c.key === key)) out.push({ key, provider: p, model });
 		};
 		for (const p of ai.config.providers) {
-			const current = p.id === provider?.id;
-			if (!ai.usable(p) && !current) continue;
-			add(p, p.model);
-			if (current && provider) add(p, provider.model);
-			for (const f of ai.config.favorites) if (f.provider === p.id) add(p, f.model);
+			if (ai.usable(p))
+				for (const f of ai.config.favorites) if (f.provider === p.id) add(p, f.model);
+			if (provider && p.id === provider.id) add(p, provider.model);
 		}
 		return out;
 	});

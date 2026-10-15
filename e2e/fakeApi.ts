@@ -65,6 +65,9 @@ export function installFakeApi(): void {
 	(window as unknown as { __meta: typeof metaFiles }).__meta = metaFiles;
 	// Every model request (url, headers, body), oldest first.
 	(window as unknown as { __llm: unknown[] }).__llm = [];
+	// Every httpFetch URL (model lists, models.dev, web tools), oldest first.
+	const http: string[] = [];
+	(window as unknown as { __http: string[] }).__http = http;
 	(window as unknown as { __metaWrites: typeof metaWrites }).__metaWrites = metaWrites;
 	// Every reply reports its tokens in a last chunk, like `stream_options.include_usage`.
 	const sse = (obj: unknown, usage: object = { prompt_tokens: 1200, completion_tokens: 34 }) =>
@@ -304,26 +307,32 @@ export function installFakeApi(): void {
 		setState: async (key: string, value: unknown) => {
 			state[key] = value;
 		},
-		httpFetch: async (req: { url: string; body?: string }) => ({
-			status: 200,
-			headers: {},
-			body: req.url.endsWith('/models')
-				? JSON.stringify({ data: [{ id: 'big-pickle' }, { id: 'gpt-5-nano' }, { id: 'm' }] })
-				: req.url === 'https://models.dev/api.json'
-					? JSON.stringify({
-							deepseek: {
-								api: 'https://api.deepseek.com',
-								models: { 'deepseek-chat': { cost: { input: 0.28, output: 0.42 } } }
-							},
-							// OpenCode serves this one over the Responses API only.
-							opencode: {
-								api: 'https://opencode.ai/inference/v1',
-								npm: '@ai-sdk/openai-compatible',
-								models: { 'gpt-5-nano': { provider: { npm: '@ai-sdk/openai' } } }
-							}
-						})
-					: fakeModel(req.body ?? '{}')
-		}),
+		httpFetch: async (req: { url: string; body?: string }) => {
+			http.push(req.url);
+			return {
+				status: 200,
+				headers: {},
+				body: req.url.endsWith('/models')
+					? JSON.stringify({ data: [{ id: 'big-pickle' }, { id: 'gpt-5-nano' }, { id: 'm' }] })
+					: req.url === 'https://models.dev/api.json'
+						? JSON.stringify({
+								deepseek: {
+									api: 'https://api.deepseek.com',
+									models: {
+										'deepseek-chat': { cost: { input: 0.28, output: 0.42 } },
+										m: { cost: { input: 0.28, output: 0.42 } }
+									}
+								},
+								// OpenCode serves this one over the Responses API only.
+								opencode: {
+									api: 'https://opencode.ai/inference/v1',
+									npm: '@ai-sdk/openai-compatible',
+									models: { 'gpt-5-nano': { provider: { npm: '@ai-sdk/openai' } } }
+								}
+							})
+						: fakeModel(req.body ?? '{}')
+			};
+		},
 		httpStream: async (
 			_id: string,
 			req: { url: string; headers?: Record<string, string>; body?: string },

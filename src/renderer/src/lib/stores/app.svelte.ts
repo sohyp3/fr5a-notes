@@ -29,7 +29,12 @@ import { spotOf, type BarItem, type BarPlacement, type BarSpot } from '../noteBa
 import type { Editor } from '@tiptap/core';
 import type { Vault } from '../vault/vault.svelte';
 
-const SAVE_DEBOUNCE = 500;
+/**
+ * Auto-save after this long without typing. Android: 5 s, since each save
+ * re-indexes and refreshes over the Capacitor bridge, which a tablet feels
+ * mid-typing; leaving the app, switching notes or syncing still save at once.
+ */
+const saveDebounce = () => (platform.platform === 'android' ? 5000 : 500);
 const THEME_KEY = 'fr5a-theme';
 const SETTINGS_KEY = 'fr5a-settings';
 /** Pending-save id for a draft note that has no file yet. */
@@ -1830,7 +1835,7 @@ class AppState {
 		this.pending = { id: this.activeId ?? DRAFT_ID, content };
 		this.saving = true;
 		if (this.saveTimer) clearTimeout(this.saveTimer);
-		this.saveTimer = setTimeout(() => this.flush(), SAVE_DEBOUNCE);
+		this.saveTimer = setTimeout(() => this.flush(), saveDebounce());
 	}
 
 	/** Write any pending edit to disk immediately. */
