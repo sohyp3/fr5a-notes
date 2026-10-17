@@ -1004,7 +1004,9 @@ test('desktop: search clears with its X or Esc; New note stays visible in a narr
 	const search = page.getByRole('textbox', { name: 'Search notes' });
 	const clear = page.getByRole('button', { name: 'Clear search' });
 	await expect(clear).toHaveCount(0);
-	await search.fill('hello');
+	await search.pressSequentially('hello', { delay: 20 });
+	await expect(search).toBeFocused();
+	await expect(search).toHaveValue('hello');
 	await clear.click();
 	await expect(search).toHaveValue('');
 	await expect(clear).toHaveCount(0);
@@ -1035,6 +1037,9 @@ test('desktop: find in note highlights matches and steps through them', async ({
 	await openHello(page);
 	await page.keyboard.press('Control+f');
 	const find = page.getByRole('textbox', { name: 'Find text' });
+	await find.pressSequentially('ll', { delay: 30 });
+	await expect(find).toBeFocused();
+	await expect(find).toHaveValue('ll');
 	await find.fill('l');
 	await expect(page.locator('.note-search-hit')).toHaveCount(3);
 	await expect(page.getByText('1 / 3', { exact: true })).toBeVisible();
@@ -1044,6 +1049,23 @@ test('desktop: find in note highlights matches and steps through them', async ({
 	await expect(page.getByText('1 / 3', { exact: true })).toBeVisible();
 	await page.getByRole('button', { name: 'Close find' }).click();
 	await expect(page.locator('.note-search-hit')).toHaveCount(0);
+	await expect(page.locator('.ProseMirror')).toHaveAttribute('contenteditable', 'true');
+	await ctx.close();
+});
+
+test('desktop: exports the open note as PDF from its file menu', async ({ browser }) => {
+	const { ctx, page } = await desktopPage(browser);
+	await openHello(page);
+	await page.getByRole('button', { name: /^File: hello\.md/ }).click();
+	await page.getByRole('menuitem', { name: 'Export as PDF…' }).click();
+	await expect(page.getByRole('status')).toHaveText('PDF exported');
+	await expect
+		.poll(() => page.evaluate(() => (window as unknown as { __pdfExports: string[] }).__pdfExports))
+		.toEqual(['hello.md']);
+	await page.emulateMedia({ media: 'print' });
+	await expect(page.locator('.titlebar')).toBeHidden();
+	await expect(page.locator('.notelist')).toBeHidden();
+	await expect(page.locator('.ProseMirror')).toBeVisible();
 	await ctx.close();
 });
 

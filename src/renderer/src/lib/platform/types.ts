@@ -34,6 +34,8 @@ export interface PlatformApi {
 	writeNote(id: string, content: string): Promise<void>;
 	createNote(title?: string, folder?: string, content?: string): Promise<NoteMeta>;
 	deleteNote(id: string): Promise<void>;
+	/** Export the currently rendered note through the host's native PDF/print dialog. */
+	exportPdf?(id: string): Promise<'saved' | 'opened' | null>;
 	/**
 	 * Move / rename a note to workspace path `to` (its folder is created; the
 	 * extension is kept when `to` has none). A taken name gets a numeric

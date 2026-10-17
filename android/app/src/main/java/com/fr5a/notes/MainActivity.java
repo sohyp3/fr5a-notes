@@ -9,6 +9,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         // App-local plugins register before the bridge starts.
         registerPlugin(FileTimesPlugin.class);
+        registerPlugin(PdfExportPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

@@ -833,6 +833,88 @@ html.md-image-dragging * {
 	vertical-align: text-bottom;
 }
 
+/* PDF export prints only the rendered note, across as many A4 pages
+   as it needs. The editor remains the source of truth for typography, tables,
+   highlights and images; app chrome and search decorations stay out. */
+@media print {
+	@page {
+		size: A4;
+		margin: 18mm 17mm;
+	}
+	html {
+		--bg-editor: #fff;
+		--text-strong: #111;
+		--text: #222;
+		--text-muted: #666;
+		--text-faint: #aaa;
+		--accent: #8a6800;
+		--accent-soft: rgba(138, 104, 0, 0.11);
+		--code-bg: #f3f3f3;
+		--table-line: #ccc;
+		--table-head: #f5f5f5;
+		color-scheme: light;
+	}
+
+	html,
+	body,
+	#app,
+	.app,
+	.body,
+	.content,
+	.editor-wrap,
+	.editor-pane,
+	.editor-body,
+	.scroll {
+		display: block !important;
+		position: static !important;
+		width: auto !important;
+		height: auto !important;
+		min-height: 0 !important;
+		margin: 0 !important;
+		padding: 0 !important;
+		overflow: visible !important;
+		background: #fff !important;
+		box-shadow: none !important;
+	}
+
+	.titlebar,
+	.sidebar-wrap,
+	.list-wrap,
+	.harness-wrap,
+	.resizer,
+	.editor-head,
+	.note-tabs,
+	.findbar,
+	.format-toolbar,
+	.vim-badge,
+	.notice,
+	.tag-suggest,
+	.md-image-handle,
+	.md-image-pct {
+		display: none !important;
+	}
+
+	.ProseMirror {
+		max-width: none !important;
+		padding: 0 !important;
+		color: #222 !important;
+		caret-color: transparent !important;
+	}
+
+	.note-search-hit,
+	.note-search-hit.active {
+		color: inherit !important;
+		background: transparent !important;
+		box-shadow: none !important;
+	}
+
+	.ProseMirror p,
+	.md-table,
+	.md-image {
+		break-inside: avoid;
+	}
+}
+
 /* Touch devices (html[data-touch], set from the store's layout): finger-sized
    targets across the sidebar, note list and editor actions. Desktop mouse
    windows never get this attribute. */

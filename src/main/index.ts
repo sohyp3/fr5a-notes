@@ -266,6 +266,26 @@ function registerIpc(): void {
 	);
 
 	ipcMain.handle(Channels.noteDelete, (_e, id: string) => fileService?.delete(id));
+	ipcMain.handle(Channels.noteExportPdf, async (_e, id: string): Promise<'saved' | null> => {
+		if (!mainWindow || !fileService) throw new Error('No workspace open');
+		const filename = `${path.basename(id, path.extname(id)) || 'note'}.pdf`;
+		const picked = await dialog.showSaveDialog(mainWindow, {
+			title: 'Export note as PDF',
+			defaultPath: path.join(fileService.root, filename),
+			filters: [{ name: 'PDF document', extensions: ['pdf'] }]
+		});
+		if (picked.canceled || !picked.filePath) return null;
+		const output = picked.filePath.toLowerCase().endsWith('.pdf')
+			? picked.filePath
+			: `${picked.filePath}.pdf`;
+		const pdf = await mainWindow.webContents.printToPDF({
+			printBackground: true,
+			preferCSSPageSize: true,
+			pageSize: 'A4'
+		});
+		await fs.writeFile(output, pdf);
+		return 'saved';
+	});
 	ipcMain.handle(Channels.noteMove, (_e, id: string, to: string) => {
 		if (!fileService) throw new Error('No workspace open');
 		return fileService.move(id, to);

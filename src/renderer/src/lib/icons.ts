@@ -21,6 +21,7 @@ import Ellipsis from '@lucide/svelte/icons/ellipsis';
 import Eraser from '@lucide/svelte/icons/eraser';
 import Eye from '@lucide/svelte/icons/eye';
 import FileText from '@lucide/svelte/icons/file-text';
+import FileDown from '@lucide/svelte/icons/file-down';
 import Folder from '@lucide/svelte/icons/folder';
 import FolderInput from '@lucide/svelte/icons/folder-input';
 import FolderPlus from '@lucide/svelte/icons/folder-plus';
@@ -85,6 +86,7 @@ export const ICONS = {
 	rename: TextCursorInput,
 	move: FolderInput,
 	note: FileText,
+	exportPdf: FileDown,
 	notes: NotebookText,
 	newNote: SquarePen,
 	folder: Folder,

@@ -1,11 +1,5 @@
 import { Extension } from '@tiptap/core';
-import {
-	Plugin,
-	PluginKey,
-	TextSelection,
-	type EditorState,
-	type Transaction
-} from '@tiptap/pm/state';
+import { Plugin, PluginKey, type EditorState, type Transaction } from '@tiptap/pm/state';
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import type { Node as PMNode } from '@tiptap/pm/model';
 
@@ -85,11 +79,15 @@ function dispatch(view: EditorView, meta: SearchMeta): SearchStatus {
 		tr,
 		searchKey.getState(view.state) ?? { query: '', matches: [], index: -1 }
 	);
-	if (next.index >= 0) {
-		const hit = next.matches[next.index];
-		tr.setSelection(TextSelection.create(tr.doc, hit.from)).scrollIntoView();
-	}
 	view.dispatch(tr);
+	// Keep focus in the find field. Moving ProseMirror's TextSelection here made
+	// the editor reclaim DOM focus after every character typed. The active
+	// decoration is enough for navigation; scroll it without moving the caret.
+	if (next.index >= 0) {
+		view.dom
+			.querySelector<HTMLElement>('.note-search-hit.active')
+			?.scrollIntoView({ block: 'center', inline: 'nearest' });
+	}
 	return { index: next.index, total: next.matches.length };
 }
 

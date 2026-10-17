@@ -8,9 +8,11 @@ export function installFakeApi(): void {
 		'hello.md': '# Hello\n\nworld'
 	};
 	const writes: { id: string; content: string }[] = [];
+	const pdfExports: string[] = [];
 	// "Last commit": git status compares the files against this snapshot.
 	const committed: Record<string, string> = { ...files };
 	(window as unknown as { __writes: typeof writes }).__writes = writes;
+	(window as unknown as { __pdfExports: typeof pdfExports }).__pdfExports = pdfExports;
 	const meta = (id: string) => {
 		const raw = files[id] ?? trash[id];
 		const encrypted = raw.includes('-----BEGIN PGP MESSAGE-----');
@@ -253,6 +255,10 @@ export function installFakeApi(): void {
 		},
 		deleteNote: async (id: string) => {
 			trashed.push(id);
+		},
+		exportPdf: async (id: string) => {
+			pdfExports.push(id);
+			return 'saved';
 		},
 		createFolder: async (name: string, parent = '') => {
 			const rel = parent ? `${parent}/${name}` : name;

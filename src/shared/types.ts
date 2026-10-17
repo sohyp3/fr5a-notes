@@ -152,6 +152,7 @@ export const Channels = {
 	noteWrite: 'note:write',
 	noteCreate: 'note:create',
 	noteDelete: 'note:delete',
+	noteExportPdf: 'note:exportPdf',
 	/** Move / rename a note or a folder inside the workspace. */
 	noteMove: 'note:move',
 	folderMove: 'folder:move',

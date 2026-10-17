@@ -1,5 +1,5 @@
 import { App } from '@capacitor/app';
-import { Capacitor, CapacitorHttp } from '@capacitor/core';
+import { Capacitor, CapacitorHttp, registerPlugin } from '@capacitor/core';
 import { Directory, Encoding, Filesystem, type FileInfo } from '@capacitor/filesystem';
 import { Preferences } from '@capacitor/preferences';
 import { SecureStorage } from '@aparajita/capacitor-secure-storage';
@@ -61,6 +61,11 @@ const META_DIR = '.fr5a';
 const MD_EXT = new Set(['.md', '.markdown', '.mdown', '.txt']);
 const STATE_PREFIX = 'fr5a:';
 const CHANGE_DEBOUNCE = 120;
+
+/** App-local native plugin: opens Android's print UI for the rendered WebView. */
+const PdfExport = registerPlugin<{
+	print(options: { jobName: string }): Promise<void>;
+}>('PdfExport');
 
 // --- pure helpers (mirror main/fileService.ts) -------------------------------
 
@@ -495,6 +500,11 @@ export function createAndroidPlatform(): PlatformApi {
 		async deleteNote(id) {
 			await ready;
 			await trash(id);
+		},
+		async exportPdf(id) {
+			const jobName = basename(id, extname(id)) || 'note';
+			await PdfExport.print({ jobName });
+			return 'opened';
 		},
 		async moveNote(id, to) {
 			await ready;

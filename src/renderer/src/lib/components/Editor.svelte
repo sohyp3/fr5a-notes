@@ -169,7 +169,7 @@
 				})
 			);
 		}
-		const canEdit = app.editing && !detectLocked(content);
+		const canEdit = app.editing && !detectLocked(content) && !findOpen;
 		return new Editor({
 			element: node,
 			extensions,
@@ -213,6 +213,10 @@
 		if (!editor) return;
 		findFromVim = fromVim;
 		findOpen = true;
+		// An editable ProseMirror synchronises its DOM selection after decoration
+		// updates, which can focus it again. Pause editing while the find field owns
+		// the keyboard, then restore the note's normal mode when find closes.
+		editor.setEditable(false, false);
 		await tick();
 		findInput?.focus();
 		findInput?.select();
@@ -236,6 +240,7 @@
 			findQuery = '';
 			findStatus = clearNoteSearch(editor.view);
 		}
+		if (editor) editor.setEditable(editable, false);
 		if (vimOn && editor) editor.view.focus();
 	}
 
@@ -314,6 +319,18 @@
 		await app.deleteNote(app.activeId);
 	}
 
+	async function exportPdf(): Promise<void> {
+		if (!app.activeId || !platform.exportPdf) return;
+		try {
+			await app.flush();
+			const result = await platform.exportPdf(app.activeId);
+			if (result === 'saved') app.notify('ok', 'PDF exported');
+			else if (result === 'opened') app.notify('ok', 'Choose “Save as PDF” in the print dialog');
+		} catch (err) {
+			app.notify('error', `Couldn’t export PDF: ${err instanceof Error ? err.message : err}`);
+		}
+	}
+
 	function openMore(): void {
 		if (moreAt) {
 			moreAt = null;
@@ -348,6 +365,13 @@
 			{ label: 'Rename…', icon: 'rename', action: () => void app.renameNote(n.id) },
 			{ label: 'Move to…', icon: 'move', action: () => app.openMove('note', n.id) }
 		];
+		if (platform.exportPdf)
+			items.push({
+				label: 'Export as PDF…',
+				icon: 'exportPdf',
+				divider: true,
+				action: () => void exportPdf()
+			});
 		if (app.settings.ai)
 			items.push({
 				label: hiddenAi ? 'Let cloud AI read' : 'Hide from cloud AI',
@@ -944,6 +968,7 @@
 							if (findFromVim) {
 								findOpen = false;
 								findFromVim = false;
+								editor?.setEditable(editable, false);
 								editor?.view.focus();
 							} else stepFind(e.shiftKey ? -1 : 1);
 						}

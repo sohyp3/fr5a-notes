@@ -35,6 +35,8 @@ const api = {
 	createNote: (title?: string, folder?: string, content?: string): Promise<NoteMeta> =>
 		ipcRenderer.invoke(Channels.noteCreate, title, folder, content),
 	deleteNote: (id: string): Promise<void> => ipcRenderer.invoke(Channels.noteDelete, id),
+	exportPdf: (id: string): Promise<'saved' | null> =>
+		ipcRenderer.invoke(Channels.noteExportPdf, id),
 	moveNote: (id: string, to: string): Promise<string> =>
 		ipcRenderer.invoke(Channels.noteMove, id, to),
 	moveFolder: (path: string, to: string): Promise<string> =>
