@@ -64,10 +64,16 @@ export function buildSystemPrompt(opts: {
 	skillPrompt?: string;
 	notes: AttachedNote[];
 	noteBudget: number;
+	readAll: boolean;
 	today?: string;
 }): string {
 	const parts = [BASE_PROMPT];
 	if (opts.today) parts.push(`Today is ${opts.today}.`);
+	parts.push(
+		opts.readAll
+			? 'The user enabled Read all notes for this chat. You may use the note tools across their workspace.'
+			: 'You may read only notes attached to or mentioned in this chat. If you need another note, ask the user to mention it with @ or enable Read all notes.'
+	);
 	if (opts.skillPrompt) parts.push(`## Task\n${opts.skillPrompt}`);
 	if (opts.notes.length) {
 		const each = Math.max(500, Math.floor(opts.noteBudget / opts.notes.length));

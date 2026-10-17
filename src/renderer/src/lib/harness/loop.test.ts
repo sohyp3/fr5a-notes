@@ -34,6 +34,7 @@ function deps(over: Partial<ToolDeps> = {}): ToolDeps {
 		profile,
 		config: { ...DEFAULT_AI_CONFIG, localOnlyFolders: ['private'] },
 		notes: () => [note('a.md', 'Alpha'), note('private/s.md', 'Secret')],
+		allowedNoteIds: null,
 		readNote: async (id) => files[id],
 		ask: async () => ['B'],
 		proposeWrite: async () => 'Applied',
@@ -145,6 +146,18 @@ describe('runLoop', () => {
 		const search = createTools(deps()).find((t) => t.def.name === 'search_notes')!;
 		expect(await search.run({ query: 'alp' })).toMatch(/^- a\.md — Alpha/);
 		expect(await search.run({ query: 'zzz' })).toBe('No matching notes.');
+	});
+
+	it('limits note tools to notes mentioned in the chat', async () => {
+		const tools = createTools(deps({ allowedNoteIds: new Set(['a.md']) }));
+		const read = tools.find((t) => t.def.name === 'read_note')!;
+		const list = tools.find((t) => t.def.name === 'list_notes')!;
+		const search = tools.find((t) => t.def.name === 'search_notes')!;
+		expect(await read.run({ id: 'a.md' })).toBe('# Alpha\nbody');
+		expect(await read.run({ id: 'private/s.md' })).toMatch(/wasn't mentioned or attached/);
+		expect(await list.run({})).toContain('a.md');
+		expect(await list.run({})).not.toContain('private/s.md');
+		expect(await search.run({ query: 'secret' })).toBe('No matching notes.');
 	});
 
 	it('stops at once, even while a tool or the model never answers', async () => {

@@ -28,3 +28,13 @@ vite.config.ts.timestamp-*
 # Playwright
 /test-results/
 /playwright-report/
+
+
+.agents/
+.claude/
+.github/
+founder/
+skills-lock.json
+
+advice.md
+brag-output/

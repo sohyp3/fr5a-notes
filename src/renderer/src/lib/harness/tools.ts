@@ -30,6 +30,8 @@ export interface ToolDeps {
 	profile: ProviderProfile;
 	config: AiConfig;
 	notes(): NoteMeta[];
+	/** Mentioned/attached note ids, or null when this chat may read every note. */
+	allowedNoteIds: ReadonlySet<string> | null;
 	readNote(id: string): Promise<string>;
 	/** One answer per question (several picks joined with ", "). */
 	ask(questions: QuestionItem[]): Promise<string[]>;
@@ -60,11 +62,16 @@ function scoreNote(n: NoteMeta, terms: string[]): number {
 }
 
 export function createTools(d: ToolDeps): Tool[] {
+	const canRead = (id: string) => d.allowedNoteIds === null || d.allowedNoteIds.has(id);
+	const readableNotes = () => d.notes().filter((n) => canRead(n.id));
+	const restricted = d.allowedNoteIds !== null;
 	const tools: Tool[] = [
 		{
 			def: {
 				name: 'read_note',
-				description: 'Read the full Markdown of a note by id (its workspace-relative path).',
+				description: restricted
+					? 'Read the full Markdown of a note that the user attached or mentioned, by id (its workspace-relative path).'
+					: 'Read the full Markdown of any note by id (its workspace-relative path).',
 				parameters: {
 					type: 'object',
 					properties: { id: { type: 'string', description: 'Note id, e.g. "drafts/post.md"' } },
@@ -73,7 +80,9 @@ export function createTools(d: ToolDeps): Tool[] {
 			},
 			async run(a) {
 				const id = s(a.id);
-				if (!d.notes().some((n) => n.id === id))
+				if (!canRead(id))
+					return `Cannot read "${id}": it wasn't mentioned or attached in this chat. Ask the user to mention it with @, or ask them to turn on Read all notes.`;
+				if (!readableNotes().some((n) => n.id === id))
 					return `No note with id "${id}". Use list_notes or search_notes.`;
 				const content = await d.readNote(id);
 				return blockedReason(id, content, d.profile, d.config) ?? content;
@@ -82,7 +91,9 @@ export function createTools(d: ToolDeps): Tool[] {
 		{
 			def: {
 				name: 'list_notes',
-				description: 'List notes (id, title, tags), optionally only inside a folder.',
+				description: restricted
+					? 'List only notes attached or mentioned in this chat (id, title, tags), optionally inside a folder.'
+					: 'List notes (id, title, tags), optionally only inside a folder.',
 				parameters: {
 					type: 'object',
 					properties: { folder: { type: 'string', description: 'Folder path; omit for all' } }
@@ -90,8 +101,7 @@ export function createTools(d: ToolDeps): Tool[] {
 			},
 			async run(a) {
 				const folder = s(a.folder).replace(/^\/+|\/+$/g, '');
-				const rows = d
-					.notes()
+				const rows = readableNotes()
 					.filter((n) => !folder || n.id.startsWith(`${folder}/`))
 					.slice(0, 200)
 					.map((n) => `- ${n.id} — ${n.title}${n.tags.length ? ` (#${n.tags.join(' #')})` : ''}`);
@@ -101,7 +111,9 @@ export function createTools(d: ToolDeps): Tool[] {
 		{
 			def: {
 				name: 'search_notes',
-				description: "Search the user's notes by words in the title, path, tags or opening text.",
+				description: restricted
+					? 'Search only notes attached or mentioned in this chat by title, path, tags or opening text.'
+					: "Search the user's notes by words in the title, path, tags or opening text.",
 				parameters: {
 					type: 'object',
 					properties: { query: { type: 'string' } },
@@ -111,8 +123,7 @@ export function createTools(d: ToolDeps): Tool[] {
 			async run(a) {
 				const terms = s(a.query).toLowerCase().split(/\s+/).filter(Boolean);
 				if (!terms.length) return 'Empty query.';
-				const hits = d
-					.notes()
+				const hits = readableNotes()
 					.map((n) => ({ n, score: scoreNote(n, terms) }))
 					.filter((h) => h.score > 0)
 					.sort((x, y) => y.score - x.score)

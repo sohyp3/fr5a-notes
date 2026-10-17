@@ -53,6 +53,8 @@ export interface Session {
 	skill: string;
 	/** Note ids attached as context. */
 	notes: string[];
+	/** This chat may search and read notes that were not explicitly attached. Default false. */
+	readAll?: boolean;
 	turns: Turn[];
 	/** It has received decrypted note content and must be encrypted if saved to notes. */
 	sensitive?: boolean;
@@ -92,6 +94,7 @@ export function serializeSession(s: Session): string {
 		model: s.model || undefined,
 		skill: s.skill || undefined,
 		notes: s.notes,
+		readAll: s.readAll ? 'yes' : undefined,
 		sensitive: s.sensitive ? 'yes' : 'no',
 		saved: s.saved || undefined,
 		savedHash: s.savedHash || undefined,
@@ -130,6 +133,7 @@ export function parseSession(file: string, text: string): Session {
 		...(str(data.model) ? { model: str(data.model) } : {}),
 		skill: str(data.skill),
 		notes: list(data.notes),
+		...(str(data.readAll) === 'yes' ? { readAll: true } : {}),
 		turns,
 		...(str(data.sensitive) ? { sensitive: str(data.sensitive) === 'yes' } : {}),
 		...(str(data.saved) ? { saved: str(data.saved), savedHash: str(data.savedHash) } : {}),

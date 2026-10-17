@@ -609,6 +609,9 @@
 				{#if searchLabel}<span class="pill" title="Web search on"
 						><Icon name="web" size={11} /> web</span
 					>{/if}
+				{#if tab.readAll}<span class="pill" title="This chat may read any note"
+						><Icon name="notes" size={11} /> all notes</span
+					>{/if}
 				<span class="tokens" title="Approximate tokens in history + open note"
 					>~{h.estimate(tab).toLocaleString()}</span
 				>
@@ -713,6 +716,20 @@
 						</button>
 						<button class="link" onclick={() => app.openSettings('ai')}>Settings…</button>
 					</div>
+					<div class="ctx-row">
+						<span class="k">Access</span>
+						<button
+							class={['chip', { off: !tab.readAll }]}
+							aria-pressed={tab.readAll}
+							title={tab.readAll
+								? 'The agent may search and read any note in this workspace for this chat'
+								: 'The agent may read only the open note and notes mentioned with @'}
+							onclick={() => (tab.readAll = !tab.readAll)}
+						>
+							<Icon name={tab.readAll ? 'on' : 'off'} size={12} stroke={2} />
+							{tab.readAll ? 'Read all notes on' : 'Mentioned notes only'}
+						</button>
+					</div>
 					{#if exa}
 						<dl class="search-params" aria-label="Exa search parameters">
 							<div>
@@ -769,7 +786,7 @@
 					{:else if provider}
 						<p class="privacy">
 							<strong>{provider.name}</strong> runs on your hardware: it may read every note, including
-							ones hidden from cloud AI.
+							ones hidden from cloud AI, when this chat's note access allows it.
 						</p>
 					{/if}
 				</div>

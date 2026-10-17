@@ -63,6 +63,12 @@ describe('session files', () => {
 		const privateChat = { ...session, sensitive: true };
 		expect(parseSession('x.md', serializeSession(privateChat)).sensitive).toBe(true);
 	});
+
+	it('keeps read-all access per chat and defaults old chats to off', () => {
+		const open = { ...session, readAll: true };
+		expect(parseSession('x.md', serializeSession(open)).readAll).toBe(true);
+		expect(parseSession('x.md', serializeSession(session)).readAll).toBeUndefined();
+	});
 });
 
 describe('saving and forking', () => {

@@ -1,4 +1,5 @@
 import { platform } from '../platform';
+import { SvelteSet } from 'svelte/reactivity';
 import { getAppState } from '../stores/app.svelte';
 import { docToText } from '../editor/markdown';
 import { getAiSettings } from './config.svelte';
@@ -107,6 +108,8 @@ export class HarnessTab {
 	useCurrent = $state(true);
 	/** Mention keys attached with @: note ids, `@folder/`, `#tag` (see mentions.ts). */
 	attached = $state<string[]>([]);
+	/** Allow note tools beyond the open/mentioned notes. Per chat and off by default. */
+	readAll = $state(false);
 	providerId = $state<string | null>(null);
 	/** A model picked in the pane for this chat; null = the provider's own. */
 	model = $state<string | null>(null);
@@ -147,6 +150,7 @@ export class HarnessTab {
 		this.providerId = session.provider || null;
 		this.model = session.model || null;
 		this.attached = session.notes.filter((n) => n !== getAppState().activeId);
+		this.readAll = session.readAll ?? false;
 		this.entries = session.turns.map((t): Entry =>
 			t.role === 'you'
 				? { kind: 'you', text: t.text }
@@ -252,6 +256,8 @@ export class HarnessTab {
 		this.session.provider = this.providerId ?? '';
 		this.session.model = this.model ?? undefined;
 		this.session.sensitive = this.sensitive;
+		if (this.readAll) this.session.readAll = true;
+		else delete this.session.readAll;
 		const text = serializeSession($state.snapshot(this.session));
 		// Where it goes is decided when the write runs, after any earlier move.
 		await this.queue(async () => {
@@ -433,6 +439,7 @@ class HarnessState {
 		copy.entries = $state.snapshot(tab.entries) as Entry[];
 		copy.attached = [...tab.attached];
 		copy.useCurrent = tab.useCurrent;
+		copy.readAll = tab.readAll;
 		copy.skill = tab.skill;
 		copy.providerId = tab.providerId;
 		copy.model = tab.model;
@@ -805,6 +812,7 @@ class HarnessState {
 				skillPrompt: skill?.prompt,
 				notes,
 				noteBudget: Math.floor(profile.contextTokens * 0.5),
+				readAll: tab.readAll,
 				today: today()
 			});
 			// A new message answers calls a stopped run left open (the API wants one result each).
@@ -813,12 +821,25 @@ class HarnessState {
 			messages = [{ role: 'system', content: system }, ...tab.history];
 
 			const search = ai.config.search;
+			const first = tab.useCurrent && run.current?.id ? [run.current.id] : [];
+			const mentioned = expandMentions(
+				tab.attached,
+				run.notes,
+				first,
+				MAX_INLINE_NOTES,
+				run.tabIds
+			);
+			const allowedNoteIds = new SvelteSet([
+				...mentioned.ids,
+				...mentioned.groups.flatMap((group) => group.ids)
+			]);
 			const tools = allowedTools(
 				skill,
 				createTools({
 					profile,
 					config: ai.config,
 					notes: () => run.notes,
+					allowedNoteIds: tab.readAll ? null : allowedNoteIds,
 					readNote: (id) => {
 						if (run.notes.find((n) => n.id === id)?.encrypted) tab.keepOnDevice();
 						return id === run.current?.id
