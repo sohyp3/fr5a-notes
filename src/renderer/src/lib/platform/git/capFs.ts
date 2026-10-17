@@ -13,7 +13,7 @@ import { fromBase64, toBase64 } from './capHttp';
 
 const DIR = Directory.Data;
 
-/** App-local native plugin (`FileTimesPlugin.java`): Filesystem can't set an mtime. */
+/** App-local native plugin (`FileTimesPlugin.java` / `FileTimesPlugin.swift`): Filesystem can't set an mtime. */
 const FileTimes = registerPlugin<{
 	setMtime(opts: { path: string; mtime: number }): Promise<void>;
 }>('FileTimes');

@@ -10,7 +10,9 @@ const mem = vi.hoisted(() => ({
 	secure: new Map<string, string>(),
 	http: [] as unknown[],
 	resume: [] as (() => void)[],
-	clock: 1000
+	clock: 1000,
+	/** What Capacitor.getPlatform() answers; iOS tests flip it. */
+	platform: 'android' as string
 }));
 
 vi.mock('@capacitor/filesystem', () => {
@@ -128,6 +130,10 @@ vi.mock('@aparajita/capacitor-secure-storage', () => ({
 }));
 
 vi.mock('@capacitor/core', () => ({
+	Capacitor: {
+		getPlatform: () => mem.platform,
+		convertFileSrc: (url: string) => url
+	},
 	CapacitorHttp: {
 		request: async (opts: unknown) => {
 			mem.http.push(opts);
@@ -138,7 +144,7 @@ vi.mock('@capacitor/core', () => ({
 	registerPlugin: () => ({ setMtime: async () => {} })
 }));
 
-import { buildMeta, createAndroidPlatform, safeSubdir, TOKEN_KEY } from './api.android';
+import { buildMeta, createCapacitorPlatform, safeSubdir, TOKEN_KEY } from './api.capacitor';
 
 /** Seed a note under the workspace (`notes/`) as if it came from a git clone. */
 function seed(id: string, data: string) {
@@ -162,6 +168,7 @@ beforeEach(() => {
 	mem.http.length = 0;
 	mem.resume.length = 0;
 	mem.clock = 1000;
+	mem.platform = 'android';
 });
 
 describe('pure helpers', () => {
@@ -200,9 +207,9 @@ describe('pure helpers', () => {
 	});
 });
 
-describe('android platform', () => {
+describe('capacitor platform (android + ios)', () => {
 	it('creates the app-private workspace and has no window controls', async () => {
-		const api = createAndroidPlatform();
+		const api = createCapacitorPlatform();
 		expect(await api.getWorkspace()).toBe('/data/app/files/notes');
 		expect(await api.pickWorkspace()).toBe('/data/app/files/notes');
 		expect(mem.dirs.has('notes')).toBe(true);
@@ -212,12 +219,17 @@ describe('android platform', () => {
 		expect(api.close).toBeUndefined();
 	});
 
+	it('reports the host as Capacitor sees it (ios on iOS)', () => {
+		mem.platform = 'ios';
+		expect(createCapacitorPlatform().platform).toBe('ios');
+	});
+
 	it('indexes existing notes on launch, skipping dot-dirs and non-notes', async () => {
 		seed('a.md', '# Alpha\n#tag1');
 		seed('sub/b.md', '<!-- pinned: true -->\n# Beta\n#tag1/child');
 		seed('.git/HEAD.md', '# not a note');
 		seed('image.png', 'bin');
-		const api = createAndroidPlatform();
+		const api = createCapacitorPlatform();
 		const notes = await api.listNotes();
 		expect(notes.map((n) => n.id)).toEqual(['sub/b.md', 'a.md']); // pinned first
 		expect(notes[0].absPath).toBe('/data/app/files/notes/sub/b.md');
@@ -234,7 +246,7 @@ describe('android platform', () => {
 
 	it('reads, writes and re-indexes a note', async () => {
 		seed('a.md', '# Alpha');
-		const api = createAndroidPlatform();
+		const api = createCapacitorPlatform();
 		const changed = vi.fn();
 		api.onNotesChanged(changed);
 		await api.writeNote('a.md', '# Renamed\nnew #x');
@@ -245,7 +257,7 @@ describe('android platform', () => {
 	});
 
 	it('creates notes with unique names inside a safe folder', async () => {
-		const api = createAndroidPlatform();
+		const api = createCapacitorPlatform();
 		const a = await api.createNote('My/Note', 'work');
 		expect(a.id).toBe('work/My-Note.md');
 		expect(await api.readNote(a.id)).toBe('# My-Note\n\n');
@@ -259,7 +271,7 @@ describe('android platform', () => {
 
 	it('lists and creates folders, including empty ones', async () => {
 		seed('x/y/n.md', 'n');
-		const api = createAndroidPlatform();
+		const api = createCapacitorPlatform();
 		expect(await api.createFolder('new', 'x')).toBe('x/new');
 		expect(await api.createFolder('new', 'x')).toBe('x/new 2');
 		await expect(api.createFolder('  ')).rejects.toThrow('empty');
@@ -268,7 +280,7 @@ describe('android platform', () => {
 
 	it('soft-deletes into the trash, restores and permanently deletes', async () => {
 		seed('d/n.md', '# N');
-		const api = createAndroidPlatform();
+		const api = createCapacitorPlatform();
 		await api.deleteNote('d/n.md');
 		expect(await api.listNotes()).toEqual([]);
 		const trash = await api.listTrash();
@@ -289,7 +301,7 @@ describe('android platform', () => {
 		seed('work/a.md', '# A\n<!-- ai: local -->');
 		seed('work/deep/b.md', '# B');
 		seed('c.md', '# C');
-		const api = createAndroidPlatform();
+		const api = createCapacitorPlatform();
 		expect((await api.listNotes()).find((n) => n.id === 'work/a.md')?.aiLocal).toBe(true);
 		expect(await api.moveNote('c.md', 'Renamed')).toBe('Renamed.md');
 		expect(await api.moveNote('Renamed.md', 'work/a.md')).toBe('work/a 2.md');
@@ -312,7 +324,7 @@ describe('android platform', () => {
 		seed('work/deep/b.md', '# B');
 		seed('work/deep/img.png', 'png');
 		seed('c.md', '# C');
-		const api = createAndroidPlatform();
+		const api = createCapacitorPlatform();
 		await api.deleteFolder('work');
 		expect((await api.listNotes()).map((n) => n.id)).toEqual(['c.md']);
 		expect(await api.listFolders()).toEqual([]);
@@ -323,7 +335,7 @@ describe('android platform', () => {
 		expect(mem.files.has('notes/.fr5a_trash/work/deep/img.png')).toBe(true);
 
 		seed('keep/l.md', '<!-- locked: true -->\n# L');
-		const again = createAndroidPlatform();
+		const again = createCapacitorPlatform();
 		await expect(again.deleteFolder('keep')).rejects.toThrow('locked');
 		expect((await again.listNotes()).some((n) => n.id === 'keep/l.md')).toBe(true);
 		await expect(again.deleteFolder('')).rejects.toThrow('root');
@@ -331,13 +343,13 @@ describe('android platform', () => {
 
 	it('refuses to delete a locked note', async () => {
 		seed('l.md', '<!-- locked: true -->\n# L');
-		const api = createAndroidPlatform();
+		const api = createCapacitorPlatform();
 		await expect(api.deleteNote('l.md')).rejects.toThrow('locked');
 		expect((await api.listNotes()).length).toBe(1);
 	});
 
 	it('rebuilds the index on resume and notifies listeners', async () => {
-		const api = createAndroidPlatform();
+		const api = createCapacitorPlatform();
 		expect(await api.listNotes()).toEqual([]);
 		const changed = vi.fn();
 		api.onNotesChanged(changed);
@@ -351,7 +363,7 @@ describe('android platform', () => {
 	});
 
 	it('persists UI state as JSON in Preferences', async () => {
-		const api = createAndroidPlatform();
+		const api = createCapacitorPlatform();
 		expect(await api.getState('settings')).toBeNull();
 		await api.setState('settings', { vim: true });
 		expect(mem.prefs.get('fr5a:settings')).toBe('{"vim":true}');
@@ -361,7 +373,7 @@ describe('android platform', () => {
 	});
 
 	it('unsubscribes listeners', async () => {
-		const api = createAndroidPlatform();
+		const api = createCapacitorPlatform();
 		const changed = vi.fn();
 		const off = api.onNotesChanged(changed);
 		off();
@@ -371,7 +383,7 @@ describe('android platform', () => {
 	});
 
 	it('reports sync as not set up until a remote is connected', async () => {
-		const api = createAndroidPlatform();
+		const api = createCapacitorPlatform();
 		expect(await api.syncStatus!()).toEqual({ remote: null, hasToken: false });
 		expect(await api.syncPull()).toEqual({
 			ok: false,
@@ -381,14 +393,14 @@ describe('android platform', () => {
 	});
 
 	it('rejects non-HTTPS remotes before storing anything', async () => {
-		const api = createAndroidPlatform();
+		const api = createCapacitorPlatform();
 		const res = await api.syncSetup!('git@github.com:me/notes.git', 'tok');
 		expect(res).toMatchObject({ ok: false, error: { code: 'no-remote' } });
 		expect(mem.secure.size).toBe(0);
 	});
 
 	it('keeps the token in secure storage only, and sends it over native HTTP', async () => {
-		const api = createAndroidPlatform();
+		const api = createCapacitorPlatform();
 		const res = await api.syncSetup!('https://github.com/me/notes.git', ' ghp_secret ');
 		// The mocked remote answers 401: surfaced as an auth error, nothing cloned.
 		expect(res).toMatchObject({ ok: false, error: { code: 'auth' } });

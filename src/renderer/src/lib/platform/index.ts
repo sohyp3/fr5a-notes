@@ -1,5 +1,5 @@
 import { Capacitor } from '@capacitor/core';
-import { createAndroidPlatform } from './api.android';
+import { createCapacitorPlatform } from './api.capacitor';
 import { createDesktopPlatform, isDesktop } from './desktop';
 import type { PlatformApi } from './types';
 
@@ -8,12 +8,20 @@ export type { PlatformApi } from './types';
 /** Pick the host implementation once, at startup. */
 function selectPlatform(): PlatformApi {
 	if (isDesktop()) return createDesktopPlatform();
-	if (Capacitor.getPlatform() === 'android') return createAndroidPlatform();
+	const id = Capacitor.getPlatform();
+	if (id === 'android' || id === 'ios') return createCapacitorPlatform();
 	throw new Error('fr5a: no platform implementation available for this host');
 }
 
 /** The host itself: note files exactly as they are on disk. */
 export const hostPlatform: PlatformApi = selectPlatform();
+
+/**
+ * True on the phone/tablet hosts (Android, iOS): on-screen keyboard, no hover,
+ * touch-sized controls. Derived from the chosen host — never true on desktop,
+ * where `platform` is the usual `process.platform` id.
+ */
+export const isMobile = hostPlatform.platform === 'android' || hostPlatform.platform === 'ios';
 
 /**
  * What the app talks to: a copy of the host's methods. Encryption, while

@@ -42,14 +42,15 @@ import { noteSnippet } from '../../../../shared/snippet';
 import { isEncryptedNote } from '../../../../shared/encrypted';
 
 /**
- * Android host (Capacitor). Notes live in `notes/` under app-private storage
- * (Directory.Data) — the folder a git working copy will be cloned into once
- * sync lands. No SAF, no storage permissions. The note index is in-memory,
+ * Mobile host (Capacitor, Android and iOS). Notes live in `notes/` under
+ * app-private storage (Directory.Data — app files on Android, the app's
+ * Documents folder on iOS) — the folder a git working copy will be cloned into
+ * once sync lands. No SAF, no storage permissions. The note index is in-memory,
  * rebuilt from disk on launch, on resume and after every sync. There is no
  * window chrome, so the window controls are simply absent.
  *
  * Git sync runs isomorphic-git over Capacitor Filesystem + native HTTP; the
- * GitHub token lives only in Keystore-backed secure storage.
+ * GitHub token lives only in Keystore/Keychain-backed secure storage.
  */
 
 const DIR = Directory.Data;
@@ -62,7 +63,11 @@ const MD_EXT = new Set(['.md', '.markdown', '.mdown', '.txt']);
 const STATE_PREFIX = 'fr5a:';
 const CHANGE_DEBOUNCE = 120;
 
-/** App-local native plugin: opens Android's print UI for the rendered WebView. */
+/**
+ * App-local native plugin: opens the system print UI for the rendered WebView
+ * (Android's print service; iOS's `UIPrintInteractionController`). The twins are
+ * `android/app/…/PdfExportPlugin.java` and `packaging/ios/PdfExportPlugin.swift`.
+ */
 const PdfExport = registerPlugin<{
 	print(options: { jobName: string }): Promise<void>;
 }>('PdfExport');
@@ -187,7 +192,7 @@ export const TOKEN_KEY = 'github-token';
 
 // --- implementation ----------------------------------------------------------
 
-export function createAndroidPlatform(): PlatformApi {
+export function createCapacitorPlatform(): PlatformApi {
 	const index = new Map<string, NoteMeta>();
 	const changeListeners = new Set<() => void>();
 	const doneListeners = new Set<() => void>();
@@ -450,7 +455,7 @@ export function createAndroidPlatform(): PlatformApi {
 	});
 
 	return {
-		platform: 'android',
+		platform: Capacitor.getPlatform(),
 		conflictsInline: true,
 
 		async getWorkspace() {
@@ -503,7 +508,14 @@ export function createAndroidPlatform(): PlatformApi {
 		},
 		async exportPdf(id) {
 			const jobName = basename(id, extname(id)) || 'note';
-			await PdfExport.print({ jobName });
+			try {
+				await PdfExport.print({ jobName });
+			} catch (err) {
+				// iOS before its Swift twin is registered: best-effort fallback to
+				// the WKWebView's own print sheet. Android's failure is real.
+				if (Capacitor.getPlatform() !== 'ios') throw err;
+				window.print();
+			}
 			return 'opened';
 		},
 		async moveNote(id, to) {

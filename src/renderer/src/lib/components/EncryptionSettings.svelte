@@ -1,9 +1,18 @@
 <script lang="ts">
 	import { getAppState } from '../stores/app.svelte';
+	import { platform } from '../platform';
 	import Icon from './Icon.svelte';
 
 	const app = getAppState();
 	const v = $derived(app.vault);
+	/** Where a remembered passphrase is kept, per host. */
+	const keyStoreName = $derived(
+		platform.platform === 'android'
+			? 'Android Keystore'
+			: platform.platform === 'ios'
+				? 'iOS keychain'
+				: 'system keyring'
+	);
 	const encryptedCount = $derived(app.notes.filter((n) => n.encrypted).length);
 
 	/** With a key set up, the create / import forms stay folded until "Replace". */
@@ -177,9 +186,8 @@
 				<div class="label">
 					<span class="name">Remember passphrase</span>
 					<span class="desc"
-						>Kept in the {app.touch ? 'Android Keystore' : 'system keyring'} so notes unlock without typing
-						it, also after an auto-lock. Anyone who can use this device can then read them. Turning it
-						off deletes it from this device.</span
+						>Kept in the {keyStoreName} so notes unlock without typing it, also after an auto-lock. Anyone
+						who can use this device can then read them. Turning it off deletes it from this device.</span
 					>
 				</div>
 				<button

@@ -1,4 +1,4 @@
-import { hostPlatform, platform } from '../platform';
+import { hostPlatform, isMobile, platform } from '../platform';
 import type {
 	GitChange,
 	GitOpResponse,
@@ -30,11 +30,11 @@ import type { Editor } from '@tiptap/core';
 import type { Vault } from '../vault/vault.svelte';
 
 /**
- * Auto-save after this long without typing. Android: 5 s, since each save
+ * Auto-save after this long without typing. Mobile: 5 s, since each save
  * re-indexes and refreshes over the Capacitor bridge, which a tablet feels
  * mid-typing; leaving the app, switching notes or syncing still save at once.
  */
-const saveDebounce = () => (platform.platform === 'android' ? 5000 : 500);
+const saveDebounce = () => (isMobile ? 5000 : 500);
 const THEME_KEY = 'fr5a-theme';
 const SETTINGS_KEY = 'fr5a-settings';
 /** Pending-save id for a draft note that has no file yet. */
@@ -472,7 +472,7 @@ class AppState {
 		// Hardware back (Android) walks the stacked layout; at the root it exits.
 		platform.onBackButton?.(() => this.back());
 		// Touch devices have no hover: ghost syntax is revealed at the caret only.
-		if (platform.platform === 'android' || matchMedia('(hover: none)').matches)
+		if (isMobile || matchMedia('(hover: none)').matches)
 			document.documentElement.setAttribute('data-hover', 'none');
 		// The stacked layout opens on the folders pane, whatever note was restored.
 		this.pane = 'nav';

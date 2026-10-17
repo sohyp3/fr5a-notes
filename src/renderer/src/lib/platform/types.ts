@@ -19,7 +19,8 @@ import type {
  * a non-Electron host can supply its own implementation.
  */
 export interface PlatformApi {
-	/** Host OS, as `process.platform` (e.g. 'linux', 'darwin'). */
+	/** Host OS, as `process.platform` on desktop ('linux', 'darwin', …); on the
+	 * mobile Capacitor hosts, Capacitor's platform id ('android', 'ios'). */
 	readonly platform: string;
 	/** Show the conflict resolver inside the main window (no second window on this host). */
 	readonly conflictsInline?: boolean;

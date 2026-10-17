@@ -19,7 +19,7 @@
 	import Notice from './lib/components/Notice.svelte';
 	import ConflictWindow from './lib/components/ConflictWindow.svelte';
 	import Resizer from './lib/components/Resizer.svelte';
-	import { platform } from './lib/platform';
+	import { isMobile } from './lib/platform';
 	import { layoutFor } from './lib/layout';
 	import { reducedMotion } from './lib/portal';
 
@@ -48,10 +48,10 @@
 	const showSidebar = $derived(app.sidebarOpen && !app.zen);
 	const showList = $derived(app.listOpen && !app.zen);
 
-	// Layout follows width + input type: touch devices (Android, coarse pointer)
-	// get phone / tablet layouts; mouse windows stay desktop at any width.
+	// Layout follows width + input type: touch devices (phones/tablets, coarse
+	// pointer) get phone / tablet layouts; mouse windows stay desktop at any width.
 	const coarse = new MediaQuery('pointer: coarse');
-	const touch = $derived(platform.platform === 'android' || coarse.current);
+	const touch = $derived(isMobile || coarse.current);
 	const winW = $derived(innerWidth.current ?? window.innerWidth);
 	$effect(() => app.setLayout(layoutFor(winW, touch), touch));
 

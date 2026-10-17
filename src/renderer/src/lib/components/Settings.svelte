@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { fade, fly } from 'svelte/transition';
 	import { getAppState, type OpenIn, type SettingsSection } from '../stores/app.svelte';
-	import { platform } from '../platform';
+	import { isMobile, platform } from '../platform';
 	import GitSetup from './GitSetup.svelte';
 	import SyncRepos from './SyncRepos.svelte';
 	import Icon from './Icon.svelte';
@@ -361,8 +361,8 @@
 								</div>
 							{/if}
 						</section>
-						<!-- No Vim on Android (on-screen keyboard; the editor ignores the setting there). -->
-						{#if platform.platform !== 'android'}
+						<!-- No Vim on touch hosts (on-screen keyboard; the editor ignores the setting there). -->
+						{#if !isMobile}
 							<section class="group">
 								<h3>Keyboard</h3>
 								<div class="row">

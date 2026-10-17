@@ -40,7 +40,7 @@
 	import HighlightPicker from './HighlightPicker.svelte';
 	import NoteTabs from './NoteTabs.svelte';
 	import Icon from './Icon.svelte';
-	import { platform } from '../platform';
+	import { isMobile, platform } from '../platform';
 	import { reducedMotion } from '../portal';
 	import type { IconName } from '../icons';
 	import {
@@ -102,8 +102,8 @@
 	// Suppress auto-save while we programmatically replace content.
 	let loading = false;
 
-	// No hardware keyboard to drive modal editing on Android: Vim stays off there.
-	const vimOn = $derived(app.settings.vim && platform.platform !== 'android');
+	// No hardware keyboard to drive modal editing on phones/tablets: Vim stays off.
+	const vimOn = $derived(app.settings.vim && !isMobile);
 	const highlights = $derived(app.settings.highlights);
 	const activeMeta = $derived(app.notes.find((n) => n.id === app.activeId));
 	// Locked notes are read-only. Fall back to the buffer so the badge is right

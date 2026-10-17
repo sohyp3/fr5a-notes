@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { getAppState } from '../stores/app.svelte';
-	import { platform } from '../platform';
+	import { isMobile, platform } from '../platform';
 	import { syncErrorMessage } from '../sync';
 	import type { SyncRepo } from '../../../../shared/types';
 
@@ -9,7 +9,7 @@
 	// nested repos on disk; both can add one here (clone into a new folder, or
 	// turn a folder that already has notes into its own repo).
 	const app = getAppState();
-	const android = platform.platform === 'android';
+	const mobile = isMobile;
 	let repos = $state.raw<SyncRepo[]>([]);
 	let adding = $state(false);
 	let folder = $state('');
@@ -74,7 +74,7 @@
 		to <code>.gitignore</code>). Use it to send <code>private/</code> or <code>.fr5a/</code>
 		(AI sessions) only to your server. A new folder is cloned into; a folder that already has notes becomes
 		its own repo, and the root stops tracking it — what the root already pushed stays in its history.
-		{#if !android}Uses your system git credentials (SSH keys, or the credential helper your notes
+		{#if !mobile}Uses your system git credentials (SSH keys, or the credential helper your notes
 			repo uses).{/if}
 	</p>
 	{#if message && !adding}<p class={['msg after', { error: message.kind === 'error' }]}>
@@ -96,7 +96,7 @@
 					</datalist>
 				</label>
 				<label class="field">
-					<span class="name">{android ? 'HTTPS clone URL' : 'Clone URL (https or SSH)'}</span>
+					<span class="name">{mobile ? 'HTTPS clone URL' : 'Clone URL (https or SSH)'}</span>
 					<input
 						type="url"
 						inputmode="url"
@@ -105,7 +105,7 @@
 						placeholder="https://git.example.com/me/private.git"
 					/>
 				</label>
-				{#if android}
+				{#if mobile}
 					<label class="field">
 						<span class="name">Token</span>
 						<input type="password" bind:value={token} autocomplete="off" />
