@@ -164,6 +164,12 @@
 		selectedId = node.id;
 	}
 
+	/** Phones: leave a note's neighbourhood for the whole map. */
+	function showAll(): void {
+		selectedId = '';
+		resetView();
+	}
+
 	function open(node = selected): void {
 		if (!node || node.missing) return;
 		void app.openNote(node.id);
@@ -321,6 +327,13 @@
 					<button aria-label="Zoom in" title="Zoom in" onclick={() => changeZoom(0.15)}>
 						<Icon name="plus" size={15} />
 					</button>
+					{#if phone && selectedId}
+						<span class="sep" aria-hidden="true"></span>
+						<button class="whole" onclick={showAll}>
+							<Icon name="graph" size={15} />
+							<span>Whole map</span>
+						</button>
+					{/if}
 				</div>
 				<svg
 					class={{ dragging: !!drag }}
@@ -384,7 +397,7 @@
 				</svg>
 				<div class="map-foot">
 					{#if phone}
-						<p>Tap a note to bring its connections into focus</p>
+						{#if !selectedId}<p>Tap a note to bring its connections into focus</p>{/if}
 					{:else}
 						<p class="legend" aria-hidden="true">
 							<span><i></i>Note</span><span><i class="broken"></i>Missing target</span>
@@ -757,6 +770,19 @@
 		font-size: 11.5px;
 		font-weight: 600;
 		font-variant-numeric: tabular-nums;
+	}
+	.map-tools .sep {
+		width: 1px;
+		height: 18px;
+		margin-inline: 2px;
+		background: var(--bg-hover);
+	}
+	.map-tools .whole {
+		display: flex;
+		gap: 6px;
+		padding-inline: 10px;
+		font-size: 12.5px;
+		font-weight: 600;
 	}
 	.map-foot {
 		position: absolute;

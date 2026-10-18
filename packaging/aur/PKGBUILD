@@ -1,8 +1,8 @@
 # Maintainer: sohyp3 <thetit4nsh3@gmail.com>
 pkgname=fr5a-bin
 _appname=fr5a
-pkgver=0.0.1
-pkgrel=3
+pkgver=0.1.1
+pkgrel=1
 pkgdesc="A polished Bear-style Markdown editor (Electron + Svelte + TipTap)"
 arch=('x86_64')
 url="https://github.com/sohyp3/fr5a-notes"

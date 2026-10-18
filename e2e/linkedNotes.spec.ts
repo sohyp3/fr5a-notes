@@ -42,10 +42,13 @@ test('linked notes stays dormant until enabled and adapts its map', async ({ pag
 		page.getByRole('button', { name: /Missing idea, \d+ connection.*missing note/ })
 	).toBeVisible();
 	await expect(page.getByText('2 notes · 3 links · 0 unlinked')).toBeVisible();
-	// Phones swap the legend for a hint about tapping into a note's connections.
+	// Phones open on a note's neighbourhood with no legend; Whole map shows every
+	// note and the hint about tapping back into one.
 	if (layout === 'phone') {
 		await expect(page.locator('.legend')).toHaveCount(0);
+		await page.getByRole('button', { name: 'Whole map' }).click();
 		await expect(page.getByText('Tap a note to bring its connections into focus')).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Whole map' })).toHaveCount(0);
 	} else await expect(page.locator('.legend')).toBeVisible();
 
 	await page.screenshot({
@@ -54,6 +57,13 @@ test('linked notes stays dormant until enabled and adapts its map', async ({ pag
 	});
 
 	await page.getByRole('button', { name: /Hello, \d+ connections?/ }).click();
+	// A phone focuses the tapped note's neighbourhood; desktop and tablet keep every note.
+	if (layout === 'phone') {
+		await expect(
+			page.getByRole('button', { name: /Missing idea, \d+ connection.*missing note/ })
+		).toHaveCount(0);
+		await expect(page.getByRole('button', { name: 'Whole map' })).toBeVisible();
+	} else await expect(page.getByRole('button', { name: 'Whole map' })).toHaveCount(0);
 	await page.getByRole('button', { name: 'Open note' }).click();
 	await expect(page.locator('.ProseMirror')).toContainText('Back to');
 	await page.locator('.md-wiki-link').click();
