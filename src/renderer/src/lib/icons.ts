@@ -45,7 +45,9 @@ import LockOpen from '@lucide/svelte/icons/lock-open';
 import Maximize from '@lucide/svelte/icons/maximize';
 import Menu from '@lucide/svelte/icons/menu';
 import Minimize from '@lucide/svelte/icons/minimize';
+import Minus from '@lucide/svelte/icons/minus';
 import Moon from '@lucide/svelte/icons/moon';
+import Network from '@lucide/svelte/icons/network';
 import NotebookText from '@lucide/svelte/icons/notebook-text';
 import PanelLeft from '@lucide/svelte/icons/panel-left';
 import PanelTop from '@lucide/svelte/icons/panel-top';
@@ -93,6 +95,8 @@ export const ICONS = {
 	newFolder: FolderPlus,
 	collapse: ChevronsDownUp,
 	search: Search,
+	graph: Network,
+	minus: Minus,
 	// sync / app chrome
 	pull: ArrowDownToLine,
 	push: ArrowUpFromLine,

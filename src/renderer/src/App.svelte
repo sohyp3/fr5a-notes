@@ -34,6 +34,13 @@
 			? import('./lib/components/harness/HarnessPane.svelte')
 			: null
 	);
+	// Linked notes is a true optional chunk: disabled means no import, no graph
+	// state, no note-body reads, and no graph-specific event handlers.
+	const graphModule = $derived(
+		app.settings.linkedNotes && app.view === 'graph'
+			? import('./lib/components/LinkedNotes.svelte')
+			: null
+	);
 
 	// Spring-driven widths so toggling/Zen feels physical, not linear.
 	const sidebarWidth = new Spring(app.widths.sidebar, { stiffness: 0.16, damping: 0.72 });
@@ -43,9 +50,10 @@
 	const desktop = $derived(app.layout === 'desktop');
 	const tablet = $derived(app.layout === 'tablet');
 	const phone = $derived(app.layout === 'phone');
+	const graphWideTouch = $derived(app.view === 'graph' && app.touch && desktop);
 
 	// In Zen mode the sidebar and note list animate away, centring the editor.
-	const showSidebar = $derived(app.sidebarOpen && !app.zen);
+	const showSidebar = $derived(app.sidebarOpen && !app.zen && !graphWideTouch);
 	const showList = $derived(app.listOpen && !app.zen);
 
 	// Layout follows width + input type: touch devices (phones/tablets, coarse
@@ -177,6 +185,12 @@
 		if (mod && !e.shiftKey && (e.key === 'j' || e.key === 'J') && app.settings.ai) {
 			e.preventDefault();
 			app.toggleHarness();
+			return;
+		}
+		// Mod+G opens the linked-note map when the feature is enabled.
+		if (mod && !e.shiftKey && (e.key === 'g' || e.key === 'G') && app.settings.linkedNotes) {
+			e.preventDefault();
+			app.openGraph();
 			return;
 		}
 		// Mod+Shift+L shows / hides the note list.
@@ -312,8 +326,12 @@
 					>
 						{#if app.view === 'settings'}
 							<Settings />
-						{:else}
+						{:else if app.view === 'changes'}
 							<Changes />
+						{:else if graphModule}
+							{#await graphModule then m}
+								<m.default />
+							{/await}
 						{/if}
 					</div>
 				{/if}

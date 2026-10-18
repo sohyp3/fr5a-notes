@@ -51,6 +51,10 @@ export interface MarkdownSyntaxOptions {
 	imageUrl: (src: string) => string | null;
 	/** Hand a clicked web link to the host browser. */
 	openLink?: (href: string) => void;
+	/** Wiki-link parsing is entirely skipped while the optional feature is off. */
+	wikiLinks?: boolean;
+	/** Follow a `[[target]]` link (view mode click; Mod+click while editing). */
+	onWikiLink?: (target: string) => void;
 }
 
 interface Deco {
@@ -170,6 +174,35 @@ function externalHref(raw: string): string | null {
 	}
 }
 
+/** Kept outside INLINE_RULES so the disabled feature does not run its regex. */
+const WIKI_RULE: (typeof INLINE_RULES)[number] = {
+	re: /\[\[([^\]|\n]+?)(?:\|([^\]\n]+))?\]\]/g,
+	build: (m, base) => {
+		const s = base + m.index;
+		const target = m[1].trim();
+		const targetStart = s + 2;
+		const targetEnd = targetStart + m[1].length;
+		const e = s + m[0].length;
+		const attrs = { 'data-wiki-target': target, role: 'link', tabindex: '0' };
+		if (m[2] !== undefined) {
+			const labelStart = targetEnd + 1;
+			return [
+				{ from: s, to: s + 2, class: 'md-syntax', syntax: true },
+				{ from: targetStart, to: labelStart, class: 'md-syntax', syntax: true },
+				{ from: labelStart, to: e - 2, class: 'md-link md-wiki-link', attrs },
+				{ from: e - 2, to: e, class: 'md-syntax', syntax: true }
+			];
+		}
+		return [
+			{ from: s, to: s + 2, class: 'md-syntax', syntax: true },
+			{ from: targetStart, to: targetEnd, class: 'md-link md-wiki-link', attrs },
+			{ from: e - 2, to: e, class: 'md-syntax', syntax: true }
+		];
+	}
+};
+/** Inline code first, so `[[x]]` in a code span stays code. */
+const WIKI_RULES = [INLINE_RULES[0], WIKI_RULE, ...INLINE_RULES.slice(1)];
+
 /** Helper for symmetric wrappers like **x** where marker length is fixed. */
 function wrap(m: RegExpExecArray, base: number, markLen: number, innerClass: string): Deco[] {
 	const s = base + m.index;
@@ -213,7 +246,11 @@ function blockInfo(text: string): { nodeClass: string; prefixLen: number } | nul
 	return null;
 }
 
-function tokenizeLine(text: string, contentStart: number): { tokens: Token[]; nodeClass?: string } {
+function tokenizeLine(
+	text: string,
+	contentStart: number,
+	wikiLinks = false
+): { tokens: Token[]; nodeClass?: string } {
 	const tokens: Token[] = [];
 	const consumed = new Array(text.length).fill(false);
 
@@ -281,14 +318,20 @@ function tokenizeLine(text: string, contentStart: number): { tokens: Token[]; no
 		}
 	}
 
-	tokens.push(...inlineTokens(text, contentStart, consumed));
+	tokens.push(...inlineTokens(text, contentStart, consumed, wikiLinks));
 	return { tokens, nodeClass: block?.nodeClass };
 }
 
 /** Inline rules over the characters not yet `consumed` (marked as they're used). */
-function inlineTokens(text: string, contentStart: number, consumed: boolean[]): Token[] {
+function inlineTokens(
+	text: string,
+	contentStart: number,
+	consumed: boolean[],
+	wikiLinks = false
+): Token[] {
 	const tokens: Token[] = [];
-	for (const rule of INLINE_RULES) {
+	const rules = wikiLinks ? WIKI_RULES : INLINE_RULES;
+	for (const rule of rules) {
 		rule.re.lastIndex = 0;
 		let m: RegExpExecArray | null;
 		while ((m = rule.re.exec(text))) {
@@ -308,7 +351,12 @@ function inlineTokens(text: string, contentStart: number, consumed: boolean[]): 
 }
 
 /** A table line in source mode: pipes tinted, separator dashes muted, cells styled inline. */
-function tokenizeTableSource(text: string, contentStart: number, sep: boolean): Token[] {
+function tokenizeTableSource(
+	text: string,
+	contentStart: number,
+	sep: boolean,
+	wikiLinks: boolean
+): Token[] {
 	const consumed = new Array(text.length).fill(false);
 	const decos: Deco[] = [];
 	for (const p of pipeOffsets(text)) {
@@ -322,7 +370,7 @@ function tokenizeTableSource(text: string, contentStart: number, sep: boolean): 
 				decos.push({ from: contentStart + from, to: contentStart + to, class: 'md-tsep-text' });
 		return [whole];
 	}
-	return [...inlineTokens(text, contentStart, consumed), whole];
+	return [...inlineTokens(text, contentStart, consumed, wikiLinks), whole];
 }
 
 /**
@@ -566,9 +614,9 @@ function lineDecorations(
 	} else if (row) {
 		const cls = `md-trow md-trow-${row.role}${row.role === 'head' ? ' md-trow-first' : ''}${row.last ? ' md-trow-last' : ''}`;
 		out.push(Decoration.node(pos, end, { class: cls }));
-		tokens = tokenizeTableSource(text, contentStart, row.role === 'sep');
+		tokens = tokenizeTableSource(text, contentStart, row.role === 'sep', !!opts.wikiLinks);
 	} else {
-		const t = tokenizeLine(text, contentStart);
+		const t = tokenizeLine(text, contentStart, opts.wikiLinks);
 		tokens = t.tokens;
 		if (t.nodeClass) out.push(Decoration.node(pos, end, { class: t.nodeClass }));
 	}
@@ -719,7 +767,7 @@ export const MarkdownSyntax = Extension.create<MarkdownSyntaxOptions>({
 	name: 'markdownSyntax',
 
 	addOptions() {
-		return { highlights: false, imageUrl: () => null };
+		return { highlights: false, imageUrl: () => null, wikiLinks: false, onWikiLink: () => {} };
 	},
 
 	addProseMirrorPlugins() {
@@ -762,15 +810,33 @@ export const MarkdownSyntax = Extension.create<MarkdownSyntaxOptions>({
 					decorations(state) {
 						return key.getState(state)?.set;
 					},
-					handleClick(_view, _pos, event) {
+					handleClick(view, _pos, event) {
 						const target = event.target;
 						if (!(target instanceof Element)) return false;
+						if (opts.wikiLinks) {
+							const el = target.closest<HTMLElement>('[data-wiki-target]');
+							if (el && (!view.editable || event.metaKey || event.ctrlKey)) {
+								event.preventDefault();
+								opts.onWikiLink?.(el.dataset.wikiTarget ?? '');
+								return true;
+							}
+						}
 						const link = target.closest<HTMLAnchorElement>('a.md-link[href]');
 						const href = link?.getAttribute('href');
 						if (!href || !externalHref(href)) return false;
 						event.preventDefault();
 						if (opts.openLink) opts.openLink(href);
 						else window.open(href, '_blank', 'noopener,noreferrer');
+						return true;
+					},
+					handleKeyDown(_view, event) {
+						if (!opts.wikiLinks || (event.key !== 'Enter' && event.key !== ' ')) return false;
+						const el = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>(
+							'[data-wiki-target]'
+						);
+						if (!el) return false;
+						event.preventDefault();
+						opts.onWikiLink?.(el.dataset.wikiTarget ?? '');
 						return true;
 					}
 				}

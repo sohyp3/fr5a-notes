@@ -355,7 +355,8 @@ button.scrim {
 	color: var(--accent);
 	text-decoration: none;
 }
-.md-link[href] {
+.md-link[href],
+.md-wiki-link {
 	cursor: pointer;
 	text-decoration: underline;
 	text-decoration-color: transparent;
@@ -363,8 +364,20 @@ button.scrim {
 	transition: text-decoration-color 120ms ease-out;
 }
 .md-link[href]:hover,
-.md-link[href]:focus-visible {
+.md-link[href]:focus-visible,
+.md-wiki-link:hover,
+.md-wiki-link:focus-visible {
 	text-decoration-color: currentColor;
+}
+/* View mode: wiki links are tab stops; show the same accent ring as other controls. */
+.md-wiki-link:focus-visible {
+	outline: 1.5px solid var(--accent);
+	outline-offset: 2px;
+	border-radius: 3px;
+}
+/* While editing a plain click places the caret (Mod+click follows the link). */
+.ProseMirror[contenteditable='true'] .md-wiki-link {
+	cursor: text;
 }
 
 /* Line-level (node) decorations — heading sizing, quotes, etc. */

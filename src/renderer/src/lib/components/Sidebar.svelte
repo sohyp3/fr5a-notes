@@ -158,6 +158,16 @@
 	</div>
 
 	<footer class="foot">
+		{#if app.settings.linkedNotes}
+			<button
+				class={['settings-btn', { selected: app.view === 'graph' }]}
+				title="Linked notes (Mod+G)"
+				onclick={() => app.openGraph()}
+			>
+				<Icon name="graph" size={16} />
+				<span>Linked notes</span>
+			</button>
+		{/if}
 		<button
 			class={['settings-btn', { selected: app.trashOpen && app.view === 'editor' }]}
 			title="Trash"

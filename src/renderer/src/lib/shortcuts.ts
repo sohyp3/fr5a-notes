@@ -7,7 +7,7 @@ export interface Shortcut {
 	keys: string[];
 	desc: string;
 	/** Listed only while this setting is on. */
-	feature?: 'encryption' | 'highlights' | 'tabs';
+	feature?: 'encryption' | 'highlights' | 'tabs' | 'linkedNotes';
 }
 
 export const SHORTCUTS: Shortcut[] = [
@@ -17,6 +17,7 @@ export const SHORTCUTS: Shortcut[] = [
 	{ keys: ['Ctrl', 'Tab'], desc: 'Next tab  ·  ⇧ previous', feature: 'tabs' },
 	{ keys: ['Mod', '\\'], desc: 'Toggle Zen mode' },
 	{ keys: ['Mod', 'J'], desc: 'Toggle the AI harness pane' },
+	{ keys: ['Mod', 'G'], desc: 'Open linked notes', feature: 'linkedNotes' },
 	{ keys: ['Mod', 'F'], desc: 'Find in the open note' },
 	{ keys: ['Mod', '⇧', 'L'], desc: 'Show / hide the note list' },
 	{ keys: ['Mod', '⇧', 'E'], desc: 'View / edit mode for the open note' },

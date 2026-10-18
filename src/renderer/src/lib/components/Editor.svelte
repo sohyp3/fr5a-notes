@@ -105,6 +105,7 @@
 	// No hardware keyboard to drive modal editing on phones/tablets: Vim stays off.
 	const vimOn = $derived(app.settings.vim && !isMobile);
 	const highlights = $derived(app.settings.highlights);
+	const wikiLinks = $derived(app.settings.linkedNotes);
 	const activeMeta = $derived(app.notes.find((n) => n.id === app.activeId));
 	// Locked notes are read-only. Fall back to the buffer so the badge is right
 	// even before the index round-trips.
@@ -128,7 +129,7 @@
 	// reload token. Keyed on the session — not the note id — so a draft
 	// materialising into a real file doesn't remount the editor mid-typing.
 	const editorKey = $derived(
-		`${app.editorSession}:${vimOn}:${highlights}:${app.editorReloadToken}`
+		`${app.editorSession}:${vimOn}:${highlights}:${wikiLinks}:${app.editorReloadToken}`
 	);
 	const crumb = $derived.by(() => {
 		const id = app.activeId;
@@ -156,7 +157,9 @@
 			MarkdownSyntax.configure({
 				highlights,
 				imageUrl,
-				openLink: (href) => window.open(href, '_blank', 'noopener,noreferrer')
+				openLink: (href) => window.open(href, '_blank', 'noopener,noreferrer'),
+				wikiLinks,
+				onWikiLink: (target) => void app.openWikiLink(target)
 			}),
 			MarkdownShortcuts,
 			ListBehavior,

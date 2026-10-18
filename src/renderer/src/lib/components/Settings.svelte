@@ -34,6 +34,12 @@
 		{ id: 'general', label: 'General', icon: 'note', desc: 'Notes folder, opening notes' },
 		{ id: 'appearance', label: 'Appearance', icon: 'sun', desc: 'Theme, accent, fonts' },
 		{ id: 'editor', label: 'Editor', icon: 'edit', desc: 'Ghost syntax, highlights, tabs, Vim' },
+		{
+			id: 'linkedNotes',
+			label: 'Linked notes',
+			icon: 'graph',
+			desc: 'Wiki links and the connection map'
+		},
 		{ id: 'toolbar', label: 'Toolbar', icon: 'toolbar', desc: 'Buttons in the bar or in its menu' },
 		{
 			id: 'advanced',
@@ -384,6 +390,39 @@
 										<span class="desc">Modal editing (normal · insert · visual)</span>
 									</div>
 									{@render toggle(s.vim, 'Vim motions', () => app.updateSettings({ vim: !s.vim }))}
+								</div>
+							</section>
+						{/if}
+					{:else if section.id === 'linkedNotes'}
+						<section class="group">
+							<div class="row">
+								<div class="label">
+									<span class="name">Enable linked notes</span>
+									<span class="desc"
+										>Follow <code>[[Note title]]</code> links between notes and see how they connect (Mod+G)</span
+									>
+								</div>
+								{@render toggle(s.linkedNotes, 'Enable linked notes', () =>
+									app.updateSettings({ linkedNotes: !s.linkedNotes })
+								)}
+							</div>
+						</section>
+						{#if s.linkedNotes}
+							<section class="group">
+								<h3>Wiki links</h3>
+								<p class="prose">
+									Type <code>[[Ideas]]</code> to link by title, or
+									<code>[[work/project|Project]]</code> to show a custom label. In view mode, tap a link
+									to follow it; while editing, hold Mod and click.
+								</p>
+								<div class="row">
+									<div class="label">
+										<span class="name">Connection map</span>
+										<span class="desc"
+											>Every note and the links between them, read when you open it</span
+										>
+									</div>
+									<button class="btn" onclick={() => app.openGraph()}>Open map</button>
 								</div>
 							</section>
 						{/if}

@@ -47,10 +47,10 @@ const DEFAULT_SIDEBAR: SidebarState = {
 	tagExpanded: {}
 };
 
-export type View = 'editor' | 'settings' | 'changes';
+export type View = 'editor' | 'settings' | 'changes' | 'graph';
 export type Pane = 'nav' | 'list' | 'editor' | 'harness';
 export type SettingsSection =
-	'general' | 'appearance' | 'editor' | 'toolbar' | 'advanced' | 'shortcuts';
+	'general' | 'appearance' | 'editor' | 'linkedNotes' | 'toolbar' | 'advanced' | 'shortcuts';
 export type AdvancedSettingsSection = 'ai' | 'sync' | 'encryption';
 /** How a note opens: 'auto' = view on touch devices (no keyboard pop-up), edit with a mouse. */
 export type OpenIn = 'auto' | 'view' | 'edit';
@@ -116,6 +116,8 @@ export interface Settings {
 	accent: string;
 	/** AI harness on. Off: its code is never loaded, no button, no Mod+J. */
 	ai: boolean;
+	/** Wiki links + graph. Off: the graph chunk is not loaded and no graph work runs. */
+	linkedNotes: boolean;
 	/** Open notes in view or edit mode. */
 	openIn: OpenIn;
 	/** Note tabs above the editor: every note opened (or created) gets a tab. */
@@ -151,6 +153,7 @@ const DEFAULT_SETTINGS: Settings = {
 	highlightColor: 'yellow',
 	accent: DEFAULT_ACCENT,
 	ai: true,
+	linkedNotes: false,
 	openIn: 'auto',
 	tabs: false,
 	maxTabs: 5,
@@ -911,6 +914,21 @@ class AppState {
 		this.trashOpen = false;
 		this.pane = 'list';
 		this.drawerOpen = false;
+	}
+
+	/** Open the linked-note map. Its component is imported only for this view. */
+	openGraph(): void {
+		if (!this.settings.linkedNotes) return;
+		this.setView('graph');
+	}
+
+	/** Follow a wiki link the way the map resolves it (hidden folders left out). */
+	async openWikiLink(target: string): Promise<void> {
+		if (!this.settings.linkedNotes) return;
+		const { resolveWikiLink } = await import('../linkedNotes');
+		const note = resolveWikiLink(this.listedNotes, target, this.activeId ?? '');
+		if (note) await this.openNote(note.id);
+		else this.notify('error', `No note named “${target.trim()}”`);
 	}
 
 	// --- stacked (compact) navigation ---------------------------------------
@@ -1793,6 +1811,9 @@ class AppState {
 			this.closeHarness();
 			this.harnessLoaded = false;
 		}
+		// The graph view owns every graph allocation and listener. Leaving it
+		// unmounts the component immediately; the disabled feature has no runtime work.
+		if (patch.linkedNotes === false && this.view === 'graph') this.setView('editor');
 		if (patch.encryption !== undefined)
 			void (patch.encryption ? this.startVault() : this.stopVault());
 		if (patch.autoLockMinutes !== undefined) this.vault?.rearm();
