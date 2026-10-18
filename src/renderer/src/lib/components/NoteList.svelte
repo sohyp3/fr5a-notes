@@ -175,6 +175,10 @@
 		border-radius: 8px;
 		background: var(--bg-hover);
 		color: var(--text-muted);
+		transition: box-shadow var(--dur-fast) ease;
+	}
+	.search:focus-within {
+		box-shadow: inset 0 0 0 1.5px var(--accent);
 	}
 	.search input {
 		flex: 1 1 auto;

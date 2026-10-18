@@ -140,9 +140,10 @@
 	}
 	.btn.primary {
 		background: var(--accent);
-		color: #fff;
+		color: var(--on-accent);
 	}
 	.btn.primary.danger {
 		background: var(--danger);
+		color: var(--on-danger);
 	}
 </style>

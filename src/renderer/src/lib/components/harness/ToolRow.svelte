@@ -151,15 +151,17 @@
 		width: 18px;
 		height: 18px;
 		border-radius: 50%;
-		color: #fff;
+		color: var(--on-faint);
 		background: var(--text-faint);
 	}
 	.ok .st {
 		background: var(--ok);
+		color: var(--on-ok);
 	}
 	.failed .st,
 	.rejected .st {
 		background: var(--danger);
+		color: var(--on-danger);
 	}
 	.running .st {
 		background: none;

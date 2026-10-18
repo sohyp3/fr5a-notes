@@ -231,6 +231,6 @@
 	.btn.primary,
 	.btn.primary:hover:not(:disabled) {
 		background: var(--accent);
-		color: #fff;
+		color: var(--on-accent);
 	}
 </style>

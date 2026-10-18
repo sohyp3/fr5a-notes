@@ -184,10 +184,13 @@
 	.item :global(.icon) {
 		color: var(--text-muted);
 	}
-	.item:hover:not(:disabled),
+	.item:hover:not(:disabled) {
+		background: var(--bg-hover);
+	}
 	.item:focus-visible {
 		background: var(--bg-hover);
 		outline: none;
+		box-shadow: inset 0 0 0 1.5px var(--accent);
 	}
 	.item:active:not(:disabled) {
 		background: var(--bg-active);
@@ -200,6 +203,10 @@
 	}
 	.item.danger:hover:not(:disabled) {
 		background: var(--danger-soft);
+	}
+	.item.danger:focus-visible {
+		background: var(--danger-soft);
+		box-shadow: inset 0 0 0 1.5px var(--danger);
 	}
 	.item:disabled {
 		opacity: 0.4;

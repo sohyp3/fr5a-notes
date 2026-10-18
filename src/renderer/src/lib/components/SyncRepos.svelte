@@ -206,7 +206,7 @@
 	}
 	.btn.primary {
 		background: var(--accent);
-		color: #fff;
+		color: var(--on-accent);
 	}
 	.btn:disabled {
 		opacity: 0.5;

@@ -358,8 +358,18 @@
 	>
 		<div class="row">
 			<span class="title">
-				{#if note.pinned && !trash}<span class="pindot" title="Pinned">📌</span>{/if}
-				{#if note.locked && !trash}<span class="pindot" title="Locked">🔒</span>{/if}
+				{#if note.pinned && !trash}<span
+						class="shield pinned"
+						role="img"
+						title="Pinned"
+						aria-label="Pinned"><Icon name="pin" size={11} stroke={2} /></span
+					>{/if}
+				{#if note.locked && !trash}<span
+						class="shield"
+						role="img"
+						title="Locked"
+						aria-label="Locked"><Icon name="lock" size={11} stroke={2} /></span
+					>{/if}
 				{#if note.encrypted}<span
 						class="shield"
 						role="img"
@@ -410,7 +420,7 @@
 		min-height: 44px;
 		font-size: 11.5px;
 		font-weight: 600;
-		color: #fff;
+		color: var(--on-muted);
 		touch-action: manipulation;
 	}
 	.action:active {
@@ -419,20 +429,25 @@
 	.action.right {
 		left: 0;
 		background: #e0a520;
+		color: #1e1d1b;
 	}
 	.action.right.restore {
 		background: var(--ok);
+		color: var(--on-ok);
 	}
 	.action.left {
 		right: 0;
 		background: var(--accent);
+		color: var(--on-accent);
 	}
 	/* Permanent delete gets a hard red: it's irreversible. */
 	.action.left.danger {
 		background: var(--danger);
+		color: var(--on-danger);
 	}
 	.action.left.locked {
 		background: var(--text-muted);
+		color: var(--on-muted);
 	}
 	.ico {
 		display: grid;
@@ -452,6 +467,10 @@
 	}
 	.card:hover {
 		background: var(--bg-hover);
+	}
+	.card:focus-visible {
+		outline: none;
+		box-shadow: inset 0 0 0 2px var(--accent);
 	}
 	.swipe.open .card {
 		box-shadow: 0 1px 6px rgba(0, 0, 0, 0.12);
@@ -482,15 +501,14 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
-	.pindot {
-		font-size: 11px;
-		margin-right: 2px;
-	}
 	.shield {
 		display: inline-grid;
 		vertical-align: -1px;
 		margin-right: 3px;
 		color: var(--text-muted);
+	}
+	.shield.pinned {
+		color: var(--accent);
 	}
 	.time {
 		flex: 0 0 auto;

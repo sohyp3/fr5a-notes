@@ -113,8 +113,11 @@
 	const editable = $derived(app.editing && !locked);
 	const compact = $derived(app.layout === 'phone');
 	let headW = $state(0);
+	let crumbW = $state(0);
 	/** A narrow header (touch tablets: 44px targets beside the list): the crumb keeps to the file name. */
 	const narrow = $derived(compact || (headW > 0 && headW < (app.touch ? 620 : 440)));
+	/** The crumb itself is squeezed (a full toolbar leaves it little room): drop the folder. */
+	const crumbTight = $derived(crumbW > 0 && crumbW < 240);
 	const mac = platform.platform === 'darwin';
 	/** A shortcut to show in a menu row: none on touch, where there's no keyboard to press it. */
 	const keys = (onMac: string, other: string) => (app.touch ? undefined : mac ? onMac : other);
@@ -893,7 +896,7 @@
 	{:else}
 		<header class={['editor-head', { scrolled }]} bind:clientWidth={headW}>
 			{#if !compact}
-				<div class="crumb">
+				<div class="crumb" bind:clientWidth={crumbW}>
 					{#if fileItems.length}
 						<button
 							bind:this={crumbBtn}
@@ -906,7 +909,7 @@
 							aria-expanded={!!crumbAt}
 							onclick={openCrumb}
 						>
-							{#if crumb.dir && !narrow}<span class="cdir">{crumb.dir} /</span>{/if}
+							{#if crumb.dir && !narrow && !crumbTight}<span class="cdir">{crumb.dir} /</span>{/if}
 							<span class="cname">{crumb.name}</span>
 							<span class="caret-down" aria-hidden="true"><Icon name="chevron" size={11} /></span>
 						</button>
@@ -1423,11 +1426,12 @@
 		font-size: 10.5px;
 		font-weight: 600;
 		letter-spacing: 0.06em;
-		color: #fff;
+		color: var(--on-muted);
 		background: var(--text-muted);
 	}
 	.vim-badge.insert {
 		background: var(--accent);
+		color: var(--on-accent);
 	}
 	.vim-badge.visual {
 		background: #7c6ff0;
@@ -1446,7 +1450,7 @@
 		padding: 9px 18px;
 		border-radius: 9px;
 		background: var(--accent);
-		color: #fff;
+		color: var(--on-accent);
 		font-size: 13.5px;
 		font-weight: 600;
 		transition:

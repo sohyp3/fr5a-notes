@@ -270,7 +270,7 @@
 	}
 	.insert {
 		background: var(--accent);
-		color: #fff;
+		color: var(--on-accent);
 	}
 	.cancel {
 		margin-top: 6px;

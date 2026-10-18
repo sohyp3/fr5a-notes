@@ -238,7 +238,7 @@
 	.stepper.on .dot,
 	.stepper.done .dot {
 		background: var(--accent);
-		color: #fff;
+		color: var(--on-accent);
 	}
 	.qbody {
 		flex: 1 1 auto;
@@ -309,7 +309,7 @@
 	}
 	.opt.on .key {
 		background: var(--accent);
-		color: #fff;
+		color: var(--on-accent);
 	}
 	.otext {
 		flex: 1;
@@ -339,7 +339,7 @@
 		height: 20px;
 		border-radius: 50%;
 		box-shadow: inset 0 0 0 1.5px var(--text-faint);
-		color: #fff;
+		color: var(--on-accent);
 	}
 	.mark.multi {
 		border-radius: 5px;
@@ -350,6 +350,9 @@
 	}
 	.other {
 		cursor: text;
+	}
+	.other:focus-within {
+		box-shadow: inset 0 0 0 1.5px var(--accent);
 	}
 	.other input {
 		flex: 1;
@@ -403,7 +406,7 @@
 	}
 	.primary {
 		background: var(--accent);
-		color: #fff;
+		color: var(--on-accent);
 	}
 	.primary:disabled {
 		opacity: 0.4;

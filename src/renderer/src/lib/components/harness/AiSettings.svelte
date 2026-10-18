@@ -1558,7 +1558,7 @@
 	}
 	.btn.primary {
 		background: var(--accent);
-		color: #fff;
+		color: var(--on-accent);
 	}
 	.btn.danger {
 		color: var(--danger);

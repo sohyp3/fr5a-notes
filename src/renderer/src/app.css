@@ -63,6 +63,13 @@
 	   the default (yellow) used before the store applies the stored choice. */
 	--accent: #c99700;
 	--accent-soft: rgba(201, 151, 0, 0.13); /* re-derived from --accent in applyPalette */
+	/* Ink on filled accent / danger / ok surfaces. applyPalette re-derives the
+	   accent one per theme; these defaults match the default palette. */
+	--on-accent: #1e1d1b;
+	--on-danger: #ffffff;
+	--on-ok: #ffffff;
+	--on-muted: #1e1d1b;
+	--on-faint: #1e1d1b;
 
 	--md-syntax: #c26b62;
 	--shadow-pane: 0 1px 3px rgba(0, 0, 0, 0.04), 0 6px 20px rgba(0, 0, 0, 0.05);
@@ -106,6 +113,11 @@
 
 	--accent: #f0b429;
 	--accent-soft: rgba(240, 180, 41, 0.17);
+	--on-accent: #1e1d1b;
+	--on-danger: #1e1d1b;
+	--on-ok: #1e1d1b;
+	--on-muted: #1e1d1b;
+	--on-faint: #ffffff;
 
 	--md-syntax: #e08a80;
 	--shadow-pane: 0 1px 3px rgba(0, 0, 0, 0.25), 0 8px 26px rgba(0, 0, 0, 0.35);
@@ -887,7 +899,8 @@ html.md-image-dragging * {
 		size: A4;
 		margin: 18mm 17mm;
 	}
-	html {
+	:root[data-theme],
+	:root:not([data-theme]) {
 		--bg-editor: #fff;
 		--text-strong: #111;
 		--text: #222;
@@ -895,6 +908,11 @@ html.md-image-dragging * {
 		--text-faint: #aaa;
 		--accent: #8a6800;
 		--accent-soft: rgba(138, 104, 0, 0.11);
+		--on-accent: #ffffff;
+		--on-danger: #ffffff;
+		--on-ok: #ffffff;
+		--on-muted: #ffffff;
+		--on-faint: #1e1d1b;
 		--code-bg: #f3f3f3;
 		--table-line: #ccc;
 		--table-head: #f5f5f5;

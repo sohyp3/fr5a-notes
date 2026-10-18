@@ -16,7 +16,7 @@ Produces in `dist/`:
 - `fr5a-notes_<version>_amd64.deb` — Debian/Ubuntu
 
 All three are built independently from the same `dist/linux-unpacked/` — none is derived
-from another. (`bun run dist:arch` is a separate flow: it builds a package via the AUR
+from another. `bun run dist:arch` builds only the `.pacman`. (`bun run dist:aur` is a separate flow: it builds a package via the AUR
 PKGBUILD to test exactly what AUR users will get.)
 
 > On Arch, the `.deb`/`.pacman` steps need `libxcrypt-compat` installed (provides `libcrypt.so.1` for fpm).

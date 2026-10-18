@@ -644,16 +644,19 @@
 		font-family: var(--font-mono);
 		font-size: 11px;
 		font-weight: 700;
-		color: #fff;
+		color: var(--text);
 	}
 	.badge.added {
 		background: var(--ok);
+		color: var(--on-ok);
 	}
 	.badge.modified {
 		background: var(--accent);
+		color: var(--on-accent);
 	}
 	.badge.deleted {
 		background: var(--danger);
+		color: var(--on-danger);
 	}
 	.badge.stash {
 		background: var(--bg-active);
@@ -837,7 +840,7 @@
 	}
 	.btn.primary {
 		background: var(--accent);
-		color: #fff;
+		color: var(--on-accent);
 	}
 	.btn.primary:hover,
 	.btn.primary:active {

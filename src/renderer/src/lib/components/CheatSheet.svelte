@@ -6,6 +6,16 @@
 
 	const app = getAppState();
 	const shortcuts = $derived(SHORTCUTS.filter((sc) => !sc.feature || app.settings[sc.feature]));
+	let sheetEl = $state<HTMLDivElement | null>(null);
+	// Move focus into the dialog while it is open, and hand it back where it
+	// came from when it closes, so typing in the editor carries on.
+	$effect(() => {
+		const el = sheetEl;
+		if (!el) return;
+		const prev = document.activeElement as HTMLElement | null;
+		el.focus();
+		return () => prev?.focus?.();
+	});
 </script>
 
 <!-- Global cheat-sheet overlay, toggled from anywhere with Mod+/. -->
@@ -19,6 +29,7 @@
 	onkeydown={(e) => e.key === 'Escape' && app.toggleCheatSheet()}
 >
 	<div
+		bind:this={sheetEl}
 		class="sheet"
 		role="dialog"
 		tabindex="-1"

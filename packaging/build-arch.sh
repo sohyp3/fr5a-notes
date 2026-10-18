@@ -4,7 +4,7 @@
 # published to the AUR) but points its source at the local dist AppImage instead
 # of the GitHub release, so no download/release is needed.
 #
-# Usage:  bun run dist:arch     (builds the AppImage first, then this)
+# Usage:  bun run dist:aur      (builds the AppImage first, then this)
 # Output: build/aur/<pkgname>-<ver>-x86_64.pkg.tar.zst
 set -euo pipefail
 

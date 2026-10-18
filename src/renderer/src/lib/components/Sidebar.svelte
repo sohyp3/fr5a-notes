@@ -303,6 +303,10 @@
 		border-radius: 8px;
 		background: var(--bg-hover);
 		color: var(--text-muted);
+		transition: box-shadow var(--dur-fast) ease;
+	}
+	.new-folder:focus-within {
+		box-shadow: inset 0 0 0 1.5px var(--accent);
 	}
 	.new-folder input {
 		flex: 1;

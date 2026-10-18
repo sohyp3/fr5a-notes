@@ -15,7 +15,7 @@ export const ACCENTS: Accent[] = [
 	{ id: 'red', label: 'Red', light: '#ee5d50', dark: '#ff6a5c' },
 	{ id: 'orange', label: 'Orange', light: '#e8720c', dark: '#ff8c42' },
 	{ id: 'green', label: 'Green', light: '#2aa66a', dark: '#3ecf8e' },
-	{ id: 'blue', label: 'Blue', light: '#2f7de1', dark: '#5b9dff' },
+	{ id: 'blue', label: 'Blue', light: '#2c76d5', dark: '#5b9dff' },
 	{ id: 'purple', label: 'Purple', light: '#7b5cd6', dark: '#a68bff' },
 	{ id: 'pink', label: 'Pink', light: '#e0559a', dark: '#ff77b7' },
 	{ id: 'graphite', label: 'Graphite', light: '#6b6862', dark: '#a09c94' }
@@ -52,6 +52,7 @@ export function applyPalette(accent: Accent, theme: 'light' | 'dark'): void {
 	root.setProperty('--bg-list', mix(primary, secondary, 0.4));
 	root.setProperty('--text-main', mix(hex, base.text, 0.08));
 	root.setProperty('--accent-soft', rgba(hex, theme === 'dark' ? 0.17 : 0.13));
+	root.setProperty('--on-accent', onColor(hex));
 }
 
 const channel = (hex: string, i: number): number => parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16);
@@ -72,4 +73,30 @@ function mix(a: string, b: string, p: number): string {
 		out += v.toString(16).padStart(2, '0');
 	}
 	return out;
+}
+
+/** WCAG relative luminance of a `#rrggbb` color. */
+function luminance(hex: string): number {
+	const [r, g, b] = [0, 1, 2].map((i) => {
+		const c = channel(hex, i) / 255;
+		return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+	});
+	return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrast(a: string, b: string): number {
+	const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+	return (hi + 0.05) / (lo + 0.05);
+}
+
+const ON_LIGHT = '#ffffff';
+const ON_DARK = '#1e1d1b';
+
+/**
+ * Text / icon color for a filled accent button. White is the incumbent look;
+ * a dark ink is only chosen when it is clearly more legible (bright accents,
+ * especially in the dark theme), so warm mid-tones keep their white type.
+ */
+export function onColor(hex: string): string {
+	return contrast(hex, ON_DARK) > contrast(hex, ON_LIGHT) * 1.15 ? ON_DARK : ON_LIGHT;
 }

@@ -1751,7 +1751,7 @@
 		padding: 0 14px;
 		border-radius: 9px;
 		background: var(--accent);
-		color: #fff;
+		color: var(--on-accent);
 		font-weight: 600;
 	}
 	:global(html[data-touch]) .btn {
@@ -1849,7 +1849,7 @@
 	}
 	.dock-foot .primary {
 		background: var(--accent);
-		color: #fff;
+		color: var(--on-accent);
 	}
 
 	/* --- prompt ------------------------------------------------------------ */
@@ -1863,6 +1863,10 @@
 		gap: 8px;
 		padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
 		box-shadow: inset 0 1px 0 var(--bg-active);
+		transition: box-shadow var(--dur-fast) ease;
+	}
+	.prompt:focus-within {
+		box-shadow: inset 0 2px 0 var(--accent-soft);
 	}
 	:global(html[data-touch]) .prompt {
 		--row: 44px;
@@ -1911,7 +1915,7 @@
 		padding: 0 7px;
 		border-radius: 8px;
 		background: var(--accent);
-		color: #fff;
+		color: var(--on-accent);
 		font-size: 12.5px;
 		font-weight: 600;
 		transition:

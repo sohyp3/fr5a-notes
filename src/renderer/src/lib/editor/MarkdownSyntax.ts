@@ -483,7 +483,7 @@ function lineDecorations(
 	const block = s.blocks.get(i);
 	/** Its table / picture shows as source: the caret is inside (and editable). */
 	const raw =
-		!!block && editable && selTo >= s.starts[block[0]] && selFrom <= s.starts[block[1] + 1];
+		!!block && editable && selTo >= s.starts[block[0]] && selFrom < s.starts[block[1] + 1];
 	const row = s.tables.get(i);
 
 	if (row?.role === 'head' && !raw) {
