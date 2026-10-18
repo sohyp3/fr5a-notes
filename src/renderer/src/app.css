@@ -304,9 +304,55 @@ button.scrim {
 	padding: 0.1em 0.32em;
 	border-radius: 4px;
 }
+.ProseMirror p.md-codeblock {
+	margin: 0;
+	padding: 0 0.8em;
+	min-height: 1.55em;
+	font-family: var(--font-mono);
+	font-size: 0.86em;
+	line-height: 1.65;
+	white-space: pre-wrap;
+	overflow-wrap: normal;
+	background: var(--code-bg);
+}
+.ProseMirror p.md-codeblock-first {
+	margin-top: 0.6em;
+	padding-top: 0.45em;
+	border-radius: 8px 8px 0 0;
+}
+.ProseMirror p.md-codeblock-last {
+	margin-bottom: 0.6em;
+	padding-bottom: 0.45em;
+	border-radius: 0 0 8px 8px;
+}
+.ProseMirror p.md-codeblock-first.md-codeblock-last {
+	border-radius: 8px;
+}
+.ProseMirror p.md-codeblock-fence {
+	color: var(--text-faint);
+}
+:root:not([data-ghost='off']) .ProseMirror p.md-codeblock-fence:not(.md-codeblock-fence-open) {
+	min-height: 0;
+	font-size: 0;
+	line-height: 0;
+}
+.md-codeblock-text {
+	color: var(--text);
+}
 .md-link {
 	color: var(--accent);
 	text-decoration: none;
+}
+.md-link[href] {
+	cursor: pointer;
+	text-decoration: underline;
+	text-decoration-color: transparent;
+	text-underline-offset: 0.18em;
+	transition: text-decoration-color 120ms ease-out;
+}
+.md-link[href]:hover,
+.md-link[href]:focus-visible {
+	text-decoration-color: currentColor;
 }
 
 /* Line-level (node) decorations — heading sizing, quotes, etc. */

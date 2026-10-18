@@ -268,8 +268,8 @@
 				<p>
 					This notes folder isn't under git, so there is no "last sync" to compare with. Set up sync
 					in
-					<button class="link" onclick={() => app.openSettings('sync')}>Settings → Sync</button> to get
-					a full history of every note.
+					<button class="link" onclick={() => app.openSettings('sync')}>Git sync settings</button> to
+					get a full history of every note.
 				</p>
 				{#if sinceOpened}
 					<h2>{sinceOpened.path} — since you opened it</h2>

@@ -647,7 +647,7 @@
 						</select>
 						<button
 							class="chip"
-							title="Star models in Settings → AI to pick them here"
+							title="Star models in Settings → Advanced → AI & BYOK to pick them here"
 							onclick={() => app.openSettings('ai')}
 							><Icon name="star" size={12} stroke={2} /> Models…</button
 						>
@@ -659,7 +659,7 @@
 								class={['chip', { off: !tab.useCurrent || app.aiBlocksActive }]}
 								aria-pressed={tab.useCurrent}
 								title={app.aiBlocksActive
-									? 'The open note is encrypted: unlock it (and allow it in Settings → Encryption) for the assistant to read it'
+									? 'The open note is encrypted: unlock it (and allow it in Settings → Advanced → Encryption) for the assistant to read it'
 									: app.activeEncrypted
 										? 'Attach the open note (encrypted: the chat then stays on this device)'
 										: app.settings.tabs
@@ -805,16 +805,20 @@
 								<p class="muted">
 									Get one at <a href={OPENCODE_KEY_URL} target="_blank" rel="noreferrer"
 										>opencode.ai/console</a
-									>, then paste it in Settings → AI.
+									>, then paste it in Settings → Advanced → AI & BYOK.
 								</p>
 							{/if}
-							<button class="btn" onclick={() => app.openSettings('ai')}>Open Settings → AI</button>
+							<button class="btn" onclick={() => app.openSettings('ai')}
+								>Open AI & BYOK settings</button
+							>
 						{:else if !ai.config.providers.length}
 							<p class="lead">
 								Add a provider (DeepSeek, OpenRouter, a local llama.cpp / Ollama over VPN…) to
 								start.
 							</p>
-							<button class="btn" onclick={() => app.openSettings('ai')}>Open Settings → AI</button>
+							<button class="btn" onclick={() => app.openSettings('ai')}
+								>Open AI & BYOK settings</button
+							>
 						{:else}
 							<EmptyState
 								small
@@ -854,7 +858,7 @@
 								<div
 									class="usage"
 									title={recordCost(e.usage, priced(e.usage.provider, e.usage.model)) === null
-										? 'Tokens of this reply (tool steps included). models.dev lists no price for this model: add one to the provider in Settings → AI to see the cost.'
+										? 'Tokens of this reply (tool steps included). models.dev lists no price for this model: add one under Settings → Advanced → AI & BYOK to see the cost.'
 										: 'Tokens and cost of this reply, tool steps included'}
 								>
 									{replyUsage(e.usage)}
@@ -913,7 +917,7 @@
 									{#if info.retry}{@render retryBtn()}{/if}
 									{#if info.settings}
 										<button class="chip-btn" onclick={() => app.openSettings('ai')}>
-											<Icon name="settings" size={14} /> Settings → AI
+											<Icon name="settings" size={14} /> AI & BYOK settings
 										</button>
 									{/if}
 								</div>

@@ -49,6 +49,12 @@ describe('renderMarkdown', () => {
 		expect(html).toContain('<pre><code>if (a &lt; b) {}</code></pre>');
 	});
 
+	it('renders a compact one-line fence without treating its content as a language', () => {
+		const html = renderMarkdown('``` code block ```');
+		expect(html).toContain('<span>text</span>');
+		expect(html).toContain('<pre><code>code block</code></pre>');
+	});
+
 	it('renders quotes and tables', () => {
 		expect(renderMarkdown('> **q**')).toBe('<blockquote><p><strong>q</strong></p></blockquote>');
 		const t = renderMarkdown('| a | b |\n|---|--:|\n| 1 | 2 |');

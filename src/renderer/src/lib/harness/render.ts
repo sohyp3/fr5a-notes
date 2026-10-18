@@ -93,7 +93,8 @@ export function renderInline(src: string): string {
 
 // --- blocks -------------------------------------------------------------------
 
-const FENCE = /^\s{0,3}(`{3,}|~{3,})\s*([\w+#.-]*)/;
+const FENCE = /^\s{0,3}(`{3,}|~{3,})[ \t]*([\w+#.-]*)[ \t]*$/;
+const ONE_LINE_FENCE = /^\s{0,3}(`{3,}|~{3,})[ \t]+(.+?)[ \t]+\1\s*$/;
 const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;
 const RULE = /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/;
 const QUOTE = /^\s{0,3}>\s?/;
@@ -102,7 +103,12 @@ const TABLE_SEP = /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/;
 
 function isBlockStart(line: string): boolean {
 	return (
-		FENCE.test(line) || HEADING.test(line) || RULE.test(line) || QUOTE.test(line) || ITEM.test(line)
+		ONE_LINE_FENCE.test(line) ||
+		FENCE.test(line) ||
+		HEADING.test(line) ||
+		RULE.test(line) ||
+		QUOTE.test(line) ||
+		ITEM.test(line)
 	);
 }
 
@@ -190,13 +196,20 @@ export function renderMarkdown(src: string): string {
 			i++;
 			continue;
 		}
+		const oneLineFence = ONE_LINE_FENCE.exec(line);
+		if (oneLineFence) {
+			out.push(codeBlock('', oneLineFence[2]));
+			i++;
+			continue;
+		}
 
 		const fence = FENCE.exec(line);
 		if (fence) {
 			const marker = fence[1];
 			const body: string[] = [];
 			i++;
-			while (i < lines.length && !lines[i].trim().startsWith(marker)) body.push(lines[i++]);
+			const closing = new RegExp(`^\\s{0,3}${marker[0]}{${marker.length},}\\s*$`);
+			while (i < lines.length && !closing.test(lines[i])) body.push(lines[i++]);
 			i++; // closing fence (or EOF while streaming)
 			while (body.length && !body[body.length - 1].trim()) body.pop();
 			out.push(codeBlock(fence[2], body.join('\n')));

@@ -50,7 +50,8 @@ const DEFAULT_SIDEBAR: SidebarState = {
 export type View = 'editor' | 'settings' | 'changes';
 export type Pane = 'nav' | 'list' | 'editor' | 'harness';
 export type SettingsSection =
-	'general' | 'appearance' | 'editor' | 'toolbar' | 'sync' | 'ai' | 'encryption' | 'shortcuts';
+	'general' | 'appearance' | 'editor' | 'toolbar' | 'advanced' | 'shortcuts';
+export type AdvancedSettingsSection = 'ai' | 'sync' | 'encryption';
 /** How a note opens: 'auto' = view on touch devices (no keyboard pop-up), edit with a mouse. */
 export type OpenIn = 'auto' | 'view' | 'edit';
 
@@ -244,6 +245,8 @@ class AppState {
 
 	/** Section Settings shows (transient). */
 	settingsSection = $state<SettingsSection>('general');
+	/** Tab shown inside Settings → Advanced (transient). */
+	settingsAdvancedSection = $state<AdvancedSettingsSection>('ai');
 	/** Phones: a section is open (else the list of sections). */
 	settingsDrill = $state(false);
 	/** Notes changed since the last commit; null = not a git repo (or not loaded yet). */
@@ -349,7 +352,7 @@ class AppState {
 			? this.folders.filter((f) => !this.hiddenParent(f))
 			: this.folders
 	);
-	/** The AI may read encrypted notes now: allowed (Settings → Encryption) and unlocked. */
+	/** The AI may read encrypted notes now: allowed (Settings → Advanced → Encryption) and unlocked. */
 	aiReadsEncrypted = $derived(!!this.vault?.unlocked && this.settings.aiReadsEncrypted);
 	/** Notes the AI harness may see: encrypted ones only while `aiReadsEncrypted`. */
 	aiNotes = $derived(this.aiReadsEncrypted ? this.notes : this.notes.filter((n) => !n.encrypted));
@@ -1715,7 +1718,7 @@ class AppState {
 		else this.openSettings();
 	}
 
-	/** Open Settings, optionally on one section (e.g. 'ai' from the harness). */
+	/** Open Settings, optionally on one section (e.g. the AI tab inside Advanced). */
 	/** Where a note toolbar button sits on this device (Settings → Toolbar). */
 	barSpot(id: BarItem): BarSpot {
 		return spotOf(this.settings.bar, id, this.layout === 'phone', this.touch);
@@ -1725,8 +1728,11 @@ class AppState {
 		this.updateSettings({ bar: { ...this.settings.bar, [id]: spot } });
 	}
 
-	openSettings(section?: SettingsSection): void {
-		if (section) this.settingsSection = section;
+	openSettings(section?: SettingsSection | AdvancedSettingsSection): void {
+		if (section === 'ai' || section === 'sync' || section === 'encryption') {
+			this.settingsSection = 'advanced';
+			this.settingsAdvancedSection = section;
+		} else if (section) this.settingsSection = section;
 		this.settingsDrill = !!section;
 		this.setView('settings');
 	}

@@ -8,20 +8,57 @@ import type { EditorState, Transaction } from '@tiptap/pm/state';
 
 const FENCE = /^\s{0,3}(`{3,}|~{3,})/;
 
+export interface CodeRow {
+	fence: boolean;
+	first: boolean;
+	last: boolean;
+	/** A compact block such as ``` code ``` on one line. */
+	single: boolean;
+}
+
+/** Fenced-code rows, including their opening and closing fence lines. */
+export function findCodeRows(lines: string[]): Map<number, CodeRow> {
+	const rows = new Map<number, CodeRow>();
+	for (let i = 0; i < lines.length; i++) {
+		const opening = FENCE.exec(lines[i]);
+		if (!opening) continue;
+		const marker = opening[1];
+		const tail = lines[i].slice(opening[0].length);
+		const inlineClose = new RegExp(`\\s${marker[0]}{${marker.length},}\\s*$`).exec(tail);
+		if (inlineClose && tail.slice(0, inlineClose.index).trim()) {
+			rows.set(i, { fence: true, first: true, last: true, single: true });
+			continue;
+		}
+
+		let end = lines.length - 1;
+		for (let j = i + 1; j < lines.length; j++) {
+			const closing = FENCE.exec(lines[j]);
+			if (
+				closing &&
+				closing[1][0] === marker[0] &&
+				closing[1].length >= marker.length &&
+				lines[j].slice(closing[0].length).trim() === ''
+			) {
+				end = j;
+				break;
+			}
+		}
+		for (let j = i; j <= end; j++)
+			rows.set(j, {
+				fence: j === i || j === end,
+				first: j === i,
+				last: j === end,
+				single: false
+			});
+		i = end;
+	}
+	return rows;
+}
+
 /** Which lines sit inside fenced code (fence lines included): no blocks there. */
 export function codeLines(lines: string[]): boolean[] {
 	const out = new Array<boolean>(lines.length).fill(false);
-	let fence: string | null = null;
-	for (let i = 0; i < lines.length; i++) {
-		const f = FENCE.exec(lines[i]);
-		if (fence) {
-			out[i] = true;
-			if (f && f[1][0] === fence[0] && f[1].length >= fence.length) fence = null;
-		} else if (f) {
-			out[i] = true;
-			fence = f[1];
-		}
-	}
+	for (const i of findCodeRows(lines).keys()) out[i] = true;
 	return out;
 }
 

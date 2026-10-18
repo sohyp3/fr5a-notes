@@ -109,7 +109,8 @@ export class Vault {
 
 	/** Encrypt note text with the public key (no unlock needed). */
 	async encrypt(plain: string): Promise<string> {
-		if (!this.#public) throw new Error('Set up an encryption key first (Settings → Encryption).');
+		if (!this.#public)
+			throw new Error('Set up an encryption key first (Settings → Advanced → Encryption).');
 		return pgp.encryptNote(plain, this.#public);
 	}
 

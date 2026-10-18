@@ -1,6 +1,11 @@
 <script lang="ts">
 	import { fade, fly } from 'svelte/transition';
-	import { getAppState, type OpenIn, type SettingsSection } from '../stores/app.svelte';
+	import {
+		getAppState,
+		type AdvancedSettingsSection,
+		type OpenIn,
+		type SettingsSection
+	} from '../stores/app.svelte';
 	import { isMobile, platform } from '../platform';
 	import GitSetup from './GitSetup.svelte';
 	import SyncRepos from './SyncRepos.svelte';
@@ -30,10 +35,18 @@
 		{ id: 'appearance', label: 'Appearance', icon: 'sun', desc: 'Theme, accent, fonts' },
 		{ id: 'editor', label: 'Editor', icon: 'edit', desc: 'Ghost syntax, highlights, tabs, Vim' },
 		{ id: 'toolbar', label: 'Toolbar', icon: 'toolbar', desc: 'Buttons in the bar or in its menu' },
-		{ id: 'sync', label: 'Sync', icon: 'sync', desc: 'Git remotes, changes' },
-		{ id: 'ai', label: 'AI assistant', icon: 'ai', desc: 'Providers, web search, skills' },
-		{ id: 'encryption', label: 'Encryption', icon: 'key', desc: 'Encrypt notes with your key' },
+		{
+			id: 'advanced',
+			label: 'Advanced',
+			icon: 'settings',
+			desc: 'AI & BYOK, Git sync, encryption'
+		},
 		{ id: 'shortcuts', label: 'Shortcuts', icon: 'keyboard', desc: 'Keyboard shortcuts' }
+	];
+	const ADVANCED_SECTIONS: { id: AdvancedSettingsSection; label: string }[] = [
+		{ id: 'ai', label: 'AI & BYOK' },
+		{ id: 'sync', label: 'Git sync' },
+		{ id: 'encryption', label: 'Encryption' }
 	];
 
 	const shortcuts = $derived(SHORTCUTS.filter((sc) => !sc.feature || s[sc.feature]));
@@ -407,69 +420,87 @@
 								</div>
 							</section>
 						{/if}
-					{:else if section.id === 'sync'}
-						{#if platform.syncSetup}<GitSetup />{/if}
-						{#if platform.syncRepos}<SyncRepos />{/if}
-						{#if !platform.syncSetup}
+					{:else if section.id === 'advanced'}
+						<div class="advanced-tabs" role="tablist" aria-label="Advanced settings">
+							{#each ADVANCED_SECTIONS as item (item.id)}
+								<button
+									class={['advanced-tab', { on: app.settingsAdvancedSection === item.id }]}
+									role="tab"
+									aria-selected={app.settingsAdvancedSection === item.id}
+									aria-label={item.id === 'ai' ? 'AI assistant' : item.label}
+									onclick={() => (app.settingsAdvancedSection = item.id)}>{item.label}</button
+								>
+							{/each}
+						</div>
+
+						{#if app.settingsAdvancedSection === 'ai'}
+							<!-- AI off = no harness code loaded at all (AiSettings is a lazy chunk). -->
 							<section class="group">
-								<h3>How sync works</h3>
-								<p class="prose">
-									Pull and Push in the top bar run the system <code>git</code> in your notes folder: local
-									edits are committed, then merged with the remote (never force-pushed). The folder needs
-									to be a git repository with a remote you can push to.
-								</p>
+								<div class="row">
+									<div class="label">
+										<span class="name">Enable AI harness</span>
+										<span class="desc"
+											>Bring your own provider key for chat, skills and fact-checking (Mod+J)</span
+										>
+									</div>
+									{@render toggle(s.ai, 'Enable AI harness', () =>
+										app.updateSettings({ ai: !s.ai })
+									)}
+								</div>
 							</section>
-						{/if}
-						<section class="group">
-							<h3>Changes</h3>
-							<div class="row">
-								<div class="label">
-									<span class="name">Changed since the last sync</span>
-									<span class="desc"
-										>{app.changes === null
-											? 'Not a git repository'
-											: `${app.changes.length} ${app.changes.length === 1 ? 'note' : 'notes'}`}</span
-									>
+							{#if s.ai}
+								{#await import('./harness/AiSettings.svelte') then m}
+									<m.default />
+								{/await}
+							{/if}
+						{:else if app.settingsAdvancedSection === 'sync'}
+							{#if platform.syncSetup}<GitSetup />{/if}
+							{#if platform.syncRepos}<SyncRepos />{/if}
+							{#if !platform.syncSetup}
+								<section class="group">
+									<h3>How sync works</h3>
+									<p class="prose">
+										Pull and Push in the top bar run the system <code>git</code> in your notes folder:
+										local edits are committed, then merged with the remote (never force-pushed). The folder
+										needs to be a git repository with a remote you can push to.
+									</p>
+								</section>
+							{/if}
+							<section class="group">
+								<h3>Changes</h3>
+								<div class="row">
+									<div class="label">
+										<span class="name">Changed since the last sync</span>
+										<span class="desc"
+											>{app.changes === null
+												? 'Not a git repository'
+												: `${app.changes.length} ${app.changes.length === 1 ? 'note' : 'notes'}`}</span
+										>
+									</div>
+									<button class="btn" onclick={() => app.showChanges()}>Review…</button>
 								</div>
-								<button class="btn" onclick={() => app.showChanges()}>Review…</button>
-							</div>
-						</section>
-					{:else if section.id === 'ai'}
-						<!-- AI off = no harness code loaded at all (AiSettings is a lazy chunk). -->
-						<section class="group">
-							<div class="row">
-								<div class="label">
-									<span class="name">Enable AI harness</span>
-									<span class="desc">Chat, skills and fact-checking over your notes (Mod+J)</span>
+							</section>
+						{:else}
+							<!-- Off = no crypto code or key loaded (EncryptionSettings + OpenPGP are lazy chunks). -->
+							<section class="group">
+								<div class="row">
+									<div class="label">
+										<span class="name">Encrypt notes</span>
+										<span class="desc"
+											>Keep chosen notes encrypted with your PGP key: only devices that have the key
+											can read them, and git syncs the encrypted text.</span
+										>
+									</div>
+									{@render toggle(s.encryption, 'Encrypt notes', () =>
+										app.updateSettings({ encryption: !s.encryption })
+									)}
 								</div>
-								{@render toggle(s.ai, 'Enable AI harness', () => app.updateSettings({ ai: !s.ai }))}
-							</div>
-						</section>
-						{#if s.ai}
-							{#await import('./harness/AiSettings.svelte') then m}
-								<m.default />
-							{/await}
-						{/if}
-					{:else if section.id === 'encryption'}
-						<!-- Off = no crypto code or key loaded (EncryptionSettings + OpenPGP are lazy chunks). -->
-						<section class="group">
-							<div class="row">
-								<div class="label">
-									<span class="name">Encrypt notes</span>
-									<span class="desc"
-										>Keep chosen notes encrypted with your PGP key: only devices that have the key
-										can read them, and git syncs the encrypted text.</span
-									>
-								</div>
-								{@render toggle(s.encryption, 'Encrypt notes', () =>
-									app.updateSettings({ encryption: !s.encryption })
-								)}
-							</div>
-						</section>
-						{#if s.encryption}
-							{#await import('./EncryptionSettings.svelte') then m}
-								<m.default />
-							{/await}
+							</section>
+							{#if s.encryption}
+								{#await import('./EncryptionSettings.svelte') then m}
+									<m.default />
+								{/await}
+							{/if}
 						{/if}
 					{:else if section.id === 'shortcuts'}
 						<section class="group">
@@ -685,6 +716,45 @@
 		font-size: 17px;
 		font-weight: 700;
 		color: var(--text-strong);
+	}
+	.advanced-tabs {
+		display: flex;
+		gap: 3px;
+		margin: 0 0 24px;
+		padding: 3px;
+		width: fit-content;
+		max-width: 100%;
+		border-radius: 10px;
+		background: var(--bg-hover);
+		overflow-x: auto;
+	}
+	.advanced-tab {
+		flex: 0 0 auto;
+		min-height: 30px;
+		padding: 0 13px;
+		border-radius: 7px;
+		font-size: 13px;
+		font-weight: 500;
+		color: var(--text-muted);
+		transition:
+			background var(--dur-fast) ease,
+			color var(--dur-fast) ease;
+	}
+	.advanced-tab:hover {
+		color: var(--text);
+	}
+	.advanced-tab.on {
+		background: var(--bg-editor);
+		color: var(--text-strong);
+		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+	}
+	.advanced-tab:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 1px;
+	}
+	:global(html[data-touch]) .advanced-tab {
+		min-height: 40px;
+		padding: 0 16px;
 	}
 	.group {
 		margin-bottom: 26px;

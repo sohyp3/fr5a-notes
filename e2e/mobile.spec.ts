@@ -89,6 +89,13 @@ async function openSettings(page: Page) {
 	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).tap();
 }
 
+/** Open one of the feature tabs grouped under Settings → Advanced. */
+async function openAdvanced(page: Page, tab: 'AI assistant' | 'Git sync' | 'Encryption') {
+	const nav = page.getByRole('navigation', { name: 'Settings sections' });
+	await nav.getByRole('button', { name: /Advanced/ }).click();
+	await page.getByRole('tab', { name: tab, exact: true }).click();
+}
+
 async function openHarness(page: Page) {
 	await page.getByRole('button', { name: 'Toggle AI harness' }).tap();
 	const harness = page.getByRole('region', { name: 'AI harness' });
@@ -410,10 +417,7 @@ test('AI off: no button, no pane', async ({ page }) => {
 	if (layout === 'phone') await page.getByRole('button', { name: 'Back' }).tap();
 	if (layout === 'phone') await page.getByRole('button', { name: 'Back' }).tap();
 	await openSettings(page);
-	await page
-		.getByRole('navigation', { name: 'Settings sections' })
-		.getByRole('button', { name: /AI assistant/ })
-		.tap();
+	await openAdvanced(page, 'AI assistant');
 	const sw = page.getByRole('switch', { name: 'Enable AI harness' });
 	await expect(sw).toHaveAttribute('aria-checked', 'true');
 	await sw.tap();
@@ -1412,7 +1416,7 @@ test('desktop: encryption — off by default, then a key, an encrypted note, loc
 
 	// Switch it on and make a key.
 	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
-	await page.getByRole('button', { name: 'Encryption' }).click();
+	await openAdvanced(page, 'Encryption');
 	await page.getByRole('switch', { name: 'Encrypt notes' }).click();
 	await page.getByLabel('Passphrase', { exact: true }).fill('correct horse');
 	await page.getByLabel('Repeat passphrase').fill('correct horse');
@@ -1455,7 +1459,7 @@ test('desktop: encryption — off by default, then a key, an encrypted note, loc
 
 	// Switching it off locks, closes the note and takes the controls away.
 	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
-	await page.getByRole('button', { name: 'Encryption' }).click();
+	await openAdvanced(page, 'Encryption');
 	await page.getByRole('switch', { name: 'Encrypt notes' }).click();
 	await expect(page.getByRole('button', { name: 'Create key' })).toHaveCount(0);
 	await page.getByRole('button', { name: 'Close settings' }).click();
@@ -1470,7 +1474,7 @@ test('encryption on touch: a note encrypted while locked opens after the passphr
 	page
 }) => {
 	await openSettings(page);
-	await page.getByRole('button', { name: /^Encryption/ }).tap();
+	await openAdvanced(page, 'Encryption');
 	await page.getByRole('switch', { name: 'Encrypt notes' }).tap();
 	await page.getByLabel('Passphrase', { exact: true }).fill('correct horse');
 	await page.getByLabel('Repeat passphrase').fill('correct horse');
@@ -1536,7 +1540,7 @@ test('desktop: a folder can be hidden from the sidebar, shown again, and deleted
 
 	// Saved AI chats: one checkbox in Settings → AI hides their folder.
 	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
-	await page.getByRole('button', { name: 'AI assistant' }).click();
+	await openAdvanced(page, 'AI assistant');
 	await page.getByLabel('Hide saved chats from the sidebar').check();
 	await page.getByRole('button', { name: 'General' }).click();
 	await expect(page.getByText('AI chats', { exact: true })).toBeVisible();
@@ -1587,7 +1591,7 @@ test('desktop: encrypting a folder encrypts its notes, new notes and notes moved
 }) => {
 	const { ctx, page } = await desktopPage(browser);
 	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
-	await page.getByRole('button', { name: 'Encryption' }).click();
+	await openAdvanced(page, 'Encryption');
 	await page.getByRole('switch', { name: 'Encrypt notes' }).click();
 	await page.getByLabel('Passphrase', { exact: true }).fill('correct horse');
 	await page.getByLabel('Repeat passphrase').fill('correct horse');
@@ -1637,7 +1641,7 @@ test('desktop: a remembered passphrase unlocks without asking; forgetting delete
 			).api.getSecret('pgp:passphrase')
 		);
 	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
-	await page.getByRole('button', { name: 'Encryption' }).click();
+	await openAdvanced(page, 'Encryption');
 	await page.getByRole('switch', { name: 'Encrypt notes' }).click();
 	await page.getByLabel('Passphrase', { exact: true }).fill('correct horse');
 	await page.getByLabel('Repeat passphrase').fill('correct horse');
@@ -1706,7 +1710,7 @@ test('desktop: the model picker offers starred models of providers set up; model
 	const toggle = page.getByRole('button', { name: 'Toggle AI harness' });
 	await toggle.click();
 	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
-	await page.getByRole('button', { name: 'AI assistant' }).click();
+	await openAdvanced(page, 'AI assistant');
 	await page.getByRole('button', { name: 'Show DeepSeek details' }).click();
 	const deepseek = page.locator('.provider', { hasText: 'DeepSeek' });
 	await deepseek.locator('#key-deepseek').fill('sk-test');
@@ -1735,7 +1739,7 @@ test('desktop: models starred in Settings are offered in the AI pane, per chat',
 }) => {
 	const { ctx, page } = await desktopPage(browser);
 	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
-	await page.getByRole('button', { name: 'AI assistant' }).click();
+	await openAdvanced(page, 'AI assistant');
 
 	// OpenCode: a key, then its list (models.dev says gpt-5-nano is served over the Responses API).
 	await page.getByRole('button', { name: 'Show OpenCode details' }).click();
@@ -1839,7 +1843,7 @@ test('desktop: model lists and models.dev are fetched once, then read from stora
 	const fetched = (p: Page) => p.evaluate(() => (window as unknown as { __http: string[] }).__http);
 	const openAiSettings = async (p: Page) => {
 		await sidebar(p).getByRole('button', { name: 'Settings', exact: true }).click();
-		await p.getByRole('button', { name: 'AI assistant' }).click();
+		await openAdvanced(p, 'AI assistant');
 	};
 	// First visit: the local provider's list and the catalog (for every cloud provider).
 	await openAiSettings(page);
@@ -1882,7 +1886,7 @@ test('desktop: unlocked encrypted notes reach the AI; such a chat stays on this 
 }) => {
 	const { ctx, page } = await desktopPage(browser);
 	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
-	await page.getByRole('button', { name: 'Encryption' }).click();
+	await openAdvanced(page, 'Encryption');
 	await page.getByRole('switch', { name: 'Encrypt notes' }).click();
 	await page.getByLabel('Passphrase', { exact: true }).fill('correct horse');
 	await page.getByLabel('Repeat passphrase').fill('correct horse');
@@ -1919,7 +1923,7 @@ test('desktop: unlocked encrypted notes reach the AI; such a chat stays on this 
 	const toggle = page.getByRole('button', { name: 'Toggle AI harness' });
 	await toggle.click();
 	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
-	await page.getByRole('button', { name: 'Encryption' }).click();
+	await openAdvanced(page, 'Encryption');
 	await allow.click();
 	await page.getByRole('button', { name: 'Close settings' }).click();
 	await toggle.click();

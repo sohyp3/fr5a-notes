@@ -4,7 +4,7 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import type { EditorState } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 import { cellRanges, findTables, pipeOffsets, tableHtml, type TableRow } from './tables';
-import { codeLines } from './blocks';
+import { findCodeRows, type CodeRow } from './blocks';
 import { findImages, type ImageBlock } from './images';
 import { imageWidget } from './imageView';
 import {
@@ -49,12 +49,16 @@ export interface MarkdownSyntaxOptions {
 	highlights: boolean;
 	/** What an `<img>` loads for an image's `src`; null when it can't be shown. */
 	imageUrl: (src: string) => string | null;
+	/** Hand a clicked web link to the host browser. */
+	openLink?: (href: string) => void;
 }
 
 interface Deco {
 	from: number;
 	to: number;
 	class: string;
+	/** Extra DOM attributes for interactive decorations such as external links. */
+	attrs?: Record<string, string>;
 	/** Syntax markers get lit when the caret enters the token's outer span. */
 	syntax?: boolean;
 }
@@ -120,9 +124,23 @@ const INLINE_RULES: { re: RegExp; build: (m: RegExpExecArray, base: number) => D
 			const textStart = s + 1;
 			const textEnd = textStart + m[1].length;
 			const e = s + m[0].length;
+			const href = externalHref(m[2]);
 			return [
 				{ from: s, to: s + 1, class: 'md-syntax', syntax: true }, // [
-				{ from: textStart, to: textEnd, class: 'md-link' },
+				{
+					from: textStart,
+					to: textEnd,
+					class: 'md-link',
+					attrs: href
+						? {
+								nodeName: 'a',
+								href,
+								target: '_blank',
+								rel: 'noreferrer noopener',
+								title: 'Open in browser'
+							}
+						: undefined
+				},
 				{ from: textEnd, to: e, class: 'md-syntax', syntax: true } // ](url)
 			];
 		}
@@ -140,6 +158,17 @@ const INLINE_RULES: { re: RegExp; build: (m: RegExpExecArray, base: number) => D
 		}
 	}
 ];
+
+/** Only web links may leave the app; relative/file/custom URLs remain editable text. */
+function externalHref(raw: string): string | null {
+	const href = raw.trim();
+	try {
+		const url = new URL(href);
+		return url.protocol === 'http:' || url.protocol === 'https:' ? href : null;
+	} catch {
+		return null;
+	}
+}
 
 /** Helper for symmetric wrappers like **x** where marker length is fixed. */
 function wrap(m: RegExpExecArray, base: number, markLen: number, innerClass: string): Deco[] {
@@ -346,6 +375,8 @@ interface Scan {
 	lines: string[];
 	/** Position of each line's node, plus the document's end. */
 	starts: number[];
+	/** Fenced code blocks, including their fence lines. */
+	code: Map<number, CodeRow>;
 	tables: Map<number, TableRow>;
 	/** Image lines (not in a table): the picture shows above them. */
 	images: Map<number, ImageBlock>;
@@ -373,8 +404,10 @@ function scan(state: EditorState, opts: MarkdownSyntaxOptions): Scan {
 		starts.push(pos);
 	});
 	starts.push(state.doc.content.size);
+	const code = findCodeRows(lines);
 	// Tables span lines, so find them over the whole document first.
 	const tables = findTables(lines);
+	for (const i of code.keys()) tables.delete(i);
 	const blocks = new Map<number, [number, number]>();
 	for (const [i, row] of tables) {
 		if (row.role !== 'head') continue;
@@ -387,7 +420,7 @@ function scan(state: EditorState, opts: MarkdownSyntaxOptions): Scan {
 	const images = new Map<number, ImageBlock>();
 	const imageRows = new Map<number, { size: boolean }>();
 	for (const [i, img] of findImages(lines)) {
-		if (tables.has(i)) continue;
+		if (code.has(i) || tables.has(i)) continue;
 		images.set(i, img);
 		const block: [number, number] = [i, img.sizeLine ?? i];
 		imageRows.set(i, { size: false });
@@ -398,18 +431,20 @@ function scan(state: EditorState, opts: MarkdownSyntaxOptions): Scan {
 		}
 	}
 	// Highlights: stretches per marked line; their comment lines are hidden.
-	const code = opts.highlights ? codeLines(lines) : null;
 	const marks = new Map<number, Ranges[]>();
 	const comments = new Set<number>();
-	if (code) {
+	if (opts.highlights) {
 		for (const h of findHighlights(lines))
-			marks.set(h.target, [...(marks.get(h.target) ?? []), h.ranges]);
+			if (!code.has(h.target)) marks.set(h.target, [...(marks.get(h.target) ?? []), h.ranges]);
 		lines.forEach((text, i) => {
-			if (!code[i] && !tables.has(i) && !imageRows.has(i) && isHighlightComment(text))
+			if (!code.has(i) && !tables.has(i) && !imageRows.has(i) && isHighlightComment(text))
 				comments.add(i);
 		});
 	}
 	const sig = lines.map((_, i) => {
+		const codeRow = code.get(i);
+		if (codeRow)
+			return `c${codeRow.fence ? 'f' : 'b'}${codeRow.first ? 1 : 0}${codeRow.last ? 1 : 0}${codeRow.single ? 1 : 0}`;
 		const row = tables.get(i);
 		if (row) return `t${row.role}${row.last ? 1 : 0}`;
 		const img = imageRows.get(i);
@@ -418,7 +453,7 @@ function scan(state: EditorState, opts: MarkdownSyntaxOptions): Scan {
 		const m = marks.get(i);
 		return m ? `m${JSON.stringify(m)}` : '';
 	});
-	return { lines, starts, tables, images, imageRows, blocks, comments, marks, sig };
+	return { lines, starts, code, tables, images, imageRows, blocks, comments, marks, sig };
 }
 
 /** The line holding `pos` (a position between two lines counts as the later one). */
@@ -492,6 +527,37 @@ function lineDecorations(
 		);
 		return;
 	}
+	const codeRow = s.code.get(i);
+	if (codeRow) {
+		const fenceOpen = codeRow.fence && editable && selTo > pos && selFrom < end;
+		const classes = [
+			'md-codeblock',
+			codeRow.first ? 'md-codeblock-first' : '',
+			codeRow.last ? 'md-codeblock-last' : '',
+			codeRow.fence ? 'md-codeblock-fence' : '',
+			fenceOpen ? 'md-codeblock-fence-open' : ''
+		]
+			.filter(Boolean)
+			.join(' ');
+		out.push(Decoration.node(pos, end, { class: classes }));
+		if (codeRow.single) {
+			const m = /^(\s{0,3})(`{3,}|~{3,})(\s+)(.*?)(\s+)(\2)\s*$/.exec(text);
+			if (m) {
+				const opening = m[1].length + m[2].length + m[3].length;
+				const closing = m[5].length + m[6].length;
+				out.push(
+					Decoration.inline(contentStart, contentStart + opening, { class: 'md-syntax' }),
+					Decoration.inline(contentStart + opening, contentStart + text.length - closing, {
+						class: 'md-codeblock-text'
+					}),
+					Decoration.inline(contentStart + text.length - closing, contentStart + text.length, {
+						class: 'md-syntax'
+					})
+				);
+			}
+		}
+		return;
+	}
 
 	let tokens: Token[];
 	if (row && !raw) {
@@ -514,7 +580,7 @@ function lineDecorations(
 		const active = selTo >= token.outerFrom && selFrom <= token.outerTo;
 		for (const d of token.decos) {
 			const cls = d.syntax && active ? `${d.class} md-active` : d.class;
-			out.push(Decoration.inline(d.from, d.to, { class: cls }));
+			out.push(Decoration.inline(d.from, d.to, { ...d.attrs, class: cls }));
 			if (d.syntax && !active) ghosted.push([d.from - contentStart, d.to - contentStart]);
 		}
 	}
@@ -695,6 +761,17 @@ export const MarkdownSyntax = Extension.create<MarkdownSyntaxOptions>({
 				props: {
 					decorations(state) {
 						return key.getState(state)?.set;
+					},
+					handleClick(_view, _pos, event) {
+						const target = event.target;
+						if (!(target instanceof Element)) return false;
+						const link = target.closest<HTMLAnchorElement>('a.md-link[href]');
+						const href = link?.getAttribute('href');
+						if (!href || !externalHref(href)) return false;
+						event.preventDefault();
+						if (opts.openLink) opts.openLink(href);
+						else window.open(href, '_blank', 'noopener,noreferrer');
+						return true;
 					}
 				}
 			})

@@ -126,6 +126,45 @@ describe('MarkdownSyntax decorations', () => {
 			)!.set
 		);
 
+	it('renders multiline and compact fenced code as code blocks', () => {
+		const state = EditorState.create({
+			doc: doc(['```ts', 'const answer = 42', '```', '', '``` code block ```']),
+			plugins: [plugin]
+		});
+		const painted = rows(plugin.getState(state)!.set).join('\n');
+		expect(painted).toContain('md-codeblock md-codeblock-first md-codeblock-fence');
+		expect(painted).toContain('md-codeblock md-codeblock-last md-codeblock-fence');
+		expect(painted).toContain(
+			'md-codeblock md-codeblock-first md-codeblock-last md-codeblock-fence'
+		);
+		expect(painted).toContain('inline md-codeblock-text');
+	});
+
+	it('turns web-link labels into anchors that open outside the app', () => {
+		const state = EditorState.create({
+			doc: doc([
+				'[site](https://example.com/path?q=1)',
+				'[relative](other-note.md)',
+				'[unsafe](javascript:alert(1))'
+			]),
+			plugins: [plugin]
+		});
+		const links = plugin
+			.getState(state)!
+			.set.find()
+			.map((d) => (d as unknown as { type: { attrs?: Record<string, string> } }).type.attrs)
+			.filter((attrs) => attrs?.class === 'md-link');
+
+		expect(links[0]).toMatchObject({
+			nodeName: 'a',
+			href: 'https://example.com/path?q=1',
+			target: '_blank',
+			rel: 'noreferrer noopener'
+		});
+		expect(links[1]).toEqual({ class: 'md-link' });
+		expect(links[2]).toEqual({ class: 'md-link' });
+	});
+
 	it('rebuilt line by line, match a full rebuild after every edit and caret move', () => {
 		for (let seed = 1; seed <= 12; seed++) {
 			const rand = rng(seed);

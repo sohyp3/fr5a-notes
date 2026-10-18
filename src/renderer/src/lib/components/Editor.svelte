@@ -150,7 +150,11 @@
 			Text,
 			UndoRedo,
 			Placeholder.configure({ placeholder: 'Start writing…' }),
-			MarkdownSyntax.configure({ highlights, imageUrl }),
+			MarkdownSyntax.configure({
+				highlights,
+				imageUrl,
+				openLink: (href) => window.open(href, '_blank', 'noopener,noreferrer')
+			}),
 			MarkdownShortcuts,
 			ListBehavior,
 			TableBehavior,
