@@ -83,14 +83,11 @@
 	const insertBarItems = $derived<BarItem[]>([
 		...(app.touch ? FORMAT_ITEMS : ['insert' as const]),
 		...INSERT_ITEMS.filter(
-			(id) =>
-				(id !== 'image' || !!platform.saveAsset) &&
-				(id !== 'link' || s.linkedNotes) &&
-				(id !== 'highlight' || s.highlights)
+			(id) => (id !== 'image' || !!platform.saveAsset) && (id !== 'highlight' || s.highlights)
 		)
 	]);
 	const BAR_DESC: Partial<Record<BarItem, string>> = {
-		insert: 'Image, table, note link and highlight without a button of their own',
+		insert: 'Image, table, link and highlight without a button of their own',
 		edit: 'Switch between reading and editing',
 		dir: 'Left-to-right or right-to-left'
 	};
@@ -434,8 +431,7 @@
 								<h3>Note links</h3>
 								<p class="prose">
 									Tags connect notes to a topic; a link connects one note to another. A link is
-									plain Markdown, <code>[text](folder/note.md)</code>: Insert → Link to note, or
-									type
+									plain Markdown, <code>[text](folder/note.md)</code>: Insert → Link, or type
 									<code>[text](</code>, and pick the note. In view mode, tap a link to follow it;
 									while editing, hold Mod and click.
 								</p>

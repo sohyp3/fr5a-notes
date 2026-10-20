@@ -10,7 +10,7 @@ import { span, suggestMenu } from './suggestMenu';
  * Note-link autocomplete (linked notes on). Writing a link — `[my text](` —
  * lists notes by title; picking one fills in its path relative to this note,
  * `[my text](path/to/note.md)`. A link with no text yet (`[](`, what
- * Insert → Link to note types) takes the note's title, selected so it can be
+ * Insert → Link types) takes the note's title, selected so it can be
  * typed over.
  */
 

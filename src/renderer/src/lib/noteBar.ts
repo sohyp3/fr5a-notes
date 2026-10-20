@@ -34,7 +34,7 @@ export const BAR_LABELS: Record<BarItem, string> = {
 	insert: 'Insert',
 	image: 'Image',
 	table: 'Table',
-	link: 'Link to note',
+	link: 'Link',
 	highlight: 'Highlight',
 	edit: 'Edit / Done',
 	ai: 'AI assistant',
@@ -81,13 +81,16 @@ export const isInsertItem = (id: BarItem): id is InsertItem =>
  * Where a button goes until the user moves it: the bar as it always was. On
  * phones the note's direction / lock / changes / trash wait in ⋯; with a mouse
  * Highlight sits in Insert, on touch it's a button of the formatting toolbar.
+ * Link is a button on tablets (brackets are awkward on their keyboards), in
+ * Insert elsewhere.
  */
 export function defaultSpot(id: BarItem, phone: boolean, touch: boolean): BarSpot {
 	switch (id) {
 		case 'image':
 		case 'table':
-		case 'link':
 			return 'menu';
+		case 'link':
+			return touch && !phone ? 'bar' : 'menu';
 		case 'highlight':
 			return touch ? 'bar' : 'menu';
 		case 'dir':

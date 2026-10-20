@@ -102,19 +102,23 @@ test('linked notes stays dormant until enabled; the map walks notes and tags', a
 		await page.locator('.md-note-link').tap();
 		await expect(page.locator('.ProseMirror')).toContainText('first line');
 
-		// The formatting toolbar's Insert → Link to note… opens the note list at the caret.
+		// The formatting toolbar's Link (a button on tablets, in Insert on phones) opens the
+		// note list at the caret.
 		await page.getByRole('button', { name: 'Edit note' }).tap();
 		await page.locator('.ProseMirror p').last().tap();
 		await page.keyboard.press('End');
 		const toolbar = page.getByRole('toolbar', { name: 'Formatting' });
-		await toolbar.getByRole('button', { name: 'Insert', exact: true }).tap();
-		await page.getByRole('menuitem', { name: 'Link to note…' }).tap();
+		if (layout === 'tablet') await toolbar.getByRole('button', { name: 'Link', exact: true }).tap();
+		else {
+			await toolbar.getByRole('button', { name: 'Insert', exact: true }).tap();
+			await page.getByRole('menuitem', { name: 'Link…' }).tap();
+		}
 		await page.locator('.tag-suggest-item', { hasText: 'Hello' }).tap();
 		await expect.poll(() => editorText(page)).toContain('[Hello](../hello.md)');
 	}
 });
 
-test('desktop: [text]( suggests notes; Insert → Link to note; Mod+click follows', async ({
+test('desktop: [text]( suggests notes; Insert → Link; Mod+click follows', async ({
 	browser
 }, info) => {
 	test.skip(info.project.name !== 'phone 390x844', 'one desktop run is enough');
@@ -140,10 +144,10 @@ test('desktop: [text]( suggests notes; Insert → Link to note; Mod+click follow
 	await expect(suggest).toHaveCount(0);
 	for (let i = 0; i < 5; i++) await page.keyboard.press('Backspace');
 
-	// Insert → Link to note… with no selection: the note's title, selected to type over.
+	// Insert → Link… with no selection: the note's title, selected to type over.
 	await page.keyboard.type(' ');
 	await page.getByRole('button', { name: 'Insert', exact: true }).click();
-	await page.getByRole('menuitem', { name: 'Link to note…' }).click();
+	await page.getByRole('menuitem', { name: 'Link…' }).click();
 	await expect(suggest).toContainText('Plan');
 	await page.keyboard.press('Enter');
 	await page.keyboard.type('the plan');
@@ -154,7 +158,7 @@ test('desktop: [text]( suggests notes; Insert → Link to note; Mod+click follow
 	await page.keyboard.type(' see this');
 	for (let i = 0; i < 4; i++) await page.keyboard.press('Shift+ArrowLeft');
 	await page.getByRole('button', { name: 'Insert', exact: true }).click();
-	await page.getByRole('menuitem', { name: 'Link to note…' }).click();
+	await page.getByRole('menuitem', { name: 'Link…' }).click();
 	await expect(suggest).toContainText('Plan');
 	await page.keyboard.press('Enter');
 	expect(await editorText(page)).toContain('see [this](Work/plan.md)');

@@ -2,6 +2,7 @@
 	import { fade } from 'svelte/transition';
 	import { tick, untrack } from 'svelte';
 	import { Editor } from '@tiptap/core';
+	import { TextSelection } from '@tiptap/pm/state';
 	import Document from '@tiptap/extension-document';
 	import Paragraph from '@tiptap/extension-paragraph';
 	import Text from '@tiptap/extension-text';
@@ -524,18 +525,26 @@
 	}
 
 	/**
-	 * Start a link to a note: `[](` at the caret (`[selection](` over a
-	 * selection, which becomes the link's text) opens the note list
-	 * (`NoteLinkSuggest`).
+	 * Start a link: `[selection]()` with the caret in the parentheses, where a
+	 * URL is typed or pasted, or (linked notes on) the note list opens
+	 * (`NoteLinkSuggest`; an empty `[]` takes the picked note's title). A
+	 * selected URL becomes the destination instead, the caret in `[]`.
 	 */
-	function insertNoteLink(): void {
+	function insertLink(): void {
 		editor
 			?.chain()
 			.focus()
 			.command(({ tr, state }) => {
 				const { from, to } = state.selection;
 				const text = state.doc.textBetween(from, to).replace(/[[\]\n]/g, ' ');
-				tr.insertText(`[${text}](`, from, to);
+				const url = /^\s*((?:https?:\/\/|mailto:|www\.)[^\s()]+)\s*$/i.exec(text)?.[1];
+				if (url) {
+					tr.insertText(`[](${/^www\./i.test(url) ? `https://${url}` : url})`, from, to);
+					tr.setSelection(TextSelection.create(tr.doc, from + 1));
+				} else {
+					tr.insertText(`[${text}]()`, from, to);
+					tr.setSelection(TextSelection.create(tr.doc, from + text.length + 3));
+				}
 				return true;
 			})
 			.run();
@@ -587,7 +596,7 @@
 	}
 
 	/**
-	 * Image / table / note link / highlight while editing. Settings → Toolbar makes each a
+	 * Image / table / link / highlight while editing. Settings → Toolbar makes each a
 	 * button (header with a mouse, formatting toolbar on touch) or a row of Insert.
 	 */
 	const inserts = $derived.by((): InsertAction[] => {
@@ -596,8 +605,7 @@
 		if (platform.saveAsset)
 			all.push({ id: 'image', label: 'Image', icon: 'image', on: false, run: pickImage });
 		all.push({ id: 'table', label: 'Table', icon: 'table', on: !!tableAt, run: openTable });
-		if (noteLinks)
-			all.push({ id: 'link', label: 'Link to note', icon: 'link', on: false, run: insertNoteLink });
+		all.push({ id: 'link', label: 'Link', icon: 'link', on: false, run: insertLink });
 		if (highlights)
 			all.push({
 				id: 'highlight',
@@ -796,10 +804,10 @@
 		<button
 			data-bar="link"
 			class="act icon"
-			title="Link to note"
-			aria-label="Link to note"
+			title="Insert link"
+			aria-label="Insert link"
 			onpointerdown={keepFocus}
-			onclick={insertNoteLink}
+			onclick={insertLink}
 		>
 			<Icon name="link" size={16} stroke={1.7} />
 		</button>

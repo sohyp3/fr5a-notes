@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BAR_ITEMS, defaultSpot, fitBar, spotOf } from './noteBar';
 
 describe('note toolbar placement', () => {
-	it('defaults to the bars as they were: phones keep note extras in ⋯, touch shows Highlight', () => {
+	it('defaults to the bars as they were: phones keep note extras in ⋯, touch shows Highlight, tablets Link', () => {
 		const bar = (phone: boolean, touch: boolean) =>
 			BAR_ITEMS.filter((id) => defaultSpot(id, phone, touch) === 'bar');
 		const format = ['bold', 'heading', 'list', 'outdent', 'indent', 'tag', 'undo'];
@@ -19,6 +19,7 @@ describe('note toolbar placement', () => {
 		]);
 		expect(bar(false, true)).toEqual([
 			'insert',
+			'link',
 			'highlight',
 			'edit',
 			'ai',
