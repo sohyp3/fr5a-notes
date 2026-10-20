@@ -1,11 +1,11 @@
 <script lang="ts">
-	import { fly } from 'svelte/transition';
+	import { fade, fly } from 'svelte/transition';
+	import { easeOut, ms } from '../motion';
 	import { getAppState } from '../stores/app.svelte';
-	import { portal, reducedMotion } from '../portal';
+	import { portal } from '../portal';
 	import Icon from './Icon.svelte';
 
 	const app = getAppState();
-	const dur = reducedMotion() ? 0 : 1;
 </script>
 
 {#if app.notice}
@@ -14,7 +14,8 @@
 		{@attach portal}
 		class={['notice', { error: n.kind === 'error' }]}
 		role={n.kind === 'error' ? 'alert' : 'status'}
-		transition:fly={{ y: 12, duration: 160 * dur }}
+		in:fly={{ y: 12, duration: ms.pop, easing: easeOut }}
+		out:fade={{ duration: ms.out }}
 	>
 		<span>{n.text}</span>
 		{#if n.kind === 'error'}

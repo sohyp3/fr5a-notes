@@ -230,15 +230,21 @@
 		flex: 1 0 auto;
 		min-width: 36px;
 		max-width: 64px;
-		height: 40px;
+		height: 44px;
 		border-radius: 10px;
 		color: var(--text-main);
 		display: grid;
 		place-items: center;
 		touch-action: manipulation;
+		transition:
+			background var(--dur-fast) ease,
+			transform var(--dur-fast) var(--ease-out);
 	}
 	.fmt:active,
 	.fmt.on {
 		background: var(--bg-hover);
+	}
+	.fmt:active {
+		transform: scale(var(--press-icon));
 	}
 </style>

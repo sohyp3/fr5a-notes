@@ -15,11 +15,13 @@
 </script>
 
 <script lang="ts">
-	import { fade, fly } from 'svelte/transition';
+	import { fade, fly, scale } from 'svelte/transition';
 	import { tick } from 'svelte';
 	import type { Attachment } from 'svelte/attachments';
 	import Icon from './Icon.svelte';
-	import { portal, reducedMotion } from '../portal';
+	import { portal } from '../portal';
+	import { dragToDismiss } from '../gesture';
+	import { ms, popIn, scrimIn, scrimOut, sheetIn, sheetOut } from '../motion';
 	import { getAppState } from '../stores/app.svelte';
 
 	interface Props {
@@ -41,13 +43,43 @@
 	let el = $state<HTMLDivElement | null>(null);
 	let w = $state(200);
 	let h = $state(0);
-	const dur = reducedMotion() ? 0 : 1;
+	/** Closing: it fades out for a moment, deaf to input (Chromium 92 has no `inert`). */
+	let leaving = false;
+	/** Dragged off screen: it's already gone, so no outro. */
+	let dismissed = $state(false);
+	let scrimEl = $state<HTMLDivElement | null>(null);
+	const dragOff = dragToDismiss(
+		() => scrimEl,
+		() => {
+			dismissed = true;
+			onclose();
+		}
+	);
 
 	// Keep the popover inside the viewport (flip up / left when it would overflow).
 	const pos = $derived({
 		left: Math.max(8, Math.min(at.x, window.innerWidth - w - 8)),
 		top: Math.max(8, at.y + h + 8 > window.innerHeight ? at.y - h : at.y)
 	});
+	// Grow from the corner it hangs from (it flips up / left near the edges).
+	const origin = $derived(
+		`${pos.left + 1 < at.x ? 'right' : 'left'} ${pos.top < at.y ? 'bottom' : 'top'}`
+	);
+
+	function leave(e: Event): void {
+		leaving = true;
+		const node = e.currentTarget as HTMLElement;
+		node.style.pointerEvents = 'none';
+		// Gone as far as anyone using it can tell (a new one may already be open).
+		node.setAttribute('aria-hidden', 'true');
+	}
+	/** Reopened mid-fade, Svelte reverses the outro on this same instance: live again. */
+	function arrive(e: Event): void {
+		leaving = false;
+		const node = e.currentTarget as HTMLElement;
+		node.style.removeProperty('pointer-events');
+		node.removeAttribute('aria-hidden');
+	}
 
 	function run(item: MenuItem): void {
 		if (item.disabled) return;
@@ -56,6 +88,13 @@
 	}
 
 	function onKey(e: KeyboardEvent): void {
+		if (leaving) return;
+		// Tab leaves a menu (the menu pattern): close it, focus goes back.
+		if (e.key === 'Tab') {
+			e.preventDefault();
+			onclose();
+			return;
+		}
 		if (e.key === 'Escape') {
 			e.preventDefault();
 			e.stopPropagation();
@@ -74,20 +113,31 @@
 
 	function outside(e: PointerEvent): void {
 		const t = e.target as Node;
+		if (leaving) return;
 		if (el && !el.contains(t) && !trigger?.contains(t)) onclose();
 	}
 
 	function wheel(): void {
-		if (!sheet) onclose();
+		if (!sheet && !leaving) onclose();
 	}
 
-	/** Focus the first item once the menu is on screen (after the portal moved it). */
+	/**
+	 * Focus the first item once the menu is on screen (after the portal moved
+	 * it); when it goes, give focus back to what had it — unless the chosen item
+	 * moved focus on purpose (a dialog, the editor).
+	 */
 	const focusFirst: Attachment<HTMLElement> = (node) => {
+		const prev = document.activeElement as HTMLElement | null;
 		void tick().then(() =>
 			node
 				.querySelector<HTMLButtonElement>('[role=menuitem]:not(:disabled)')
 				?.focus({ preventScroll: true })
 		);
+		return () => {
+			const now = document.activeElement;
+			if ((!now || now === document.body || node.contains(now)) && prev?.isConnected)
+				prev.focus({ preventScroll: true });
+		};
 	};
 
 	// Android back closes the menu (not the pane under it).
@@ -119,7 +169,14 @@
 
 {#if sheet}
 	<div {@attach portal} class="sheet-root">
-		<div class="scrim" transition:fade={{ duration: 180 * dur }}></div>
+		<div
+			class="scrim"
+			bind:this={scrimEl}
+			in:fade|global={scrimIn}
+			out:fade|global={dismissed ? { duration: 0 } : scrimOut}
+			onoutrostart={leave}
+			onintrostart={arrive}
+		></div>
 		<div
 			bind:this={el}
 			{@attach focusFirst}
@@ -127,7 +184,11 @@
 			role="menu"
 			aria-label={label}
 			tabindex="-1"
-			transition:fly={{ y: 60, duration: 240 * dur, opacity: 0 }}
+			{@attach dragOff}
+			in:fly|global={sheetIn}
+			out:fly|global={dismissed ? { duration: 0 } : sheetOut}
+			onoutrostart={leave}
+			onintrostart={arrive}
 		>
 			<div class="grip" aria-hidden="true"></div>
 			{#if title}<div class="sheet-title">{title}</div>{/if}
@@ -145,10 +206,14 @@
 		class="menu"
 		style:left="{pos.left}px"
 		style:top="{pos.top}px"
+		style:transform-origin={origin}
 		role="menu"
 		aria-label={label}
 		tabindex="-1"
-		transition:fly={{ y: -4, duration: 120 * dur }}
+		in:scale|global={popIn}
+		out:fade|global={{ duration: ms.out }}
+		onoutrostart={leave}
+		onintrostart={arrive}
 	>
 		{@render rows()}
 	</div>
@@ -162,7 +227,7 @@
 		max-width: min(320px, calc(100vw - 16px));
 		padding: 5px;
 		border-radius: 11px;
-		background: var(--bg-editor);
+		background: var(--bg-elevated);
 		box-shadow:
 			0 0 0 1px var(--bg-active),
 			0 12px 32px rgba(0, 0, 0, 0.18);
@@ -234,6 +299,11 @@
 		position: fixed;
 		inset: 0;
 		z-index: 120;
+		/* Only the scrim and sheet take taps (they let go while leaving). */
+		pointer-events: none;
+	}
+	.sheet-root > * {
+		pointer-events: auto;
 	}
 	.scrim {
 		position: absolute;
@@ -249,17 +319,19 @@
 		overflow-y: auto;
 		padding: 6px 10px calc(10px + env(safe-area-inset-bottom, 0px));
 		border-radius: 18px 18px 0 0;
-		background: var(--bg-editor);
+		background: var(--bg-elevated);
 		box-shadow: 0 -10px 34px rgba(0, 0, 0, 0.2);
 	}
 	.grip {
+		touch-action: none;
 		width: 38px;
 		height: 4px;
 		margin: 4px auto 8px;
 		border-radius: 2px;
-		background: var(--bg-active);
+		background: var(--rule);
 	}
 	.sheet-title {
+		touch-action: none;
 		padding: 2px 12px 8px;
 		font-size: 13px;
 		font-weight: 600;

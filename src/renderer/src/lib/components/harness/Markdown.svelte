@@ -81,7 +81,7 @@
 		color: var(--text-muted);
 	}
 	.md :global(a) {
-		color: var(--accent);
+		color: var(--accent-ink);
 		text-decoration: underline;
 		text-decoration-color: var(--accent-soft);
 		text-underline-offset: 2px;
@@ -106,7 +106,7 @@
 		margin: 0.15em 0 0;
 	}
 	.md :global(li::marker) {
-		color: var(--accent);
+		color: var(--accent-ink);
 	}
 	.md :global(li.task) {
 		list-style: none;
@@ -190,7 +190,7 @@
 		font-weight: 600;
 	}
 	.md :global(.j-key) {
-		color: var(--accent);
+		color: var(--accent-ink);
 	}
 	.md :global(.j-str) {
 		color: var(--add-fg);

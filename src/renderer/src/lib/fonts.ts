@@ -60,7 +60,13 @@ function optFor(options: FontOption[], id: string): FontOption {
 	return options.find((o) => o.id === id) ?? options[0];
 }
 
-export const uiStack = (id: string) => optFor(UI_FONTS, id).stack;
+/**
+ * The chrome's stack: the UI family, then the note Arabic family, so Arabic
+ * titles and snippets in lists and tabs join and match the editor (same order
+ * rule as `editorStack`).
+ */
+export const uiStack = (id: string, arId = 'naskh'): string =>
+	`${optFor(UI_FONTS, id).family}, ${optFor(AR_FONTS, arId).family}, system-ui, sans-serif`;
 
 /**
  * Compose the editor's font stack for mixed English/Arabic text.

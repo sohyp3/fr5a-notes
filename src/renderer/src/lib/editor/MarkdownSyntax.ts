@@ -299,7 +299,8 @@ function tokenizeLine(
 		});
 		consume(0, block.prefixLen);
 	} else if (block && block.prefixLen > 0) {
-		// Headings / quotes: hide the leading symbol(s) via Ghost Syntax.
+		// Headings / quotes: hide the leading symbol(s) via Ghost Syntax — the space
+		// after them too, or the text sits a space right of the body column.
 		const trimmed = text.slice(0, block.prefixLen).replace(/\s+$/, '');
 		if (trimmed.length) {
 			tokens.push({
@@ -308,13 +309,13 @@ function tokenizeLine(
 				decos: [
 					{
 						from: contentStart,
-						to: contentStart + trimmed.length,
+						to: contentStart + block.prefixLen,
 						class: 'md-syntax',
 						syntax: true
 					}
 				]
 			});
-			consume(0, trimmed.length);
+			consume(0, block.prefixLen);
 		}
 	}
 
@@ -624,8 +625,9 @@ function lineDecorations(
 	// Symbols Ghost Syntax collapses (no caret in their token), as line offsets.
 	const ghosted: [number, number][] = [];
 	for (const token of tokens) {
-		// A token is active when the selection overlaps its outer span.
-		const active = selTo >= token.outerFrom && selFrom <= token.outerTo;
+		// A token is active when the selection overlaps its outer span — only while
+		// editable: view mode is the rendered page (the caret parks at 0, in the H1).
+		const active = editable && selTo >= token.outerFrom && selFrom <= token.outerTo;
 		for (const d of token.decos) {
 			const cls = d.syntax && active ? `${d.class} md-active` : d.class;
 			out.push(Decoration.inline(d.from, d.to, { ...d.attrs, class: cls }));

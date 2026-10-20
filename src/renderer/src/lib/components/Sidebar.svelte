@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { slide } from 'svelte/transition';
+	import { easeOut, ms } from '../motion';
 	import { getAppState } from '../stores/app.svelte';
 	import { buildFolderTree } from '../folders';
 	import { dropFor, endDrag } from '../dnd';
@@ -48,6 +49,7 @@
 
 	<button
 		class={['all-notes', { selected: allSelected, over: rootOver }]}
+		aria-current={allSelected ? 'true' : undefined}
 		title={rootOver ? 'Move to the top level' : undefined}
 		onclick={() => app.showAllNotes()}
 		ondragover={(e) => {
@@ -113,7 +115,7 @@
 		{/if}
 
 		{#if folders.length > 0 && app.sidebar.foldersOpen}
-			<div class="tree" transition:slide={{ duration: app.touch ? 0 : 160 }}>
+			<div class="tree" transition:slide={{ duration: app.touch ? 0 : ms.pop, easing: easeOut }}>
 				{#each folders as node (node.path)}
 					<FolderTree {node} />
 				{/each}
@@ -145,7 +147,7 @@
 			{/if}
 		</div>
 		{#if app.sidebar.tagsOpen}
-			<div class="tree" transition:slide={{ duration: app.touch ? 0 : 160 }}>
+			<div class="tree" transition:slide={{ duration: app.touch ? 0 : ms.pop, easing: easeOut }}>
 				{#if app.tags.length === 0}
 					<p class="empty">No tags yet. Add <code>#tags</code> to your notes.</p>
 				{:else}
@@ -161,6 +163,7 @@
 		{#if app.settings.linkedNotes}
 			<button
 				class={['settings-btn', { selected: app.view === 'graph' }]}
+				aria-current={app.view === 'graph' ? 'true' : undefined}
 				title="Linked notes (Mod+G)"
 				onclick={() => app.openGraph()}
 			>
@@ -170,6 +173,7 @@
 		{/if}
 		<button
 			class={['settings-btn', { selected: app.trashOpen && app.view === 'editor' }]}
+			aria-current={app.trashOpen && app.view === 'editor' ? 'true' : undefined}
 			title="Trash"
 			onclick={() => app.openTrash()}
 		>
@@ -180,6 +184,7 @@
 		{#if app.changes !== null}
 			<button
 				class={['settings-btn', { selected: app.view === 'changes' }]}
+				aria-current={app.view === 'changes' ? 'true' : undefined}
 				title="Notes changed since the last sync (git status)"
 				onclick={() => app.showChanges()}
 			>
@@ -190,6 +195,7 @@
 		{/if}
 		<button
 			class={['settings-btn', { selected: app.view === 'settings' }]}
+			aria-current={app.view === 'settings' ? 'true' : undefined}
 			title="Settings"
 			onclick={() => app.openSettings()}
 		>
@@ -228,14 +234,16 @@
 		font-size: 13.5px;
 		font-weight: 500;
 		color: var(--text);
-		transition: background 110ms ease;
+		transition: background var(--dur-fast) ease;
 	}
-	.all-notes:hover {
-		background: var(--bg-hover);
+	@media (hover: hover) {
+		.all-notes:hover {
+			background: var(--bg-hover);
+		}
 	}
 	.all-notes.selected {
 		background: var(--accent-soft);
-		color: var(--accent);
+		color: var(--accent-ink);
 	}
 	.all-notes.over {
 		background: var(--accent-soft);
@@ -244,7 +252,7 @@
 	.all-notes .count {
 		margin-left: auto;
 		font-size: 11px;
-		color: var(--text-faint);
+		color: var(--text-muted);
 		font-variant-numeric: tabular-nums;
 	}
 	.section-label {
@@ -252,7 +260,7 @@
 		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.06em;
-		color: var(--text-faint);
+		color: var(--text-muted);
 		padding: 14px 16px 6px;
 	}
 	.section-label.with-action {
@@ -269,15 +277,15 @@
 		letter-spacing: inherit;
 		color: inherit;
 		padding: 0;
-		transition: color 110ms ease;
+		transition: color var(--dur-fast) ease;
 	}
 	.section-toggle:hover {
-		color: var(--text-muted);
+		color: var(--text);
 	}
 	.section-toggle .chev {
 		flex: 0 0 auto;
 		display: grid;
-		transition: transform 140ms var(--ease-spring);
+		transition: transform var(--dur-pop) var(--ease-out);
 	}
 	.section-toggle .chev.open {
 		transform: rotate(90deg);
@@ -296,8 +304,8 @@
 		border-radius: 6px;
 		color: var(--text-faint);
 		transition:
-			background 110ms ease,
-			color 110ms ease;
+			background var(--dur-fast) ease,
+			color var(--dur-fast) ease;
 	}
 	.hdr-btn:hover {
 		background: var(--bg-hover);
@@ -340,7 +348,7 @@
 	}
 	.empty {
 		font-size: 12.5px;
-		color: var(--text-faint);
+		color: var(--text-muted);
 		line-height: 1.5;
 		padding: 4px 16px;
 	}
@@ -350,26 +358,30 @@
 	}
 	.foot {
 		flex: 0 0 auto;
-		padding: 6px 6px 0;
+		padding: 6px 0 0;
 	}
+	/* Rows share one inset (6 + 10px), so icons and counts form columns. */
 	.settings-btn {
 		display: flex;
 		align-items: center;
 		gap: 9px;
-		width: 100%;
+		width: calc(100% - 12px);
 		height: 36px;
-		padding: 0 12px;
+		margin: 0 6px;
+		padding: 0 10px;
 		border-radius: 8px;
 		font-size: 13.5px;
 		font-weight: 500;
 		color: var(--text-muted);
 		transition:
-			background 110ms ease,
-			color 110ms ease;
+			background var(--dur-fast) ease,
+			color var(--dur-fast) ease;
 	}
-	.settings-btn:hover {
-		background: var(--bg-hover);
-		color: var(--text);
+	@media (hover: hover) {
+		.settings-btn:hover {
+			background: var(--bg-hover);
+			color: var(--text);
+		}
 	}
 	.settings-btn:active,
 	.all-notes:active {
@@ -377,12 +389,12 @@
 	}
 	.settings-btn.selected {
 		background: var(--accent-soft);
-		color: var(--accent);
+		color: var(--accent-ink);
 	}
 	.settings-btn .count {
 		margin-left: auto;
 		font-size: 11px;
-		color: var(--text-faint);
+		color: var(--text-muted);
 		font-variant-numeric: tabular-nums;
 	}
 </style>

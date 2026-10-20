@@ -1,7 +1,9 @@
 <script lang="ts">
-	import { fade, fly } from 'svelte/transition';
+	import { fade, fly, scale } from 'svelte/transition';
 	import { tick } from 'svelte';
-	import { portal, reducedMotion } from '../portal';
+	import { portal } from '../portal';
+	import { dragToDismiss } from '../gesture';
+	import { ms, popIn, scrimIn, scrimOut, sheetIn, sheetOut } from '../motion';
 	import { getAppState } from '../stores/app.svelte';
 
 	/**
@@ -27,12 +29,41 @@
 	let grid: HTMLDivElement | null = null;
 	let w = $state(240);
 	let h = $state(0);
-	const dur = reducedMotion() ? 0 : 1;
+	/** Closing: it fades out for a moment, deaf to input (Chromium 92 has no `inert`). */
+	let leaving = false;
+	/** Dragged off screen: it's already gone, so no outro. */
+	let dismissed = $state(false);
+	let scrimEl = $state<HTMLDivElement | null>(null);
+	const dragOff = dragToDismiss(
+		() => scrimEl,
+		() => {
+			dismissed = true;
+			onclose();
+		}
+	);
 
 	const pos = $derived({
 		left: Math.max(8, Math.min(at.x, window.innerWidth - w - 8)),
 		top: Math.max(8, at.y + h + 8 > window.innerHeight ? at.y - h : at.y)
 	});
+	const origin = $derived(
+		`${pos.left + 1 < at.x ? 'right' : 'left'} ${pos.top < at.y ? 'bottom' : 'top'}`
+	);
+
+	function leave(e: Event): void {
+		leaving = true;
+		const node = e.currentTarget as HTMLElement;
+		node.style.pointerEvents = 'none';
+		// Gone as far as anyone using it can tell (a new one may already be open).
+		node.setAttribute('aria-hidden', 'true');
+	}
+	/** Reopened mid-fade, Svelte reverses the outro on this same instance: live again. */
+	function arrive(e: Event): void {
+		leaving = false;
+		const node = e.currentTarget as HTMLElement;
+		node.style.removeProperty('pointer-events');
+		node.removeAttribute('aria-hidden');
+	}
 	const label = $derived(
 		`${cols} ${cols === 1 ? 'column' : 'columns'} × ${rows} ${rows === 1 ? 'row' : 'rows'}`
 	);
@@ -70,11 +101,12 @@
 
 	function outside(e: PointerEvent): void {
 		const t = e.target as Node;
+		if (leaving) return;
 		if (el && !el.contains(t) && !trigger?.contains(t)) onclose();
 	}
 
 	function onKey(e: KeyboardEvent): void {
-		if (e.key !== 'Escape') return;
+		if (leaving || e.key !== 'Escape') return;
 		e.preventDefault();
 		e.stopPropagation();
 		onclose();
@@ -127,13 +159,24 @@
 
 {#if sheet}
 	<div {@attach portal} class="sheet-root">
-		<div class="scrim" transition:fade={{ duration: 180 * dur }}></div>
+		<div
+			class="scrim"
+			bind:this={scrimEl}
+			in:fade|global={scrimIn}
+			out:fade|global={dismissed ? { duration: 0 } : scrimOut}
+			onoutrostart={leave}
+			onintrostart={arrive}
+		></div>
 		<div
 			bind:this={el}
 			class="picker sheet"
 			role="dialog"
 			aria-label="Insert table"
-			transition:fly={{ y: 60, duration: 240 * dur, opacity: 0 }}
+			{@attach dragOff}
+			in:fly|global={sheetIn}
+			out:fly|global={dismissed ? { duration: 0 } : sheetOut}
+			onoutrostart={leave}
+			onintrostart={arrive}
 		>
 			<div class="grip" aria-hidden="true"></div>
 			{@render body()}
@@ -150,9 +193,13 @@
 		class="picker pop"
 		style:left="{pos.left}px"
 		style:top="{pos.top}px"
+		style:transform-origin={origin}
 		role="dialog"
 		aria-label="Insert table"
-		transition:fly={{ y: -4, duration: 120 * dur }}
+		in:scale|global={popIn}
+		out:fade|global={{ duration: ms.out }}
+		onoutrostart={leave}
+		onintrostart={arrive}
 	>
 		{@render body()}
 	</div>
@@ -162,7 +209,7 @@
 	.picker {
 		--cell: 20px;
 		--gap: 3px;
-		background: var(--bg-editor);
+		background: var(--bg-elevated);
 	}
 	.pop {
 		position: fixed;
@@ -231,6 +278,11 @@
 		position: fixed;
 		inset: 0;
 		z-index: 120;
+		/* Only the scrim and sheet take taps (they let go while leaving). */
+		pointer-events: none;
+	}
+	.sheet-root > * {
+		pointer-events: auto;
 	}
 	.scrim {
 		position: absolute;
@@ -253,11 +305,12 @@
 		padding: 0 4px;
 	}
 	.grip {
+		touch-action: none;
 		width: 38px;
 		height: 4px;
 		margin: 4px auto 10px;
 		border-radius: 2px;
-		background: var(--bg-active);
+		background: var(--rule);
 	}
 	.insert,
 	.cancel {

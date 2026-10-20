@@ -128,13 +128,13 @@
 
 	<div class="center">
 		{#if phone}
-			<span class="screen-title">{screenTitle}</span>
+			<span class="screen-title" dir="auto">{screenTitle}</span>
 		{:else}
 			<span class="workspace" title={app.workspace ?? ''}>{folderName(app.workspace)}</span>
 		{/if}
-		{#if app.saving}
-			<span class="saving">saving…</span>
-		{/if}
+		<!-- Always mounted: it fades (after a beat, so quick saves never flash)
+		     instead of popping in and out with every typing burst. -->
+		<span class={['saving', { on: app.saving }]} aria-hidden={!app.saving}>saving…</span>
 		{#if app.syncing}
 			<span class="sync-msg" role="status">{app.syncing === 'pull' ? 'pulling…' : 'pushing…'}</span>
 		{:else if app.syncMessage}
@@ -278,6 +278,15 @@
 		-webkit-app-region: drag;
 		user-select: none;
 	}
+	/* Wide layouts: three columns, so the label sits on the window's centre
+	   whatever the two button groups weigh. */
+	.titlebar:not(.phone) {
+		display: grid;
+		grid-template-columns: 1fr minmax(0, auto) 1fr;
+	}
+	.titlebar:not(.phone) .right {
+		justify-self: end;
+	}
 	/* Touch: finger-sized targets. */
 	.titlebar.touch {
 		height: 52px;
@@ -340,7 +349,28 @@
 	.saving {
 		flex: 0 0 auto;
 		font-size: 11px;
-		color: var(--text-faint);
+		color: var(--text-muted);
+		opacity: 0;
+		transition: opacity 240ms ease;
+	}
+	.saving.on {
+		opacity: 1;
+		transition: opacity var(--dur-pop) ease 300ms;
+	}
+	/* Out of the flow beside the label, so it never pushes it off centre. */
+	.titlebar:not(.phone) .center {
+		position: relative;
+	}
+	.titlebar:not(.phone) .saving {
+		position: absolute;
+		left: calc(100% + 10px);
+		top: 50%;
+		transform: translateY(-50%);
+		white-space: nowrap;
+	}
+	/* Phones: no room to reserve beside the title. */
+	.phone .saving:not(.on) {
+		display: none;
 	}
 	.icon-btn {
 		position: relative;
@@ -353,14 +383,16 @@
 		transition:
 			background var(--dur-fast) ease,
 			color var(--dur-fast) ease,
-			transform var(--dur-fast) ease;
+			transform var(--dur-fast) var(--ease-out);
 	}
-	.icon-btn:hover:not(:disabled) {
-		background: var(--bg-hover);
-		color: var(--text);
+	@media (hover: hover) {
+		.icon-btn:hover:not(:disabled) {
+			background: var(--bg-hover);
+			color: var(--text);
+		}
 	}
 	.icon-btn:active:not(:disabled) {
-		transform: scale(0.93);
+		transform: scale(var(--press-icon));
 		background: var(--bg-active);
 	}
 	.icon-btn:disabled {
@@ -369,7 +401,7 @@
 	}
 	.icon-btn.busy {
 		opacity: 1;
-		color: var(--accent);
+		color: var(--accent-ink);
 		animation: sync-pulse 900ms ease-in-out infinite alternate;
 	}
 	.icon-btn.changes {
@@ -386,7 +418,7 @@
 	.count {
 		font-size: 11px;
 		font-weight: 700;
-		color: var(--accent);
+		color: var(--accent-ink);
 		font-variant-numeric: tabular-nums;
 	}
 	.count-dot {
@@ -415,7 +447,7 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 		font-size: 11px;
-		color: var(--text-faint);
+		color: var(--text-muted);
 	}
 	.phone .sync-msg {
 		max-width: 30vw;
@@ -424,7 +456,7 @@
 		color: var(--danger);
 	}
 	.sync-msg.conflict {
-		color: var(--accent);
+		color: var(--accent-ink);
 	}
 	.dismiss {
 		display: grid;

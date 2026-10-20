@@ -268,7 +268,7 @@
 		user-select: text;
 	}
 	.json :global(.j-key) {
-		color: var(--accent);
+		color: var(--accent-ink);
 	}
 	.json :global(.j-str) {
 		color: var(--add-fg);

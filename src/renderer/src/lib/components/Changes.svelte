@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { fade } from 'svelte/transition';
+	import { ms } from '../motion';
 	import { getAppState } from '../stores/app.svelte';
 	import { platform } from '../platform';
 	import { compactDiff, diffLines } from '../harness/diff';
@@ -253,7 +254,7 @@
 		<div
 			class={['bar notice', { error: notice.kind === 'error' }]}
 			role={notice.kind === 'error' ? 'alert' : 'status'}
-			transition:fade={{ duration: 120 }}
+			transition:fade={{ duration: ms.fast }}
 		>
 			<p>{notice.text}</p>
 			<button class="icon-btn" aria-label="Dismiss" onclick={() => (notice = null)}>
@@ -361,7 +362,7 @@
 			<section class="detail" aria-label="Diff">
 				{#if currentStash}
 					{#key selectedStash}
-						<div class="detail-head" in:fade={{ duration: 120 }}>
+						<div class="detail-head" in:fade={{ duration: ms.fast }}>
 							{#if app.layout === 'phone'}
 								<button
 									class="icon-btn"
@@ -397,7 +398,7 @@
 								>
 							</div>
 						</div>
-						<div class="diff-scroll" in:fade={{ duration: 120 }}>
+						<div class="diff-scroll" in:fade={{ duration: ms.fast }}>
 							{#each stashRows as f (f.path)}
 								{@const p = split(f.path)}
 								<h3 class="fhead">
@@ -425,7 +426,7 @@
 					{/key}
 				{:else if current}
 					{#key current.path}
-						<div class="detail-head" in:fade={{ duration: 120 }}>
+						<div class="detail-head" in:fade={{ duration: ms.fast }}>
 							{#if app.layout === 'phone'}
 								<button
 									class="icon-btn"
@@ -463,7 +464,7 @@
 								{/if}
 							</div>
 						</div>
-						<div class="diff-scroll" in:fade={{ duration: 120 }}>
+						<div class="diff-scroll" in:fade={{ duration: ms.fast }}>
 							{#if current.sealed}
 								<p class="muted">Encrypted. Unlock your notes to see what changed.</p>
 							{:else}
@@ -869,7 +870,7 @@
 		color: var(--text-muted);
 	}
 	.link {
-		color: var(--accent);
+		color: var(--accent-ink);
 		font-weight: 600;
 		padding: 0;
 		font-size: inherit;

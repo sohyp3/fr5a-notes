@@ -1280,7 +1280,7 @@
 		color: var(--text-faint);
 	}
 	.mrow.on :global(.icon) {
-		color: var(--accent);
+		color: var(--accent-ink);
 		fill: currentColor;
 	}
 	:global(html[data-touch]) .mrow {
@@ -1427,7 +1427,7 @@
 		color: var(--text-muted);
 	}
 	.psum :global(.icon) {
-		color: var(--accent);
+		color: var(--accent-ink);
 	}
 	.psum strong {
 		color: var(--text-strong);
@@ -1458,7 +1458,7 @@
 		color: var(--text-muted);
 	}
 	.prow.on :global(.icon) {
-		color: var(--accent);
+		color: var(--accent-ink);
 	}
 	.prow input {
 		accent-color: var(--accent);
@@ -1488,7 +1488,7 @@
 		padding: 1px 8px;
 		border-radius: 999px;
 		background: var(--accent-soft);
-		color: var(--accent);
+		color: var(--accent-ink);
 		font-size: 11px;
 		font-weight: 600;
 	}
@@ -1602,7 +1602,7 @@
 		margin-top: 10px;
 	}
 	a {
-		color: var(--accent);
+		color: var(--accent-ink);
 	}
 	.inline select {
 		flex: 1;

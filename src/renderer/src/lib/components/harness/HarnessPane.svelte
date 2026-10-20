@@ -1080,7 +1080,8 @@
 		display: flex;
 		align-items: center;
 		gap: 2px;
-		padding: 6px 6px 0;
+		/* Tab centres line up with the list search and the editor crumb. */
+		padding: 9px 6px 0;
 		box-shadow: inset 0 -1px 0 var(--bg-active);
 		font-family: var(--font-mono);
 		font-size: 11.5px;
@@ -1123,7 +1124,7 @@
 		text-overflow: ellipsis;
 	}
 	.idx {
-		color: var(--accent);
+		color: var(--accent-ink);
 		font-weight: 700;
 	}
 	.dot {
@@ -1468,7 +1469,7 @@
 		line-height: 1.45;
 	}
 	.link {
-		color: var(--accent);
+		color: var(--accent-ink);
 		font-weight: 600;
 		font-size: inherit;
 		padding: 0;
@@ -1571,7 +1572,7 @@
 	.acts button.primary {
 		background: var(--accent-soft);
 		box-shadow: none;
-		color: var(--accent);
+		color: var(--accent-ink);
 		font-weight: 600;
 	}
 	.note {
@@ -1739,7 +1740,7 @@
 	}
 	.skill-btn span {
 		font-family: var(--font-mono);
-		color: var(--accent);
+		color: var(--accent-ink);
 		font-size: 12px;
 	}
 	.skill-btn small {
@@ -1877,7 +1878,7 @@
 		display: grid;
 		place-items: center;
 		height: var(--row);
-		color: var(--accent);
+		color: var(--accent-ink);
 	}
 	/* One line of text, padded to exactly one row: (row − line) / 2 above and below. */
 	textarea {

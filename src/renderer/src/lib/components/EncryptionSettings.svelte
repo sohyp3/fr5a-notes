@@ -385,7 +385,7 @@
 		color: var(--text-muted);
 	}
 	.status.open {
-		color: var(--accent);
+		color: var(--accent-ink);
 	}
 	.toggle {
 		flex: 0 0 auto;
@@ -412,7 +412,7 @@
 		border-radius: 50%;
 		background: #fff;
 		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-		transition: transform var(--dur-pane) var(--ease-spring);
+		transition: transform var(--dur-pop) var(--ease-out);
 	}
 	:global(html[data-touch]) .knob {
 		width: 24px;

@@ -3,6 +3,7 @@
 	import { getAppState } from '../stores/app.svelte';
 	import { haptic, reducedMotion } from '../portal';
 	import { endDrag, startDrag } from '../dnd';
+	import { EDGE_BACK_PX, Tracker, project } from '../gesture';
 	import Icon from './Icon.svelte';
 	import type { NoteMeta } from '../../../../shared/types';
 
@@ -58,10 +59,14 @@
 		haptic(8);
 	}
 
-	/** Settle after a drag: open past half the action, else back to rest. */
-	function settle(x: number): void {
-		if (x > ACTION_W / 2) openSide(1);
-		else if (x < -ACTION_W / 2) openSide(-1);
+	/**
+	 * Settle after a drag: open where the release would carry it past half the
+	 * action (a quick flick opens, a flick back closes), else back to rest.
+	 */
+	function settle(x: number, v = 0): void {
+		const p = x + project(v, 0.99);
+		if (x > 0 && p > ACTION_W / 2) openSide(1);
+		else if (x < 0 && p < -ACTION_W / 2) openSide(-1);
 		else close();
 	}
 
@@ -99,7 +104,10 @@
 		y: number;
 		from: number;
 		axis: 'x' | 'y' | null;
+		v: Tracker;
 	} | null = null;
+	/** Swiping sideways (not pressed): no press tint while it moves. */
+	let sliding = $state(false);
 	/** The release that ended a swipe must not also open the note. */
 	let swallowClick = false;
 
@@ -107,8 +115,17 @@
 		// A new touch: whatever the last swipe left behind no longer applies.
 		swallowClick = false;
 		if (e.pointerType === 'mouse') return;
-		drag = { id: e.pointerId, x: e.clientX, y: e.clientY, from: offset.current, axis: null };
 		startPress(e);
+		// The phone's left edge belongs to the Back swipe.
+		if (app.layout === 'phone' && e.clientX <= EDGE_BACK_PX) return;
+		drag = {
+			id: e.pointerId,
+			x: e.clientX,
+			y: e.clientY,
+			from: offset.current,
+			axis: null,
+			v: new Tracker()
+		};
 	}
 
 	function onPointerMove(e: PointerEvent): void {
@@ -127,8 +144,10 @@
 				return;
 			}
 			cancelPress();
+			sliding = true;
 			(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 		}
+		drag.v.add(e.clientX, e.timeStamp);
 		setNow(band(drag.from + dx));
 	}
 
@@ -136,10 +155,12 @@
 		cancelPress();
 		if (!drag || e.pointerId !== drag.id) return;
 		const swiped = drag.axis === 'x';
+		const v = e.type === 'pointercancel' ? 0 : drag.v.velocity(e.timeStamp);
 		drag = null;
+		sliding = false;
 		if (swiped) {
 			swallowClick = true;
-			settle(offset.current);
+			settle(offset.current, v);
 		}
 	}
 
@@ -300,6 +321,12 @@
 	}
 
 	const progress = $derived(Math.min(1, Math.abs(offset.current) / ACTION_W));
+	// Its folder, when the list isn't already showing that folder (root: none).
+	const folder = $derived.by(() => {
+		const i = note.id.lastIndexOf('/');
+		const dir = i < 0 ? '' : note.id.slice(0, i);
+		return dir && dir !== app.selectedFolder ? dir : '';
+	});
 </script>
 
 <div
@@ -344,7 +371,8 @@
 	{/if}
 
 	<button
-		class={['card', { active, readonly: trash }]}
+		class={['card', { active, readonly: trash, sliding }]}
+		aria-current={active ? 'true' : undefined}
 		style:transform="translateX({offset.current}px)"
 		onclick={onClick}
 		oncontextmenu={onContextMenu}
@@ -382,15 +410,17 @@
 						title="Hidden from cloud AI — only local providers can read it"
 						aria-label="Hidden from cloud AI"><Icon name="shield" size={11} stroke={2} /></span
 					>{/if}
-				{note.title}
+				<span class="ttl" dir="auto">{note.title}</span>
 			</span>
 			<span class="time">{relTime(note.mtime)}</span>
 		</div>
-		<div class="filename" title={note.id}>{note.id}</div>
-		<div class="snippet">
+		<div class="snippet" dir="auto">
 			{note.snippet ||
 				(note.encrypted && !app.vault?.unlocked ? 'Encrypted' : 'No additional text')}
 		</div>
+		{#if folder}<div class="folder" dir="auto" title={note.id}>
+				<Icon name="folder" size={11} /><span>{folder}</span>
+			</div>{/if}
 		{#if note.tags.length}
 			<div class="tags">
 				{#each note.tags.slice(0, 4) as t (t)}
@@ -428,17 +458,18 @@
 	}
 	.action.right {
 		left: 0;
-		background: #e0a520;
-		color: #1e1d1b;
+		background: var(--accent);
+		color: var(--on-accent);
 	}
 	.action.right.restore {
 		background: var(--ok);
 		color: var(--on-ok);
 	}
+	/* Trash is restorable: a quiet neutral, so it never reads like Pin. */
 	.action.left {
 		right: 0;
-		background: var(--accent);
-		color: var(--on-accent);
+		background: var(--text-muted);
+		color: var(--bg-editor);
 	}
 	/* Permanent delete gets a hard red: it's irreversible. */
 	.action.left.danger {
@@ -457,7 +488,7 @@
 		position: relative;
 		display: block;
 		width: 100%;
-		text-align: left;
+		text-align: start;
 		padding: 10px 12px;
 		border-radius: 9px;
 		background: var(--bg-list);
@@ -465,18 +496,20 @@
 		touch-action: pan-y;
 		transition: background var(--dur-fast) ease;
 	}
-	.card:hover {
-		background: var(--bg-hover);
+	@media (hover: hover) {
+		.card:hover:not(.active) {
+			background: var(--bg-hover);
+		}
 	}
 	.card:focus-visible {
 		outline: none;
-		box-shadow: inset 0 0 0 2px var(--accent);
+		box-shadow: inset 0 0 0 2px var(--focus-ring);
 	}
 	.swipe.open .card {
 		box-shadow: 0 1px 6px rgba(0, 0, 0, 0.12);
 	}
 	.card.active {
-		background: var(--bg-active);
+		background: var(--bg-selected);
 	}
 	.card.readonly {
 		cursor: default;
@@ -484,7 +517,7 @@
 	.card.readonly:hover {
 		background: var(--bg-list);
 	}
-	:global(html[data-touch]) .card:active:not(.readonly) {
+	:global(html[data-touch]) .card:active:not(.readonly):not(.sliding) {
 		background: var(--bg-hover);
 	}
 	.row {
@@ -494,21 +527,29 @@
 		gap: 8px;
 	}
 	.title {
+		display: flex;
+		align-items: baseline;
+		min-width: 0;
 		font-size: 14px;
 		font-weight: 600;
 		color: var(--text-strong);
+	}
+	/* `dir="auto"`: an Arabic title runs right to left and loses its end, not its start. */
+	.ttl {
+		min-width: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 	.shield {
+		flex: 0 0 auto;
 		display: inline-grid;
-		vertical-align: -1px;
-		margin-right: 3px;
+		align-self: center;
+		margin-inline-end: 3px;
 		color: var(--text-muted);
 	}
 	.shield.pinned {
-		color: var(--accent);
+		color: var(--accent-ink);
 	}
 	.time {
 		flex: 0 0 auto;
@@ -523,14 +564,38 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
-	.filename {
-		margin-top: 2px;
+	.folder {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		margin-top: 4px;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-		font-family: var(--font-mono);
-		font-size: 10.5px;
+		font-size: 11px;
 		color: var(--text-faint);
+	}
+	.folder :global(svg) {
+		flex: 0 0 auto;
+	}
+	.folder span {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	:global(html[data-touch]) .title {
+		font-size: 16px;
+	}
+	:global(html[data-touch]) .snippet {
+		font-size: 14px;
+	}
+	:global(html[data-touch]) .time,
+	:global(html[data-touch]) .folder {
+		font-size: 12px;
+	}
+	:global(html[data-touch]) .chip {
+		font-size: 12px;
+		padding: 2px 7px;
 	}
 	.tags {
 		display: flex;
@@ -540,7 +605,7 @@
 	}
 	.chip {
 		font-size: 10.5px;
-		color: var(--accent);
+		color: var(--accent-ink);
 		background: var(--accent-soft);
 		padding: 1px 6px;
 		border-radius: 5px;

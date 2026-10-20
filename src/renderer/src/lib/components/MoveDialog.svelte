@@ -1,15 +1,14 @@
 <script lang="ts">
 	import { fade, fly, scale } from 'svelte/transition';
+	import { ms, easeOut, popIn, sheetIn, sheetOut } from '../motion';
 	import { tick } from 'svelte';
 	import { getAppState } from '../stores/app.svelte';
 	import { buildFolderTree, type FolderNode } from '../folders';
-	import { reducedMotion } from '../portal';
 	import { baseOf, cleanFolder, parentOf } from '../../../../shared/paths';
 	import Icon from './Icon.svelte';
 
 	const app = getAppState();
 	const req = $derived(app.moveRequest);
-	const dur = reducedMotion() ? 0 : 1;
 	const phone = $derived(app.layout === 'phone');
 
 	interface Row {
@@ -127,17 +126,18 @@
 				if (scrimPressed) close();
 				scrimPressed = false;
 			}}
-			transition:fade={{ duration: 160 * dur }}
+			in:fade={{ duration: ms.pop, easing: easeOut }}
+			out:fade={{ duration: ms.out }}
 		></button>
 		<div
 			class="dialog"
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby="move-title"
-			in:fly={phone ? { y: 60, duration: 240 * dur, opacity: 0 } : { y: 0, duration: 0 }}
-			out:fade={{ duration: 120 * dur }}
+			in:fly={phone ? sheetIn : { y: 0, duration: 0 }}
+			out:fly={phone ? sheetOut : { y: 0, opacity: 0, duration: ms.out }}
 		>
-			<div class="inner" in:scale={{ start: 0.96, duration: phone ? 0 : 180 * dur }}>
+			<div class="inner" in:scale={phone ? { duration: 0 } : popIn}>
 				<h2 id="move-title">Move “{subject}”</h2>
 				<input
 					{@attach focusFilter}
@@ -297,7 +297,7 @@
 	}
 	.shield {
 		display: grid;
-		color: var(--accent);
+		color: var(--accent-ink);
 	}
 	.hint {
 		font-size: 11px;

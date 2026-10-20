@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { slide } from 'svelte/transition';
+	import { easeOut, ms } from '../motion';
 	import { getAppState } from '../stores/app.svelte';
 	import type { FolderNode } from '../folders';
 	import { dropFor, endDrag, startDrag } from '../dnd';
@@ -133,6 +134,7 @@
 
 	<button
 		class="label"
+		aria-current={selected ? 'true' : undefined}
 		draggable={!app.touch}
 		onclick={onSelect}
 		oncontextmenu={onContextMenu}
@@ -144,7 +146,7 @@
 		ondragend={endDrag}
 	>
 		<span class="ico"><Icon name="folder" size={14} /></span>
-		<span class="name">{node.name}</span>
+		<span class="name" dir="auto">{node.name}</span>
 		{#if sealed}
 			<span
 				class="shield"
@@ -178,7 +180,7 @@
 </div>
 
 {#if hasChildren && expanded}
-	<div transition:slide={{ duration: app.touch ? 0 : 160 }}>
+	<div transition:slide={{ duration: app.touch ? 0 : ms.pop, easing: easeOut }}>
 		{#each node.children as child (child.path)}
 			<Self node={child} depth={depth + 1} />
 		{/each}
@@ -196,10 +198,15 @@
 		padding-right: 8px;
 		margin: 1px 6px;
 		color: var(--text);
-		transition: background 110ms ease;
+		transition: background var(--dur-fast) ease;
 	}
-	.folder-row:hover {
-		background: var(--bg-hover);
+	@media (hover: hover) {
+		.folder-row:hover {
+			background: var(--bg-hover);
+		}
+	}
+	:global(html[data-touch]) .folder-row:active {
+		background: var(--bg-active);
 	}
 	.folder-row.selected {
 		background: var(--accent-soft);
@@ -208,10 +215,10 @@
 		background: var(--accent-soft);
 		box-shadow: inset 0 0 0 1.5px var(--accent);
 	}
+	/* Colour alone marks selection (as on All Notes): no width jump. */
 	.folder-row.selected .name,
 	.folder-row.selected .ico {
-		color: var(--accent);
-		font-weight: 600;
+		color: var(--accent-ink);
 	}
 	.twist {
 		width: 16px;
@@ -226,13 +233,14 @@
 	}
 	.chev {
 		display: grid;
-		transition: transform 140ms var(--ease-spring);
+		transition: transform var(--dur-pop) var(--ease-out);
 	}
 	.chev.open {
 		transform: rotate(90deg);
 	}
 	.label {
 		flex: 1;
+		align-self: stretch;
 		display: flex;
 		align-items: center;
 		gap: 7px;
@@ -256,7 +264,7 @@
 		flex: 0 0 auto;
 		display: grid;
 		margin-left: -2px;
-		color: var(--accent);
+		color: var(--accent-ink);
 	}
 	.shield.inherited {
 		color: var(--text-faint);
@@ -264,7 +272,7 @@
 	.count {
 		margin-left: auto;
 		font-size: 11px;
-		color: var(--text-faint);
+		color: var(--text-muted);
 		font-variant-numeric: tabular-nums;
 	}
 	/* Mouse: the ⋯ button sits over the count, shown on hover / keyboard focus. */
@@ -279,16 +287,21 @@
 		border-radius: 6px;
 		color: var(--text-muted);
 		opacity: 0;
+		transition: opacity var(--dur-fast) ease;
 	}
 	.more:hover,
 	.more:focus-visible {
 		background: var(--bg-active);
 	}
-	.folder-row:hover .more,
 	.more:focus-visible {
 		opacity: 1;
 	}
-	.folder-row:hover .count {
-		visibility: hidden;
+	@media (hover: hover) {
+		.folder-row:hover .more {
+			opacity: 1;
+		}
+		.folder-row:hover .count {
+			visibility: hidden;
+		}
 	}
 </style>

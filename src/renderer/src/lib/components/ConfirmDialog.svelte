@@ -1,11 +1,10 @@
 <script lang="ts">
 	import { fade, fly, scale } from 'svelte/transition';
+	import { ms, easeOut, popIn, sheetIn, sheetOut } from '../motion';
 	import { getAppState } from '../stores/app.svelte';
-	import { reducedMotion } from '../portal';
 
 	const app = getAppState();
 	const req = $derived(app.confirmRequest);
-	const dur = reducedMotion() ? 0 : 1;
 	// The scrim cancels only for a press that started on it: the tap that
 	// opened the dialog can still deliver its click here (a "ghost click").
 	let scrimPressed = false;
@@ -32,19 +31,18 @@
 				if (scrimPressed) app.answerConfirm(false);
 				scrimPressed = false;
 			}}
-			transition:fade={{ duration: 160 * dur }}
+			in:fade={{ duration: ms.pop, easing: easeOut }}
+			out:fade={{ duration: ms.out }}
 		></button>
 		<div
 			class="dialog"
 			role="alertdialog"
 			aria-modal="true"
 			aria-labelledby="confirm-title"
-			in:fly={app.layout === 'phone'
-				? { y: 60, duration: 240 * dur, opacity: 0 }
-				: { y: 0, duration: 0 }}
-			out:fade={{ duration: 120 * dur }}
+			in:fly={app.layout === 'phone' ? sheetIn : { y: 0, duration: 0 }}
+			out:fly={app.layout === 'phone' ? sheetOut : { y: 0, opacity: 0, duration: ms.out }}
 		>
-			<div in:scale={{ start: 0.96, duration: app.layout === 'phone' ? 0 : 180 * dur }}>
+			<div in:scale={app.layout === 'phone' ? { duration: 0 } : popIn}>
 				<h2 id="confirm-title">{req.title}</h2>
 				{#if req.body}<p>{req.body}</p>{/if}
 				<div class="actions">

@@ -17,6 +17,10 @@ import '@fontsource/cairo/600.css';
 import './app.css';
 import App from './App.svelte';
 
+// WebKit (iOS) only applies :active to touched elements when some touch
+// listener exists; passive, so it never holds up scrolling.
+document.addEventListener('touchstart', () => {}, { passive: true });
+
 const app = mount(App, {
 	target: document.getElementById('app')!
 });

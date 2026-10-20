@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { flip } from 'svelte/animate';
 	import { fade } from 'svelte/transition';
-	import { reducedMotion } from '../portal';
+	import { easeInOut, ms } from '../motion';
 	import { getAppState } from '../stores/app.svelte';
 	import NoteCard from './NoteCard.svelte';
 	import EmptyState from './EmptyState.svelte';
@@ -10,7 +10,17 @@
 	import mascotSearch from '$lib/assets/fr5a-search.png';
 
 	const app = getAppState();
-	const dur = reducedMotion() ? 0 : 1;
+	/**
+	 * The list only animates edits in place (a pin floats up, a save reorders, a
+	 * note arrives); a new scope — each search keystroke, a folder / tag / Trash
+	 * switch — swaps instantly. A plain timestamp, read when the animations start.
+	 */
+	let scopeChangedAt = 0;
+	$effect.pre(() => {
+		void [app.search, app.selectedFolder, app.selectedTag, app.trashOpen];
+		scopeChangedAt = performance.now();
+	});
+	const calm = () => performance.now() - scopeChangedAt < 150;
 	let searchEl = $state<HTMLInputElement | null>(null);
 
 	// Breadcrumb crumbs for the active filter, so it's always clear what's showing.
@@ -52,6 +62,10 @@
 		}
 		return [{ path: '', label: 'All Notes' }];
 	});
+	// Phones already title the screen "All Notes": the crumb would repeat it.
+	const rootOnPhone = $derived(
+		app.layout === 'phone' && !app.trashOpen && crumbs.length === 1 && crumbs[0].path === ''
+	);
 </script>
 
 <section class="notelist">
@@ -97,7 +111,8 @@
 	</div>
 
 	<nav
-		class={['scope', { trash: app.trashOpen }]}
+		class={['scope', { trash: app.trashOpen, redundant: rootOnPhone }]}
+		aria-label="Location"
 		title={app.trashOpen
 			? 'Swipe right to restore · left to delete forever (or right-click / long-press)'
 			: 'Swipe a card right to pin · left to trash (or right-click / long-press)'}
@@ -109,7 +124,7 @@
 			{#if crumb.onclick}
 				<button class="crumb link" onclick={crumb.onclick}>{crumb.label}</button>
 			{:else}
-				<span class="crumb current">{crumb.label}</span>
+				<span class="crumb current" aria-current="page" dir="auto">{crumb.label}</span>
 			{/if}
 		{/each}
 		{#if app.trashOpen && app.trashNotes.length}
@@ -138,7 +153,10 @@
 			{/if}
 		{:else}
 			{#each app.filtered as note (note.id)}
-				<div animate:flip={{ duration: 220 * dur }} in:fade={{ duration: 180 * dur }}>
+				<div
+					animate:flip={{ duration: calm() ? 0 : ms.pane, easing: easeInOut }}
+					in:fade={{ duration: calm() ? 0 : ms.pop }}
+				>
 					<NoteCard {note} trash={app.trashOpen} />
 				</div>
 			{/each}
@@ -161,7 +179,9 @@
 		display: flex;
 		align-items: center;
 		gap: 8px;
-		padding: 12px 12px 12px;
+		/* 48px, like the editor header: the panes' top rows line up. */
+		min-height: 48px;
+		padding: 8px 12px;
 	}
 	/* The search field shrinks with the list; the New note button never does. */
 	.search {
@@ -218,13 +238,17 @@
 		border-radius: 8px;
 		color: var(--text-muted);
 		transition:
-			background 120ms ease,
-			color 120ms ease;
+			background var(--dur-fast) ease,
+			color var(--dur-fast) ease,
+			transform var(--dur-fast) var(--ease-out);
 	}
-	.new:hover,
+	.new:hover {
+		background: var(--bg-hover);
+		color: var(--text);
+	}
 	.new:active {
-		background: var(--accent-soft);
-		color: var(--accent);
+		background: var(--bg-active);
+		transform: scale(var(--press-icon));
 	}
 	:global(html[data-touch]) .new {
 		width: 44px;
@@ -248,9 +272,13 @@
 		gap: 3px;
 		font-size: 11px;
 		font-weight: 600;
-		padding: 2px 14px 8px;
+		/* 20px = the list's 8 + a card's 12: one left edge with the card text. */
+		padding: 2px 20px 8px;
 		overflow: hidden;
 		white-space: nowrap;
+	}
+	.scope.redundant {
+		display: none;
 	}
 	.crumb {
 		font-size: 11px;
@@ -261,13 +289,19 @@
 		white-space: nowrap;
 	}
 	.crumb.current {
-		color: var(--accent);
+		color: var(--accent-ink);
 		flex: 0 1 auto;
 	}
 	.crumb.link {
-		color: var(--text-faint);
+		color: var(--text-muted);
 		flex: 0 0 auto;
-		transition: color 110ms ease;
+		transition: color var(--dur-fast) ease;
+	}
+	:global(html[data-touch]) .crumb.link,
+	:global(html[data-touch]) .empty-trash {
+		min-height: 44px;
+		display: inline-flex;
+		align-items: center;
 	}
 	.crumb.link:hover {
 		color: var(--text);

@@ -53,6 +53,23 @@ export function applyPalette(accent: Accent, theme: 'light' | 'dark'): void {
 	root.setProperty('--text-main', mix(hex, base.text, 0.08));
 	root.setProperty('--accent-soft', rgba(hex, theme === 'dark' ? 0.17 : 0.13));
 	root.setProperty('--on-accent', onColor(hex));
+	// Accent as *text* / icons: light accents (yellow on cream is 2.4:1) darken
+	// toward ink until they read at 4.5:1 on an accent-soft pill over the backdrop.
+	const pill = mix(hex, primary, theme === 'dark' ? 0.17 : 0.13);
+	root.setProperty('--accent-ink', theme === 'dark' ? hex : inkFor(hex, pill, 4.5));
+	root.setProperty('--focus-ring', theme === 'dark' ? hex : inkFor(hex, primary, 3));
+	root.setProperty('--selection', rgba(hex, theme === 'dark' ? 0.32 : 0.26));
+	// Menus / popovers: dark UIs show depth with a lighter surface, not shadow.
+	root.setProperty('--bg-elevated', theme === 'dark' ? mix(hex, '#303034', 0.04) : secondary);
+}
+
+/** `hex` mixed toward ink just enough to reach `min` contrast on `bg`. */
+function inkFor(hex: string, bg: string, min: number): string {
+	for (let p = 0; p <= 1; p += 0.02) {
+		const c = mix(ON_DARK, hex, p);
+		if (contrast(c, bg) >= min) return c;
+	}
+	return ON_DARK;
 }
 
 const channel = (hex: string, i: number): number => parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16);

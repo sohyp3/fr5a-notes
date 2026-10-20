@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { scale } from 'svelte/transition';
-	import { reducedMotion } from '../portal';
+	import { easeOut, ms } from '../motion';
 
 	interface Props {
 		/** Mascot / hero image source. */
@@ -18,7 +18,6 @@
 	}
 
 	let { src, alt = '', title, body, compact = false, small = false, action }: Props = $props();
-	const dur = reducedMotion() ? 0 : 1;
 </script>
 
 <div class={['empty-state', { compact, small }]}>
@@ -27,7 +26,7 @@
 		{src}
 		{alt}
 		draggable="false"
-		in:scale={{ start: 0.92, opacity: 0, duration: 260 * dur }}
+		in:scale={{ start: 0.94, opacity: 0, duration: ms.pane, easing: easeOut }}
 	/>
 	<h2>{title}</h2>
 	{#if body}<p>{body}</p>{/if}

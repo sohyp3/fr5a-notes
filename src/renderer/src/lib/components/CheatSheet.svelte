@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { fade, scale } from 'svelte/transition';
+	import { fade } from 'svelte/transition';
+	import { ms } from '../motion';
 	import { getAppState } from '../stores/app.svelte';
 	import { SHORTCUTS, VIM_SHORTCUTS } from '../shortcuts';
 	import Icon from './Icon.svelte';
@@ -24,7 +25,7 @@
 	role="button"
 	tabindex="-1"
 	aria-label="Close shortcuts"
-	transition:fade={{ duration: 140 }}
+	transition:fade={{ duration: ms.fast }}
 	onclick={(e) => e.target === e.currentTarget && app.toggleCheatSheet()}
 	onkeydown={(e) => e.key === 'Escape' && app.toggleCheatSheet()}
 >
@@ -34,7 +35,7 @@
 		role="dialog"
 		tabindex="-1"
 		aria-label="Keyboard shortcuts"
-		transition:scale={{ duration: 180, start: 0.94 }}
+		in:fade={{ duration: ms.fast }}
 	>
 		<header>
 			<h2>Keyboard shortcuts</h2>

@@ -150,7 +150,13 @@
 
 	<div class="frame">
 		{#if !phone || showIndex}
-			<nav class={['nav', { index: showIndex }]} aria-label="Settings sections">
+			<!-- Phones: Back to the index slides it in from the left (a section
+			     arrives from the right). Not on first open: the overlay moves then. -->
+			<nav
+				class={['nav', { index: showIndex }]}
+				aria-label="Settings sections"
+				in:fly={{ x: phone ? -24 : 0, opacity: 0, duration: phone ? 180 * dur : 0 }}
+			>
 				{#each SECTIONS as sec (sec.id)}
 					<button
 						class={['nav-item', { on: !phone && sec.id === app.settingsSection }]}
@@ -687,7 +693,7 @@
 	}
 	.nav-item.on {
 		background: var(--accent-soft);
-		color: var(--accent);
+		color: var(--accent-ink);
 	}
 	.index .nav-item {
 		min-height: 62px;
@@ -704,7 +710,7 @@
 		height: 36px;
 		border-radius: 10px;
 		background: var(--accent-soft);
-		color: var(--accent);
+		color: var(--accent-ink);
 	}
 	.nav-text {
 		flex: 1;
@@ -812,7 +818,7 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 16px;
-		padding: 12px 2px;
+		padding: 12px 0;
 		box-shadow: inset 0 -1px 0 var(--bg-hover);
 	}
 	.row:last-child {
@@ -877,6 +883,8 @@
 	code {
 		font-family: var(--font-mono);
 		font-size: 0.92em;
+		/* `<!--` must read as typed, not as an arrow ligature. */
+		font-variant-ligatures: none;
 	}
 	.btn {
 		flex: 0 0 auto;
@@ -959,14 +967,18 @@
 		border-radius: 50%;
 		background: var(--sw);
 		box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
-		transition: transform var(--dur-fast) var(--ease-spring);
+		transition: transform var(--dur-fast) var(--ease-out);
 	}
 	:global(html[data-touch]) .swatch {
 		width: 34px;
 		height: 34px;
 	}
-	.swatch:hover {
+	/* Mouse only: a tap would leave it enlarged. */
+	:global(html:not([data-hover='none'])) .swatch:hover {
 		transform: scale(1.12);
+	}
+	.swatch:active {
+		transform: scale(var(--press-icon));
 	}
 	.swatch.on {
 		box-shadow:
@@ -1007,7 +1019,7 @@
 		border-radius: 50%;
 		background: #fff;
 		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-		transition: transform var(--dur-pane) var(--ease-spring);
+		transition: transform var(--dur-pop) var(--ease-out);
 	}
 	:global(html[data-touch]) .knob {
 		width: 24px;

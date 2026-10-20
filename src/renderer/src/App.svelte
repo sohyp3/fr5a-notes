@@ -22,6 +22,17 @@
 	import { isMobile } from './lib/platform';
 	import { layoutFor } from './lib/layout';
 	import { reducedMotion } from './lib/portal';
+	import { easeDrawer, easeOut, ms, scrimIn, scrimOut } from './lib/motion';
+	import {
+		EDGE_BACK_PX,
+		LOCK_PX,
+		Tracker,
+		afterTransition,
+		liveTranslate,
+		project,
+		releaseMs,
+		rubberband
+	} from './lib/gesture';
 
 	const app = getAppState();
 	const dur = reducedMotion() ? 0 : 1;
@@ -42,10 +53,12 @@
 			: null
 	);
 
-	// Spring-driven widths so toggling/Zen feels physical, not linear.
-	const sidebarWidth = new Spring(app.widths.sidebar, { stiffness: 0.16, damping: 0.72 });
-	const listWidth = new Spring(app.widths.list, { stiffness: 0.16, damping: 0.74 });
-	const harnessWidth = new Spring(0, { stiffness: 0.16, damping: 0.74 });
+	// Spring-driven widths so toggling/Zen feels physical, not linear (critically
+	// damped: no overshoot on a layout edge).
+	const PANE_SPRING = { stiffness: 0.16, damping: 0.74 };
+	const sidebarWidth = new Spring(app.widths.sidebar, PANE_SPRING);
+	const listWidth = new Spring(app.widths.list, PANE_SPRING);
+	const harnessWidth = new Spring(0, PANE_SPRING);
 
 	const desktop = $derived(app.layout === 'desktop');
 	const tablet = $derived(app.layout === 'tablet');
@@ -64,21 +77,34 @@
 	$effect(() => app.setLayout(layoutFor(winW, touch), touch));
 
 	/**
-	 * Desktop widths actually used. With the AI pane open on a narrow window (a
-	 * landscape tablet) the editor keeps EDITOR_MIN: the sidebar steps aside
-	 * first, then the AI pane narrows toward its minimum, then the list steps
-	 * aside. Nothing is persisted — closing the AI pane brings them back.
+	 * Desktop widths actually used. On a narrow window (a landscape tablet, a
+	 * half-screen laptop window, the AI pane open) the editor keeps EDITOR_MIN:
+	 * the sidebar steps aside first, then the AI pane narrows toward its
+	 * minimum, then the list steps aside. Nothing is persisted — a wider window
+	 * brings them back.
 	 */
 	const fit = $derived.by(() => {
 		let side = showSidebar ? app.widths.sidebar : 0;
 		let list = showList ? app.widths.list : 0;
-		let ai = app.widths.harness;
-		if (!desktop || !app.harnessOpen) return { side, list, ai };
+		let ai = app.harnessOpen ? app.widths.harness : 0;
+		if (!desktop) return { side, list, ai: app.widths.harness };
 		const room = winW - EDITOR_MIN - 40;
+		if (!app.harnessOpen && side + list > room) {
+			// Narrow window: the sidebar, then the list, give up width down to their
+			// minimums before anything steps aside.
+			let over = side + list - room;
+			const cut = (w: number, min: number): number => {
+				const c = w ? Math.min(over, Math.max(0, w - min)) : 0;
+				over -= c;
+				return w - c;
+			};
+			side = cut(side, PANE_WIDTHS.sidebar.min);
+			list = cut(list, PANE_WIDTHS.list.min);
+		}
 		if (side + list + ai > room) side = 0;
-		if (list + ai > room) ai = Math.max(PANE_WIDTHS.harness.min, room - list);
+		if (app.harnessOpen && list + ai > room) ai = Math.max(PANE_WIDTHS.harness.min, room - list);
 		if (list + ai > room) list = 0;
-		return { side, list, ai };
+		return { side, list, ai: app.harnessOpen ? ai : app.widths.harness };
 	});
 	const overlay = $derived(app.view !== 'editor');
 
@@ -101,8 +127,10 @@
 	}
 
 	function follow(spring: Spring<number>, w: number): void {
-		// While an edge is dragged the pane tracks the pointer exactly.
-		if (app.resizing) void spring.set(w, { instant: true });
+		// While an edge is dragged the pane tracks the pointer exactly. Touch
+		// devices (a landscape tablet would re-wrap the whole note every frame)
+		// and reduced motion snap.
+		if (app.resizing || app.touch || dur === 0) void spring.set(w, { instant: true });
 		else spring.target = w;
 	}
 	$effect(() => follow(sidebarWidth, fit.side));
@@ -119,34 +147,264 @@
 		app.setWidth(pane, Math.min(px, Math.max(PANE_WIDTHS[pane].min, room)));
 	}
 
-	// --- tablet AI sheet: drag the handle between half and full height -------
+	// --- tablet AI sheet: drag the handle between closed, half and full --------
+	// While it moves the sheet is laid out at full height once and only
+	// translated (no per-frame layout of the transcript); its class height
+	// comes back when it lands. The release velocity picks the snap point.
 	let sheetEl = $state<HTMLDivElement | null>(null);
-	let sheetDrag: { y: number; h: number; id: number; moved: boolean } | null = null;
-	let sheetH = $state<number | null>(null);
+	let sheetScrim = $state<HTMLButtonElement | null>(null);
+	let sheet: {
+		id: number;
+		y0: number;
+		t0: number;
+		base: number;
+		full: number;
+		half: number;
+		on: boolean;
+		v: Tracker;
+	} | null = null;
+	let sheetSettle: (() => void) | null = null;
 
+	function sheetGeo(): { full: number; half: number } {
+		const h = sheetEl?.parentElement?.clientHeight ?? window.innerHeight;
+		return { full: h - 12, half: Math.round(h * 0.58) };
+	}
+	/** Full height, shifted down by `base`: one layout, nothing visibly moves. */
+	function holdFull(base: number): void {
+		if (!sheetEl) return;
+		sheetEl.style.transition = 'none';
+		sheetEl.style.height = `${sheetGeo().full}px`;
+		sheetEl.style.transform = `translateY(${base}px)`;
+	}
+	function sheetTo(to: number, v: number): void {
+		const el = sheetEl;
+		if (!el) return;
+		const from = liveTranslate(el).y;
+		const dur = releaseMs(to - from, v, 160, 320);
+		void el.offsetHeight; // commit the start before transitioning
+		el.style.transition = `transform ${dur}ms var(--ease-drawer)`;
+		el.style.transform = `translateY(${to}px)`;
+		if (sheetScrim) sheetScrim.style.transition = `opacity ${dur}ms var(--ease-out)`;
+		sheetSettle = afterTransition(el, dur, () => {
+			el.style.transition = 'none';
+			el.style.removeProperty('height');
+			el.style.removeProperty('transform');
+			void el.offsetHeight;
+			el.style.removeProperty('transition');
+			sheetScrim?.style.removeProperty('opacity');
+			sheetScrim?.style.removeProperty('transition');
+			sheetSettle = null;
+		});
+	}
 	function sheetDown(e: PointerEvent): void {
 		if (!sheetEl) return;
 		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-		sheetDrag = { y: e.clientY, h: sheetEl.offsetHeight, id: e.pointerId, moved: false };
+		const { full, half } = sheetGeo();
+		// Grabbed mid-flight: carry on from where it is.
+		const mid = sheetSettle !== null;
+		sheetSettle?.();
+		sheetSettle = null;
+		const base = mid ? liveTranslate(sheetEl).y : app.sheetExpanded ? 0 : full - half;
+		if (mid) holdFull(base);
+		sheet = {
+			id: e.pointerId,
+			y0: e.clientY,
+			t0: base,
+			base,
+			full,
+			half,
+			on: mid,
+			v: new Tracker()
+		};
+		sheet.v.add(e.clientY, e.timeStamp);
 	}
 	function sheetMove(e: PointerEvent): void {
-		if (!sheetDrag || e.pointerId !== sheetDrag.id) return;
-		const dy = e.clientY - sheetDrag.y;
-		if (Math.abs(dy) > 6) sheetDrag.moved = true;
-		if (sheetDrag.moved) sheetH = Math.max(120, sheetDrag.h - dy);
+		const s = sheet;
+		if (!s || e.pointerId !== s.id || !sheetEl) return;
+		s.v.add(e.clientY, e.timeStamp);
+		const dy = e.clientY - s.y0;
+		if (!s.on) {
+			if (Math.abs(dy) < 6) return;
+			s.on = true;
+			holdFull(s.base);
+		}
+		let ty = s.base + dy;
+		if (ty < 0) ty = -rubberband(-ty, s.full); // above full: resists
+		sheetEl.style.transform = `translateY(${ty}px)`;
+		// The scrim dims only between half and closed.
+		const below = ty - (s.full - s.half);
+		if (sheetScrim) {
+			sheetScrim.style.transition = 'none';
+			sheetScrim.style.opacity = String(Math.min(1, Math.max(0, 1 - below / s.half)));
+		}
 	}
 	function sheetUp(e: PointerEvent): void {
-		if (!sheetDrag || e.pointerId !== sheetDrag.id) return;
-		const parent = sheetEl?.parentElement?.offsetHeight ?? window.innerHeight;
-		if (!sheetDrag.moved) app.sheetExpanded = !app.sheetExpanded;
-		else if (sheetH !== null) {
-			const frac = sheetH / parent;
-			// Snap: closed below a third, else whichever height is nearer.
-			if (frac < 0.33) app.closeHarness();
-			else app.sheetExpanded = frac > 0.75;
+		const s = sheet;
+		if (!s || e.pointerId !== s.id || !sheetEl) return;
+		sheet = null;
+		if (!s.on) {
+			toggleSheet();
+			return;
 		}
-		sheetDrag = null;
-		sheetH = null;
+		const ty = liveTranslate(sheetEl).y;
+		const v = e.type === 'pointercancel' ? 0 : s.v.velocity(e.timeStamp);
+		const p = ty + project(v);
+		const snaps = [0, s.full - s.half, s.full + 24];
+		const to = snaps.reduce((a, b) => (Math.abs(b - p) < Math.abs(a - p) ? b : a));
+		// State now; the inline transform rules until it lands.
+		if (to === snaps[2]) app.closeHarness();
+		else app.sheetExpanded = to === 0;
+		sheetTo(to, v);
+	}
+	/** Tap / keyboard on the handle: half ⇄ full, by transform too. */
+	function toggleSheet(): void {
+		if (!sheetEl) return;
+		sheetSettle?.();
+		sheetSettle = null;
+		const { full, half } = sheetGeo();
+		const expand = !app.sheetExpanded;
+		holdFull(expand ? full - half : 0);
+		app.sheetExpanded = expand;
+		sheetTo(expand ? 0 : full - half, 0);
+	}
+
+	// --- phone: swipe from the left edge to go Back ---------------------------
+	// The current pane follows the finger 1:1 over the previous one (the same
+	// -28% parallax as the CSS push); the release velocity decides, and a commit
+	// goes through app.back() exactly like the Back button (no remount, the
+	// caret survives). Android gesture navigation owns the edge itself.
+	const PREV: Partial<Record<Pane, Pane>> = { list: 'nav', editor: 'list', harness: 'editor' };
+	const paneEl: Partial<Record<Pane, HTMLElement>> = {};
+	let dimEl = $state<HTMLDivElement | null>(null);
+	let edge: {
+		id: number;
+		x0: number;
+		y0: number;
+		at: number;
+		t0: number;
+		w: number;
+		on: boolean;
+		cur: HTMLElement;
+		prev: HTMLElement;
+		v: Tracker;
+	} | null = null;
+	let edgeSettle: { cur: HTMLElement; cancel: () => void } | null = null;
+	/** Records a pane wrapper for the edge swipe. */
+	const pane =
+		(p: Pane) =>
+		(node: HTMLElement): (() => void) => {
+			paneEl[p] = node;
+			return () => delete paneEl[p];
+		};
+
+	function edgeListen(on: boolean): void {
+		const f = on ? window.addEventListener : window.removeEventListener;
+		f('pointermove', edgeMove, true);
+		f('pointerup', edgeUp, true);
+		f('pointercancel', edgeUp, true);
+	}
+	function edgeDown(e: PointerEvent): void {
+		if (!phone || overlay || edge || e.pointerType === 'mouse' || !e.isPrimary) return;
+		if (e.clientX > EDGE_BACK_PX || app.swipeOpen) return;
+		const p = PREV[app.pane];
+		const cur = paneEl[app.pane];
+		const prev = p && paneEl[p];
+		if (!cur || !prev || !dimEl) return;
+		if (edgeSettle?.cur === cur) {
+			edgeSettle.cancel();
+			edgeSettle = null;
+		}
+		edge = {
+			id: e.pointerId,
+			x0: e.clientX,
+			y0: e.clientY,
+			at: e.timeStamp,
+			t0: liveTranslate(cur).x,
+			w: cur.offsetWidth,
+			on: false,
+			cur,
+			prev,
+			v: new Tracker()
+		};
+		edge.v.add(e.clientX, e.timeStamp);
+		// No preventDefault / capture: a tap at the edge still works.
+		edgeListen(true);
+	}
+	function edgePaint(t: number): void {
+		const g = edge;
+		if (!g || !dimEl) return;
+		g.cur.style.transform = `translateX(${t}px)`;
+		g.prev.style.transform = `translateX(${-0.28 * (g.w - t)}px)`;
+		dimEl.style.opacity = String(1 - t / g.w);
+	}
+	function edgeEnd(): void {
+		edgeListen(false);
+		edge = null;
+	}
+	function edgeMove(e: PointerEvent): void {
+		const g = edge;
+		if (!g || e.pointerId !== g.id || !dimEl) return;
+		g.v.add(e.clientX, e.timeStamp);
+		const dx = e.clientX - g.x0;
+		const dy = e.clientY - g.y0;
+		if (!g.on) {
+			// A scroll, or a hold (text selection, long-press) — not a swipe.
+			if (Math.abs(dy) > LOCK_PX && Math.abs(dy) > Math.abs(dx)) return edgeEnd();
+			if (e.timeStamp - g.at > 350) return edgeEnd();
+			if (dx < LOCK_PX || dx < 1.5 * Math.abs(dy)) return;
+			g.on = true;
+			for (const el of [g.cur, g.prev]) {
+				el.style.transition = 'none';
+				el.style.willChange = 'transform';
+			}
+			g.prev.style.visibility = 'visible';
+			g.prev.classList.add('edge-prev');
+			g.cur.classList.add('edge-drag');
+			dimEl.style.transition = 'none';
+		}
+		edgePaint(Math.min(g.w, Math.max(0, g.t0 + dx)));
+	}
+	function edgeUp(e: PointerEvent): void {
+		const g = edge;
+		if (!g || e.pointerId !== g.id || !dimEl) return;
+		edgeListen(false);
+		if (!g.on) {
+			edge = null;
+			return;
+		}
+		const dim = dimEl;
+		const t = liveTranslate(g.cur).x;
+		const v = e.type === 'pointercancel' ? 0 : g.v.velocity(e.timeStamp);
+		const commit = v > -0.05 && t + project(v) > g.w / 2;
+		const to = commit ? g.w : 0;
+		const dur = releaseMs(to - t, v, 140, 300);
+		g.cur.style.transition = g.prev.style.transition = `transform ${dur}ms var(--ease-drawer)`;
+		dim.style.transition = `opacity ${dur}ms var(--ease-drawer)`;
+		if (commit) {
+			// Its new data-pos ("after") would hide it at once: keep it on top until it lands.
+			g.cur.style.visibility = 'visible';
+			g.cur.style.zIndex = '4';
+			dim.style.zIndex = '3';
+			app.back();
+		}
+		edgePaint(to);
+		edge = null;
+		const clean = (): void => {
+			for (const el of [g.cur, g.prev, dim])
+				for (const p of [
+					'transform',
+					'transition',
+					'visibility',
+					'z-index',
+					'will-change',
+					'opacity'
+				])
+					el.style.removeProperty(p);
+			g.cur.classList.remove('edge-drag');
+			g.prev.classList.remove('edge-prev');
+			edgeSettle = null;
+		};
+		edgeSettle = { cur: g.cur, cancel: afterTransition(g.cur, dur, clean) };
 	}
 
 	function onKeydown(e: KeyboardEvent): void {
@@ -256,13 +514,15 @@
 			]}
 			data-layout={app.layout}
 			data-pane={phone ? (overlay ? app.view : app.pane) : undefined}
-			style:--sidebar-w="{app.widths.sidebar}px"
-			style:--list-w="{app.widths.list}px"
+			onpointerdowncapture={edgeDown}
+			style:--sidebar-w="{fit.side || app.widths.sidebar}px"
+			style:--list-w="{fit.list || app.widths.list}px"
 			style:--harness-w="{fit.ai}px"
-			in:fade={{ duration: 220 * dur }}
+			in:fade={{ duration: ms.pane, easing: easeOut }}
 		>
 			<div
 				class="sidebar-wrap"
+				{@attach pane('nav')}
 				data-pos={pos('nav')}
 				style:width={desktop ? `${sidebarWidth.current}px` : null}
 				aria-hidden={!sidebarShown}
@@ -285,12 +545,14 @@
 					class="scrim"
 					aria-label="Close folders"
 					onclick={() => app.toggleDrawer()}
-					transition:fade={{ duration: 200 * dur }}
+					in:fade={{ duration: ms.pane, easing: easeOut }}
+					out:fade={{ duration: ms.exit }}
 				></button>
 			{/if}
 			<main class="content">
 				<div
 					class="list-wrap"
+					{@attach pane('list')}
 					data-pos={pos('list')}
 					style:width={phone ? null : `${listWidth.current}px`}
 					aria-hidden={!listShown || overlay}
@@ -310,6 +572,7 @@
 				{/if}
 				<div
 					class="editor-wrap"
+					{@attach pane('editor')}
 					data-pos={pos('editor')}
 					aria-hidden={!editorShown || overlay}
 					inert={!editorShown || overlay}
@@ -320,9 +583,11 @@
 					<div
 						class="view-overlay"
 						in:fly={phone
-							? { x: 48, duration: 200 * dur, opacity: 0 }
-							: { y: 8, duration: 180 * dur }}
-						out:fade={{ duration: 120 * dur }}
+							? { x: '100%', opacity: 1, duration: ms.pane, easing: easeDrawer }
+							: { y: 8, duration: ms.pop, easing: easeOut }}
+						out:fly={phone
+							? { x: '100%', opacity: 1, duration: ms.exit, easing: easeOut }
+							: { y: 0, opacity: 0, duration: ms.out }}
 					>
 						{#if app.view === 'settings'}
 							<Settings />
@@ -339,9 +604,11 @@
 			{#if tablet && app.harnessOpen}
 				<button
 					class="scrim sheet-scrim"
+					bind:this={sheetScrim}
 					aria-label="Close AI"
 					onclick={() => app.closeHarness()}
-					transition:fade={{ duration: 200 * dur }}
+					in:fade={scrimIn}
+					out:fade={scrimOut}
 				></button>
 			{/if}
 			{#if desktop && app.harnessOpen}
@@ -357,10 +624,10 @@
 			{/if}
 			<div
 				bind:this={sheetEl}
-				class={['harness-wrap', { dragging: sheetH !== null }]}
+				{@attach pane('harness')}
+				class="harness-wrap"
 				data-pos={pos('harness')}
 				style:width={desktop ? `${harnessWidth.current}px` : null}
-				style:height={tablet && sheetH !== null ? `${sheetH}px` : null}
 				aria-hidden={!harnessShown}
 				inert={!harnessShown}
 			>
@@ -377,7 +644,7 @@
 						onkeydown={(e) => {
 							if (e.key === 'Enter' || e.key === ' ') {
 								e.preventDefault();
-								app.sheetExpanded = !app.sheetExpanded;
+								toggleSheet();
 							}
 						}}
 					>
@@ -390,6 +657,7 @@
 					{/await}
 				{/if}
 			</div>
+			<div class="pane-dim" bind:this={dimEl} aria-hidden="true"></div>
 		</div>
 	{:else}
 		<div class="body"></div>
@@ -510,10 +778,11 @@
 		background: var(--bg-primary);
 		box-shadow: 8px 0 24px rgba(0, 0, 0, 0.12);
 		transform: translateX(-105%);
-		transition: transform var(--dur-sheet) var(--ease-out);
+		transition: transform var(--dur-exit) var(--ease-out);
 	}
 	.layout-tablet.drawer-open .sidebar-wrap {
 		transform: none;
+		transition: transform var(--dur-pane) var(--ease-drawer);
 	}
 	/* The sidebar fills the drawer (its desktop width would leave a bare strip). */
 	.layout-tablet .sidebar-wrap > :global(.sidebar) {
@@ -561,17 +830,17 @@
 		padding: 0 8px;
 		transform: translateY(105%);
 		transition:
-			transform var(--dur-sheet) var(--ease-out),
-			height var(--dur-sheet) var(--ease-out);
+			transform var(--dur-exit) var(--ease-out),
+			height var(--dur-sheet) var(--ease-in-out);
 	}
 	.layout-tablet.sheet-expanded .harness-wrap {
 		height: calc(100% - 12px);
 	}
-	.layout-tablet .harness-wrap.dragging {
-		transition: none;
-	}
 	.layout-tablet.harness-open .harness-wrap {
 		transform: none;
+		transition:
+			transform var(--dur-sheet) var(--ease-drawer),
+			height var(--dur-sheet) var(--ease-in-out);
 	}
 	.layout-tablet .harness-wrap > :global(.harness) {
 		flex: 1;
@@ -581,21 +850,32 @@
 		box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.16);
 	}
 	.sheet-handle {
+		position: relative;
 		flex: 0 0 auto;
 		display: grid;
 		place-items: center;
-		height: 22px;
+		height: 24px;
 		border-radius: 16px 16px 0 0;
 		background: var(--bg-editor);
 		box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.12);
 		touch-action: none;
 		cursor: ns-resize;
 	}
+	/* A finger-sized grab area above the visible strip. */
+	.sheet-handle::before {
+		content: '';
+		position: absolute;
+		inset: -14px 0 0;
+	}
 	.sheet-handle span {
 		width: 40px;
 		height: 4px;
 		border-radius: 2px;
-		background: var(--text-faint);
+		background: var(--rule);
+		transition: background var(--dur-fast) ease;
+	}
+	.sheet-handle:active span {
+		background: var(--text-muted);
 	}
 
 	/* --- phone: one pane on screen; the others wait off to the side -------- */
@@ -616,8 +896,55 @@
 		inset: 0;
 		display: flex;
 		transition:
-			transform var(--dur-pane) var(--ease-out),
+			transform var(--dur-pane) var(--ease-drawer),
 			visibility 0s linear var(--dur-pane);
+	}
+	/* The page being covered dims a little, as on iOS: says which way you went.
+	   A composited layer, no filter. */
+	.layout-phone .sidebar-wrap::after,
+	.layout-phone .list-wrap::after {
+		content: '';
+		position: absolute;
+		inset: 0;
+		z-index: 10;
+		pointer-events: none;
+		background: #000;
+		opacity: 0;
+		transition: opacity var(--dur-pane) var(--ease-drawer);
+	}
+	.layout-phone .sidebar-wrap[data-pos='before']::after,
+	.layout-phone .list-wrap[data-pos='before']::after {
+		opacity: 0.1;
+	}
+	/* Edge swipe back: the dim follows the finger instead (.pane-dim). */
+	.layout-phone :global(.edge-prev)::after {
+		opacity: 0 !important;
+		transition: none !important;
+	}
+	.pane-dim {
+		display: none;
+	}
+	.layout-phone .pane-dim {
+		display: block;
+		position: absolute;
+		inset: 0;
+		z-index: 1; /* after the wrappers: above "before" (1), below "current" (2) */
+		background: rgba(0, 0, 0, 0.1);
+		opacity: 0;
+		pointer-events: none;
+	}
+	.layout-phone :global(.edge-drag) {
+		box-shadow: -10px 0 28px rgba(0, 0, 0, 0.12);
+	}
+	/* Horizontal drags reach the edge swipe instead of becoming a pan (up to the
+	   nearest scroller, so the scrollers say it too; wide tables keep theirs). */
+	.layout-phone .list-wrap,
+	.layout-phone .editor-wrap,
+	.layout-phone .harness-wrap,
+	.layout-phone :global(.notelist .list),
+	.layout-phone :global(.editor-pane .scroll),
+	.layout-phone :global(.harness .transcript) {
+		touch-action: pan-y pinch-zoom;
 	}
 	.layout-phone .sidebar-wrap {
 		background: var(--bg-primary);
@@ -633,7 +960,7 @@
 		transform: none;
 		visibility: visible;
 		transition:
-			transform var(--dur-pane) var(--ease-out),
+			transform var(--dur-pane) var(--ease-drawer),
 			visibility 0s linear 0s;
 	}
 	.layout-phone [data-pos='before'] {

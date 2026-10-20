@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { fly, fade, slide } from 'svelte/transition';
+	import { fade } from 'svelte/transition';
 	import { tick, untrack } from 'svelte';
 	import { Editor } from '@tiptap/core';
 	import Document from '@tiptap/extension-document';
@@ -186,8 +186,17 @@
 			content: textToDoc(content),
 			// Locked / view mode mount read-only; `editable` below flips it live.
 			editable: canEdit,
+			editorProps: { attributes: { 'aria-label': 'Note text' } },
 			// Touch: never pop the keyboard on open — except for a new note's title.
-			autofocus: canEdit && (!app.touch || app.draft) ? 'end' : false,
+			// Focused by hand: TipTap's autofocus scrolls the caret into view, which
+			// opened every note scrolled to its end.
+			autofocus: false,
+			onCreate: ({ editor }) => {
+				if (!canEdit || (app.touch && !app.draft)) return;
+				// The caret waits at the end as before, but the note opens at its top
+				// (the first keystroke scrolls there). A draft: the title, on screen.
+				editor.commands.focus('end', { scrollIntoView: !!app.draft });
+			},
 			onUpdate: ({ editor }) => {
 				if (loading) return;
 				app.queueSave(docToText(editor));
@@ -958,12 +967,7 @@
 			</div>
 		</header>
 		{#if findOpen}
-			<div
-				class="findbar"
-				role="search"
-				aria-label="Find in note"
-				transition:slide={{ duration: 120 * dur }}
-			>
+			<div class="findbar" role="search" aria-label="Find in note">
 				<Icon name="search" size={14} />
 				<input
 					bind:this={findInput}
@@ -1018,7 +1022,6 @@
 					bind:this={scroller}
 					onscroll={() => (scrolled = (scroller?.scrollTop ?? 0) > 4)}
 					ondblclick={onDoubleClick}
-					in:fly={{ y: 12, duration: 190 * dur }}
 				>
 					<div class="mount" style:direction={dir} {@attach mount} {@attach followEditable}></div>
 				</div>
@@ -1275,7 +1278,7 @@
 		opacity: 1;
 	}
 	.state.shield {
-		color: var(--accent);
+		color: var(--accent-ink);
 		background: var(--accent-soft);
 	}
 	.cdir {
@@ -1354,13 +1357,13 @@
 		min-width: 44px;
 	}
 	.act:active:not(:disabled) {
-		transform: scale(0.94);
+		transform: scale(var(--press-icon));
 	}
 	.act.pin.on {
-		color: #e0a520;
+		color: var(--accent-ink);
 	}
 	.act.lock.on {
-		color: var(--accent);
+		color: var(--accent-ink);
 	}
 	.act.dot::after {
 		content: '';
@@ -1392,7 +1395,7 @@
 	}
 	.act.ai.on,
 	.act.icon.on {
-		color: var(--accent);
+		color: var(--accent-ink);
 	}
 	.act.dir {
 		padding: 0 9px;
@@ -1405,18 +1408,32 @@
 		font-size: 13px;
 		font-weight: 600;
 	}
+	/* Done is as findable as Edit: accent ink, no fill. */
+	.act.mode:not(.edit) {
+		color: var(--accent-ink);
+		font-weight: 650;
+	}
 	.act.mode.edit {
 		padding: 0 12px;
 		background: var(--accent-soft);
-		color: var(--accent);
+		color: var(--accent-ink);
 	}
 	:global(html[data-touch]) .act.mode {
 		padding: 0 14px;
 		font-size: 15px;
 	}
+	/* Hover stays neutral: accent means state (on / pinned / editing). */
 	.act:hover:not(:disabled) {
+		background: var(--bg-hover);
+		color: var(--text);
+	}
+	.act.mode.edit:hover:not(:disabled) {
 		background: var(--accent-soft);
-		color: var(--accent);
+		color: var(--accent-ink);
+	}
+	.act.on:hover:not(:disabled),
+	.act.pin.on:hover:not(:disabled) {
+		color: var(--accent-ink);
 	}
 	.vim-badge {
 		position: absolute;

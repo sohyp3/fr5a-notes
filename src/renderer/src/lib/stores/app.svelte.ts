@@ -1834,7 +1834,7 @@ class AppState {
 
 	private applyFonts(): void {
 		const root = document.documentElement;
-		root.style.setProperty('--font-ui', uiStack(this.settings.uiFont));
+		root.style.setProperty('--font-ui', uiStack(this.settings.uiFont, this.settings.arFont));
 		// One mixed-script stack drives the editor: English first (Latin), Arabic
 		// next (fallback for Arabic glyphs) — applied in both LTR and RTL.
 		root.style.setProperty(

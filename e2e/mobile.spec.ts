@@ -675,6 +675,57 @@ test('phone: panes slide without remounting the editor', async ({ page }) => {
 	await expect(page.locator('.ProseMirror[data-mark="1"]')).toHaveCount(1);
 });
 
+/** A CDP touch drag from a screen point; `hold` ms of rest before lifting (no flick). */
+async function touchDrag(page: Page, x: number, y: number, dx: number, dy: number, hold = 0) {
+	const cdp = await page.context().newCDPSession(page);
+	await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+	for (let i = 1; i <= 10; i++)
+		await cdp.send('Input.dispatchTouchEvent', {
+			type: 'touchMove',
+			touchPoints: [{ x: x + (dx * i) / 10, y: y + (dy * i) / 10 }]
+		});
+	if (hold) await page.waitForTimeout(hold);
+	await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+}
+
+test('phone: a swipe from the left edge goes back; a short held drag springs back', async ({
+	page
+}) => {
+	test.skip((await layoutOf(page)) !== 'phone', 'phone layout only');
+	await openPlan(page);
+	await page.evaluate(
+		() => ((document.querySelector('.ProseMirror') as HTMLElement).dataset.mark = '1')
+	);
+	// Too short and placed (no throw): the note stays.
+	await touchDrag(page, 4, 420, 60, 0, 200);
+	await expect(page.locator('.editor-wrap')).toHaveAttribute('data-pos', 'current');
+	await expect
+		.poll(() => page.locator('.editor-wrap').evaluate((el) => el.style.transform))
+		.toBe('');
+	// A real swipe: back to the list, the same editor kept.
+	await touchDrag(page, 4, 420, 300, 0);
+	await expect(page.locator('.list-wrap')).toHaveAttribute('data-pos', 'current');
+	await expect(list(page)).toBeVisible();
+	await expect(page.locator('.ProseMirror[data-mark="1"]')).toHaveCount(1);
+	await expect
+		.poll(() => page.locator('.editor-wrap').evaluate((el) => el.style.transform))
+		.toBe('');
+});
+
+test('phone: a sheet drags down to close without running a row', async ({ page }) => {
+	test.skip((await layoutOf(page)) !== 'phone', 'phone layout only');
+	await openPlan(page);
+	await page.getByRole('button', { name: 'More actions' }).tap();
+	const sheet = page.locator('.sheet[role=menu]');
+	await expect(sheet).toBeVisible();
+	await page.waitForTimeout(400); // let it rise
+	const b = (await sheet.boundingBox())!;
+	await touchDrag(page, b.x + b.width / 2, b.y + 60, 0, 320);
+	await expect(page.locator('.sheet[role=menu]')).toHaveCount(0);
+	await expect(page.locator('.editor-wrap')).toHaveAttribute('data-pos', 'current');
+	expect(await readFake(page, 'Work/plan.md')).toBe('# Plan\n\nfirst line');
+});
+
 test('tablet: the AI sheet expands and its scrim closes it', async ({ page }) => {
 	test.skip((await layoutOf(page)) !== 'tablet', 'tablet layout only');
 	await openPlan(page);
@@ -731,7 +782,7 @@ test('reduced motion zeroes the motion tokens', async ({ page }) => {
 		page.evaluate(() =>
 			getComputedStyle(document.documentElement).getPropertyValue('--dur-pane').trim()
 		);
-	expect(await dur()).toBe('180ms');
+	expect(await dur()).toBe('220ms');
 	await page.emulateMedia({ reducedMotion: 'reduce' });
 	expect(await dur()).toBe('0ms');
 });
@@ -978,6 +1029,16 @@ async function desktopPage(browser: Browser, seed: Record<string, string> = {}) 
 	await expect(page.locator('.body')).toHaveAttribute('data-layout', 'desktop');
 	return { ctx, page };
 }
+
+test('desktop: a long note opens at its top, caret at the end', async ({ browser }) => {
+	const body = Array.from({ length: 120 }, (_, i) => `line ${i + 1}`).join('\n\n');
+	const { ctx, page } = await desktopPage(browser, { 'long.md': `# Long note\n\n${body}` });
+	await list(page).getByText('Long note', { exact: true }).click();
+	await expect(page.locator('.ProseMirror')).toBeFocused();
+	await page.waitForTimeout(300);
+	expect(await page.locator('.editor-pane .scroll').evaluate((el) => el.scrollTop)).toBe(0);
+	await ctx.close();
+});
 
 test('desktop: panes resize by dragging their edges; the list toggles', async ({ browser }) => {
 	const { ctx, page } = await desktopPage(browser);

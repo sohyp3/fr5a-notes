@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { scale } from 'svelte/transition';
+	import { fade, scale } from 'svelte/transition';
+	import { ms, popIn } from '../motion';
 	import { tick } from 'svelte';
-	import { portal, reducedMotion } from '../portal';
+	import { portal } from '../portal';
 	import { getAppState } from '../stores/app.svelte';
 	import { HIGHLIGHT_COLORS, type HighlightColor } from '../editor/highlights';
 	import Icon from './Icon.svelte';
@@ -42,7 +43,6 @@
 	let el = $state<HTMLDivElement | null>(null);
 	let w = $state(220);
 	let h = $state(0);
-	const dur = reducedMotion() ? 0 : 1;
 
 	const pos = $derived({
 		left: Math.max(8, Math.min(at.x - w / 2, window.innerWidth - w - 8)),
@@ -105,7 +105,9 @@
 	style:top="{pos.top}px"
 	role="toolbar"
 	aria-label="Highlight color"
-	transition:scale={{ start: 0.96, duration: 120 * dur }}
+	style:transform-origin={pos.top < at.y ? 'center bottom' : 'center top'}
+	in:scale={popIn}
+	out:fade={{ duration: ms.out }}
 >
 	{#each HIGHLIGHT_COLORS as c (c)}
 		<button
@@ -147,7 +149,7 @@
 		gap: 2px;
 		padding: 5px;
 		border-radius: 12px;
-		background: var(--bg-editor);
+		background: var(--bg-elevated);
 		box-shadow:
 			0 0 0 1px var(--bg-active),
 			0 12px 32px rgba(0, 0, 0, 0.18);

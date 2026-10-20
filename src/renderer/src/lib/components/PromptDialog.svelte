@@ -1,11 +1,10 @@
 <script lang="ts">
 	import { fade, fly, scale } from 'svelte/transition';
+	import { ms, easeOut, popIn, sheetIn, sheetOut } from '../motion';
 	import { getAppState } from '../stores/app.svelte';
-	import { reducedMotion } from '../portal';
 
 	const app = getAppState();
 	const req = $derived(app.promptRequest);
-	const dur = reducedMotion() ? 0 : 1;
 	const phone = $derived(app.layout === 'phone');
 
 	/** The field, fresh for every request; `failed` is the error `submit` returned. */
@@ -76,17 +75,18 @@
 				if (scrimPressed) cancel();
 				scrimPressed = false;
 			}}
-			transition:fade={{ duration: 160 * dur }}
+			in:fade={{ duration: ms.pop, easing: easeOut }}
+			out:fade={{ duration: ms.out }}
 		></button>
 		<div
 			class="dialog"
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby="prompt-title"
-			in:fly={phone ? { y: 60, duration: 240 * dur, opacity: 0 } : { y: 0, duration: 0 }}
-			out:fade={{ duration: 120 * dur }}
+			in:fly={phone ? sheetIn : { y: 0, duration: 0 }}
+			out:fly={phone ? sheetOut : { y: 0, opacity: 0, duration: ms.out }}
 		>
-			<form onsubmit={submit} in:scale={{ start: 0.96, duration: phone ? 0 : 180 * dur }}>
+			<form onsubmit={submit} in:scale={phone ? { duration: 0 } : popIn}>
 				<h2 id="prompt-title">{req.title}</h2>
 				<label>
 					<span class="lbl">{req.label}</span>
