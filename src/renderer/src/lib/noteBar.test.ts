@@ -5,7 +5,7 @@ describe('note toolbar placement', () => {
 	it('defaults to the bars as they were: phones keep note extras in ⋯, touch shows Highlight, tablets Link', () => {
 		const bar = (phone: boolean, touch: boolean) =>
 			BAR_ITEMS.filter((id) => defaultSpot(id, phone, touch) === 'bar');
-		const format = ['bold', 'heading', 'list', 'outdent', 'indent', 'tag', 'undo'];
+		const format = ['bold', 'heading', 'list', 'task', 'outdent', 'indent', 'tag', 'undo'];
 		expect(bar(false, false)).toEqual([
 			'insert',
 			'edit',

@@ -48,6 +48,8 @@ const LINES = [
 	'> quote ~~gone~~',
 	'Plain text with **bold** words here.',
 	'1. one',
+	'- [ ] to do **soon**',
+	'  - [x] done',
 	'---',
 	'***',
 	'| a | b |',
@@ -62,7 +64,21 @@ const LINES = [
 	'const x = 1',
 	'<!-- dir: rtl -->'
 ];
-const SNIPPETS = ['a', ' ', '|', '**', '# ', '`', '![x](y.png)', '<!--', '-->', '| c |', '```'];
+const SNIPPETS = [
+	'a',
+	' ',
+	'|',
+	'**',
+	'# ',
+	'- [ ] ',
+	'x',
+	'`',
+	'![x](y.png)',
+	'<!--',
+	'-->',
+	'| c |',
+	'```'
+];
 
 /** Small seeded PRNG, so a failure replays. */
 function rng(seed: number): () => number {

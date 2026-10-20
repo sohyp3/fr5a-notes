@@ -1,6 +1,7 @@
 import { Extension } from '@tiptap/core';
 import { TextSelection } from '@tiptap/pm/state';
 import type { Command } from '@tiptap/pm/state';
+import { TASK_RE, toggleCheck, toggleTask } from './tasks';
 
 /**
  * Intelligent list handling for the raw-Markdown editor.
@@ -10,8 +11,12 @@ import type { Command } from '@tiptap/pm/state';
  *
  *   Tab        → sink   (indent the list line by two spaces)
  *   Shift-Tab  → lift   (outdent by up to two spaces)
- *   Enter      → continue the bullet / number on the next line;
- *                a second Enter on an empty item clears the list formatting.
+ *   Enter      → continue the bullet / number / to-do (unchecked) on the
+ *                next line; a second Enter on an empty item clears the list
+ *                formatting.
+ *   Backspace  → at the start of a to-do's text, drop its box (a bullet stays).
+ *   Mod-Enter  → check / uncheck the line's to-do; Mod-Shift-T makes lines
+ *                to-dos (`tasks.ts`).
  *
  * These are the exact behaviours `sinkListItem` / `liftListItem` would give in a
  * node-based editor, adapted to our text model.
@@ -31,7 +36,8 @@ function lineCtx(state: Parameters<Command>[0]): LineCtx {
 
 const enter: Command = (state, dispatch) => {
 	const { paraStart, text } = lineCtx(state);
-	const m = text.match(LIST_RE);
+	const task = text.match(TASK_RE);
+	const m = task ?? text.match(LIST_RE);
 	if (!m) return false; // not a list line → default newline
 
 	const prefixLen = m[0].length;
@@ -47,11 +53,11 @@ const enter: Command = (state, dispatch) => {
 		return true;
 	}
 
-	// Otherwise continue the list with the same indent + (incremented) marker.
-	const indent = m[1];
-	const spacing = m[4];
-	const marker = m[3] ? `${Number(m[3]) + 1}.` : m[2];
-	const newPrefix = `${indent}${marker}${spacing}`;
+	// Otherwise continue the list with the same indent + (incremented) marker;
+	// a to-do continues unchecked.
+	const newPrefix = task
+		? `${task[1]}${task[2]}${task[3]}[ ]${task[5] || ' '}`
+		: `${m[1]}${m[3] ? `${Number(m[3]) + 1}.` : m[2]}${m[4]}`;
 
 	if (dispatch) {
 		const pos = state.selection.$head.pos;
@@ -62,6 +68,19 @@ const enter: Command = (state, dispatch) => {
 		tr.insertText(newPrefix, insertPos);
 		tr.setSelection(TextSelection.create(tr.doc, insertPos + newPrefix.length));
 		dispatch(tr.scrollIntoView());
+	}
+	return true;
+};
+
+/** At the start of a to-do's text, Backspace drops the box: `- [ ] a` → `- a`. */
+const backspace: Command = (state, dispatch) => {
+	const { empty, $head } = state.selection;
+	if (!empty) return false;
+	const task = $head.parent.textContent.match(TASK_RE);
+	if (!task || $head.parentOffset !== task[0].length) return false;
+	if (dispatch) {
+		const box = $head.start() + task[1].length + task[2].length + task[3].length;
+		dispatch(state.tr.delete(box, $head.pos).scrollIntoView());
 	}
 	return true;
 };
@@ -98,6 +117,9 @@ export const ListBehavior = Extension.create({
 		const cmd = (c: Command) => () => c(this.editor.state, this.editor.view.dispatch);
 		return {
 			Enter: cmd(enter),
+			Backspace: cmd(backspace),
+			'Mod-Enter': cmd(toggleCheck),
+			'Mod-Shift-t': cmd(toggleTask),
 			Tab: cmd(sink),
 			'Shift-Tab': cmd(lift)
 		};

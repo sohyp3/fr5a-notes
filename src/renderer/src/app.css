@@ -489,8 +489,72 @@ button.scrim {
 	font-style: italic;
 }
 .ProseMirror p.md-bullet,
-.ProseMirror p.md-ordered {
+.ProseMirror p.md-ordered,
+.ProseMirror p.md-task {
 	padding-left: 8px;
+}
+
+/* To-dos: a checkbox (a widget) stands in for the ghosted `- [ ] `; a checked
+   one strikes its text through. */
+.md-task-box {
+	display: inline-block;
+	position: relative;
+	box-sizing: border-box;
+	width: 0.95em;
+	height: 0.95em;
+	margin-inline-end: 0.5em;
+	vertical-align: -0.12em;
+	border: 1.6px solid var(--text-muted);
+	border-radius: 0.28em;
+	cursor: pointer;
+	user-select: none;
+	-webkit-user-select: none;
+	-webkit-tap-highlight-color: transparent;
+	transition:
+		background var(--dur-fast) ease,
+		border-color var(--dur-fast) ease;
+}
+/* A finger-sized target without moving the text. */
+.md-task-box::before {
+	content: '';
+	position: absolute;
+	inset: -6px;
+}
+:root[data-touch] .md-task-box::before {
+	inset: -12px;
+}
+.md-task-box:hover {
+	border-color: var(--accent);
+}
+.md-task-box.on {
+	background: var(--accent);
+	border-color: var(--accent);
+}
+/* The tick: two borders of a rotated box. */
+.md-task-box.on::after {
+	content: '';
+	position: absolute;
+	left: 31%;
+	top: 10%;
+	width: 28%;
+	height: 52%;
+	border: solid var(--bg-primary);
+	border-width: 0 2px 2px 0;
+	transform: rotate(45deg);
+}
+.md-task-box.pop {
+	animation: task-pop var(--dur-pop) var(--ease-out);
+}
+@keyframes task-pop {
+	from {
+		transform: scale(0.8);
+	}
+}
+.ProseMirror p.md-task-done {
+	color: var(--text-muted);
+}
+.md-task-text {
+	text-decoration: line-through;
 }
 /* Dividers: the rule is the line's ::after, filling the width the (ghosted)
    `---` leaves free, so revealed syntax sits beside it rather than on it. */
@@ -965,7 +1029,8 @@ html.md-image-dragging * {
 	box-shadow: inset -3px 0 0 var(--rule);
 }
 .editor-pane.is-rtl .ProseMirror p.md-bullet,
-.editor-pane.is-rtl .ProseMirror p.md-ordered {
+.editor-pane.is-rtl .ProseMirror p.md-ordered,
+.editor-pane.is-rtl .ProseMirror p.md-task {
 	padding-left: 0;
 	padding-right: 8px;
 }

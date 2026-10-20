@@ -161,7 +161,8 @@
 				imageUrl,
 				openLink: (href) => window.open(href, '_blank', 'noopener,noreferrer'),
 				noteLinks,
-				onNoteLink: (target) => void app.openNoteLink(target)
+				onNoteLink: (target) => void app.openNoteLink(target),
+				canCheck: () => !locked
 			}),
 			MarkdownShortcuts,
 			ListBehavior,

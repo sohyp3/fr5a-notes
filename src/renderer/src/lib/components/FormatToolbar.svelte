@@ -21,6 +21,7 @@
 	import { wrap } from '../editor/MarkdownShortcuts';
 	import { lift, sink } from '../editor/ListBehavior';
 	import { cycleHeading, insertTag, toggleBullet } from '../editor/formatCommands';
+	import { toggleTask } from '../editor/tasks';
 	import { getAppState } from '../stores/app.svelte';
 	import type { FormatItem } from '../noteBar';
 	import Icon from './Icon.svelte';
@@ -98,6 +99,7 @@
 		{ id: 'bold', label: 'Bold', icon: 'bold', do: () => run(wrap('**')) },
 		{ id: 'heading', label: 'Heading', icon: 'heading', do: () => run(cycleHeading) },
 		{ id: 'list', label: 'List', icon: 'bullet', do: () => run(toggleBullet) },
+		{ id: 'task', label: 'Checklist', icon: 'todo', do: () => run(toggleTask) },
 		{ id: 'outdent', label: 'Outdent', icon: 'outdent', do: () => run(lift) },
 		{ id: 'indent', label: 'Indent', icon: 'indent', do: () => run(sink) },
 		{ id: 'tag', label: 'Tag', icon: 'tag', do: () => run(insertTag) },

@@ -41,6 +41,7 @@ import List from '@lucide/svelte/icons/list';
 import ListIndentDecrease from '@lucide/svelte/icons/list-indent-decrease';
 import ListIndentIncrease from '@lucide/svelte/icons/list-indent-increase';
 import ListPlus from '@lucide/svelte/icons/list-plus';
+import ListTodo from '@lucide/svelte/icons/list-todo';
 import Lock from '@lucide/svelte/icons/lock';
 import LockOpen from '@lucide/svelte/icons/lock-open';
 import Maximize from '@lucide/svelte/icons/maximize';
@@ -130,6 +131,7 @@ export const ICONS = {
 	bold: Bold,
 	heading: Heading,
 	bullet: List,
+	todo: ListTodo,
 	outdent: ListIndentDecrease,
 	indent: ListIndentIncrease,
 	tag: Hash,

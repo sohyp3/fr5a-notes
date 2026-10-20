@@ -7,6 +7,7 @@ import { cellRanges, findTables, pipeOffsets, tableHtml, type TableRow } from '.
 import { findCodeRows, type CodeRow } from './blocks';
 import { findImages, type ImageBlock } from './images';
 import { imageWidget } from './imageView';
+import { TASK_RE, toggleCheckAt } from './tasks';
 import {
 	coveredRanges,
 	findHighlights,
@@ -39,6 +40,9 @@ import {
  *     caret enters it; the picture stays while the source shows below it.
  *   • Dividers draw a rule by kind: `---` a hairline, `***` three dots,
  *     `___` a double rule.
+ *   • To-dos (`- [ ] item`, `- [x] done`) draw a checkbox in place of their
+ *     ghosted `- [ ] `; a press toggles it (view mode too, not a locked
+ *     note), and a checked one strikes its text through.
  *   • Highlights (option, see highlights.ts) tint the stretches their
  *     comment names, in its colors; the comment lines stay hidden unless the
  *     caret is on one (or Ghost Syntax is off).
@@ -55,6 +59,8 @@ export interface MarkdownSyntaxOptions {
 	noteLinks?: boolean;
 	/** Follow a `[text](path.md)` link to a note: a view-mode click, or Mod+click while editing. */
 	onNoteLink?: (target: string) => void;
+	/** Whether a checkbox press may check / uncheck its to-do (not in a locked note). */
+	canCheck?: () => boolean;
 }
 
 interface Deco {
@@ -235,6 +241,9 @@ function blockInfo(text: string): { nodeClass: string; prefixLen: number } | nul
 		const kind = m[1] === '-' ? 'line' : m[1] === '*' ? 'dots' : 'double';
 		return { nodeClass: `md-hr md-hr-${kind}`, prefixLen: text.length };
 	}
+	if ((m = text.match(TASK_RE))) {
+		return { nodeClass: m[4] === ' ' ? 'md-task' : 'md-task md-task-done', prefixLen: m[0].length };
+	}
 	if ((m = text.match(/^(\s*)([-*+])\s/))) {
 		return { nodeClass: 'md-bullet', prefixLen: m[0].length };
 	}
@@ -248,8 +257,9 @@ function tokenizeLine(
 	text: string,
 	contentStart: number,
 	noteLinks = false
-): { tokens: Token[]; nodeClass?: string } {
+): { tokens: Token[]; nodeClass?: string; task?: { at: number; done: boolean } } {
 	const tokens: Token[] = [];
+	let task: { at: number; done: boolean } | undefined;
 	const consumed = new Array(text.length).fill(false);
 
 	const consume = (from: number, to: number) => {
@@ -274,6 +284,26 @@ function tokenizeLine(
 				{ from: contentStart, to: contentStart + text.length, class: 'md-syntax', syntax: true }
 			]
 		});
+	} else if (block?.nodeClass.startsWith('md-task')) {
+		// The checkbox stands in for `- [ ] `: ghosted, shown with the caret in it
+		// (not just after it, where the text starts).
+		const indent = text.match(/^\s*/)?.[0].length ?? 0;
+		const from = contentStart + indent;
+		const to = contentStart + block.prefixLen;
+		const done = block.nodeClass.includes('md-task-done');
+		task = { at: from, done };
+		tokens.push({
+			outerFrom: from,
+			outerTo: to - 1,
+			decos: [{ from, to, class: 'md-syntax', syntax: true }]
+		});
+		if (done && to < contentStart + text.length)
+			tokens.push({
+				outerFrom: to,
+				outerTo: contentStart + text.length,
+				decos: [{ from: to, to: contentStart + text.length, class: 'md-task-text' }]
+			});
+		consume(0, block.prefixLen);
 	} else if (block?.nodeClass === 'md-bullet') {
 		// EXCEPTION: bullet markers are never hidden — they're styled to look
 		// designed. Colour just the marker glyph, leaving the trailing space.
@@ -318,7 +348,7 @@ function tokenizeLine(
 	}
 
 	tokens.push(...inlineTokens(text, contentStart, consumed, noteLinks));
-	return { tokens, nodeClass: block?.nodeClass };
+	return { tokens, nodeClass: block?.nodeClass, task };
 }
 
 /** Inline rules over the characters not yet `consumed` (marked as they're used). */
@@ -515,6 +545,43 @@ function lineAt(s: Scan, pos: number): number {
 	return lo;
 }
 
+/** The checkbox just pressed, so its replacement pops in (and no other box does). */
+let pressedBox: number | null = null;
+
+/** A to-do's checkbox: a press toggles its `[ ]` / `[x]` without moving the caret. */
+function taskWidget(
+	view: EditorView,
+	getPos: () => number | undefined,
+	done: boolean,
+	opts: MarkdownSyntaxOptions
+): HTMLElement {
+	const box = document.createElement('span');
+	box.className = 'md-task-box';
+	box.contentEditable = 'false';
+	box.setAttribute('role', 'checkbox');
+	box.setAttribute('aria-checked', String(done));
+	box.setAttribute('aria-label', done ? 'Done' : 'To do');
+	if (done) box.classList.add('on');
+	if (pressedBox !== null && pressedBox === getPos()) {
+		box.classList.add('pop');
+		pressedBox = null;
+	}
+	// No caret placement, focus or keyboard: the press is the checkbox's alone.
+	const hold = (e: Event) => e.preventDefault();
+	box.addEventListener('pointerdown', hold);
+	box.addEventListener('mousedown', hold);
+	box.addEventListener('click', (e) => {
+		e.preventDefault();
+		const pos = getPos();
+		if (pos === undefined || !(opts.canCheck?.() ?? true)) return;
+		const tr = toggleCheckAt(view.state, pos);
+		if (!tr) return;
+		pressedBox = pos;
+		view.dispatch(tr);
+	});
+	return box;
+}
+
 /** Line `i`'s decorations, plus the table / picture widget when it starts one. */
 function lineDecorations(
 	i: number,
@@ -618,6 +685,17 @@ function lineDecorations(
 		const t = tokenizeLine(text, contentStart, opts.noteLinks);
 		tokens = t.tokens;
 		if (t.nodeClass) out.push(Decoration.node(pos, end, { class: t.nodeClass }));
+		if (t.task) {
+			const { done } = t.task;
+			out.push(
+				Decoration.widget(t.task.at, (view, getPos) => taskWidget(view, getPos, done, opts), {
+					side: -1,
+					key: `task:${done}`,
+					ignoreSelection: true,
+					stopEvent: widgetEvent
+				})
+			);
+		}
 	}
 
 	// Symbols Ghost Syntax collapses (no caret in their token), as line offsets.
