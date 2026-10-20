@@ -232,6 +232,13 @@ class AiSettings {
 		this.update({ favorites });
 	}
 
+	/** New chats start on the model last picked or sent with. */
+	rememberModel(provider: string, model: string | null): void {
+		const last = this.config.lastModel;
+		if (last?.provider !== provider || last.model !== model)
+			this.update({ lastModel: { provider, model } });
+	}
+
 	update(patch: Partial<AiConfig>): void {
 		this.config = { ...this.config, ...patch };
 		void platform.setState('ai', $state.snapshot(this.config));

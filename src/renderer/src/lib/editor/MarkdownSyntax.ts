@@ -51,10 +51,10 @@ export interface MarkdownSyntaxOptions {
 	imageUrl: (src: string) => string | null;
 	/** Hand a clicked web link to the host browser. */
 	openLink?: (href: string) => void;
-	/** Wiki-link parsing is entirely skipped while the optional feature is off. */
-	wikiLinks?: boolean;
-	/** Follow a `[[target]]` link (view mode click; Mod+click while editing). */
-	onWikiLink?: (target: string) => void;
+	/** Linked notes: links to notes are plain text while it's off. */
+	noteLinks?: boolean;
+	/** Follow a `[text](path.md)` link to a note: a view-mode click, or Mod+click while editing. */
+	onNoteLink?: (target: string) => void;
 }
 
 interface Deco {
@@ -73,8 +73,10 @@ interface Token {
 	decos: Deco[];
 }
 
+type InlineRule = { re: RegExp; build: (m: RegExpExecArray, base: number) => Deco[] };
+const WEB_LINK_RULE = linkRule(false);
 /** Inline patterns, tried in priority order; earlier wins on overlap. */
-const INLINE_RULES: { re: RegExp; build: (m: RegExpExecArray, base: number) => Deco[] }[] = [
+const INLINE_RULES: InlineRule[] = [
 	// inline code `code`
 	{
 		re: /`([^`\n]+)`/g,
@@ -121,34 +123,7 @@ const INLINE_RULES: { re: RegExp; build: (m: RegExpExecArray, base: number) => D
 		}
 	},
 	// link [text](url)
-	{
-		re: /\[([^\]\n]+)\]\(([^)\n]+)\)/g,
-		build: (m, base) => {
-			const s = base + m.index;
-			const textStart = s + 1;
-			const textEnd = textStart + m[1].length;
-			const e = s + m[0].length;
-			const href = externalHref(m[2]);
-			return [
-				{ from: s, to: s + 1, class: 'md-syntax', syntax: true }, // [
-				{
-					from: textStart,
-					to: textEnd,
-					class: 'md-link',
-					attrs: href
-						? {
-								nodeName: 'a',
-								href,
-								target: '_blank',
-								rel: 'noreferrer noopener',
-								title: 'Open in browser'
-							}
-						: undefined
-				},
-				{ from: textEnd, to: e, class: 'md-syntax', syntax: true } // ](url)
-			];
-		}
-	},
+	WEB_LINK_RULE,
 	// inline tag #work/project1 (Unicode letters supported, e.g. Arabic #عمل)
 	{
 		re: /(?:^|\s)(#\p{L}[\p{L}\p{M}\p{N}_-]*(?:\/[\p{L}\p{M}\p{N}_-]+)*)/gu,
@@ -163,6 +138,54 @@ const INLINE_RULES: { re: RegExp; build: (m: RegExpExecArray, base: number) => D
 	}
 ];
 
+/**
+ * `[text](url)`. Web links open in the browser; with linked notes on, a link to
+ * a note (a relative `.md` path) follows in the app. Other
+ * destinations remain editable text.
+ */
+function linkRule(notes: boolean): InlineRule {
+	return {
+		re: /\[([^\]\n]+)\]\(([^)\n]+)\)/g,
+		build: (m, base) => {
+			const s = base + m.index;
+			const textStart = s + 1;
+			const textEnd = textStart + m[1].length;
+			const e = s + m[0].length;
+			const href = externalHref(m[2]);
+			const note = notes && !href ? noteHref(m[2]) : null;
+			const attrs: Record<string, string> | undefined = href
+				? {
+						nodeName: 'a',
+						href,
+						target: '_blank',
+						rel: 'noreferrer noopener',
+						title: 'Open in browser'
+					}
+				: note
+					? { 'data-note-link': note, role: 'link', tabindex: '0' }
+					: undefined;
+			return [
+				{ from: s, to: s + 1, class: 'md-syntax', syntax: true }, // [
+				{
+					from: textStart,
+					to: textEnd,
+					class: note ? 'md-link md-note-link' : 'md-link',
+					attrs
+				},
+				{ from: textEnd, to: e, class: 'md-syntax', syntax: true } // ](url)
+			];
+		}
+	};
+}
+
+/** The destination of a link to a note (no scheme, a note extension), else null. */
+function noteHref(raw: string): string | null {
+	const href = raw.trim().replace(/\s+"[^"]*"$/, '');
+	const path = href.replace(/^<|>$/g, '');
+	if (!path || /^[a-z][a-z0-9+.-]*:/i.test(path)) return null;
+	return /\.(?:md|markdown|mdown|txt)$/i.test(path.replace(/[?#].*$/, '')) ? href : null;
+}
+
 /** Only web links may leave the app; relative/file/custom URLs remain editable text. */
 function externalHref(raw: string): string | null {
 	const href = raw.trim();
@@ -174,34 +197,9 @@ function externalHref(raw: string): string | null {
 	}
 }
 
-/** Kept outside INLINE_RULES so the disabled feature does not run its regex. */
-const WIKI_RULE: (typeof INLINE_RULES)[number] = {
-	re: /\[\[([^\]|\n]+?)(?:\|([^\]\n]+))?\]\]/g,
-	build: (m, base) => {
-		const s = base + m.index;
-		const target = m[1].trim();
-		const targetStart = s + 2;
-		const targetEnd = targetStart + m[1].length;
-		const e = s + m[0].length;
-		const attrs = { 'data-wiki-target': target, role: 'link', tabindex: '0' };
-		if (m[2] !== undefined) {
-			const labelStart = targetEnd + 1;
-			return [
-				{ from: s, to: s + 2, class: 'md-syntax', syntax: true },
-				{ from: targetStart, to: labelStart, class: 'md-syntax', syntax: true },
-				{ from: labelStart, to: e - 2, class: 'md-link md-wiki-link', attrs },
-				{ from: e - 2, to: e, class: 'md-syntax', syntax: true }
-			];
-		}
-		return [
-			{ from: s, to: s + 2, class: 'md-syntax', syntax: true },
-			{ from: targetStart, to: targetEnd, class: 'md-link md-wiki-link', attrs },
-			{ from: e - 2, to: e, class: 'md-syntax', syntax: true }
-		];
-	}
-};
-/** Inline code first, so `[[x]]` in a code span stays code. */
-const WIKI_RULES = [INLINE_RULES[0], WIKI_RULE, ...INLINE_RULES.slice(1)];
+/** Linked notes on: links to notes follow (a rule of its own, so off costs nothing). */
+const NOTE_LINK_RULE = linkRule(true);
+const NOTE_RULES = INLINE_RULES.map((rule) => (rule === WEB_LINK_RULE ? NOTE_LINK_RULE : rule));
 
 /** Helper for symmetric wrappers like **x** where marker length is fixed. */
 function wrap(m: RegExpExecArray, base: number, markLen: number, innerClass: string): Deco[] {
@@ -249,7 +247,7 @@ function blockInfo(text: string): { nodeClass: string; prefixLen: number } | nul
 function tokenizeLine(
 	text: string,
 	contentStart: number,
-	wikiLinks = false
+	noteLinks = false
 ): { tokens: Token[]; nodeClass?: string } {
 	const tokens: Token[] = [];
 	const consumed = new Array(text.length).fill(false);
@@ -319,7 +317,7 @@ function tokenizeLine(
 		}
 	}
 
-	tokens.push(...inlineTokens(text, contentStart, consumed, wikiLinks));
+	tokens.push(...inlineTokens(text, contentStart, consumed, noteLinks));
 	return { tokens, nodeClass: block?.nodeClass };
 }
 
@@ -328,10 +326,10 @@ function inlineTokens(
 	text: string,
 	contentStart: number,
 	consumed: boolean[],
-	wikiLinks = false
+	noteLinks = false
 ): Token[] {
 	const tokens: Token[] = [];
-	const rules = wikiLinks ? WIKI_RULES : INLINE_RULES;
+	const rules = noteLinks ? NOTE_RULES : INLINE_RULES;
 	for (const rule of rules) {
 		rule.re.lastIndex = 0;
 		let m: RegExpExecArray | null;
@@ -356,7 +354,7 @@ function tokenizeTableSource(
 	text: string,
 	contentStart: number,
 	sep: boolean,
-	wikiLinks: boolean
+	noteLinks: boolean
 ): Token[] {
 	const consumed = new Array(text.length).fill(false);
 	const decos: Deco[] = [];
@@ -371,7 +369,7 @@ function tokenizeTableSource(
 				decos.push({ from: contentStart + from, to: contentStart + to, class: 'md-tsep-text' });
 		return [whole];
 	}
-	return [...inlineTokens(text, contentStart, consumed, wikiLinks), whole];
+	return [...inlineTokens(text, contentStart, consumed, noteLinks), whole];
 }
 
 /**
@@ -615,9 +613,9 @@ function lineDecorations(
 	} else if (row) {
 		const cls = `md-trow md-trow-${row.role}${row.role === 'head' ? ' md-trow-first' : ''}${row.last ? ' md-trow-last' : ''}`;
 		out.push(Decoration.node(pos, end, { class: cls }));
-		tokens = tokenizeTableSource(text, contentStart, row.role === 'sep', !!opts.wikiLinks);
+		tokens = tokenizeTableSource(text, contentStart, row.role === 'sep', !!opts.noteLinks);
 	} else {
-		const t = tokenizeLine(text, contentStart, opts.wikiLinks);
+		const t = tokenizeLine(text, contentStart, opts.noteLinks);
 		tokens = t.tokens;
 		if (t.nodeClass) out.push(Decoration.node(pos, end, { class: t.nodeClass }));
 	}
@@ -769,7 +767,7 @@ export const MarkdownSyntax = Extension.create<MarkdownSyntaxOptions>({
 	name: 'markdownSyntax',
 
 	addOptions() {
-		return { highlights: false, imageUrl: () => null, wikiLinks: false, onWikiLink: () => {} };
+		return { highlights: false, imageUrl: () => null, noteLinks: false, onNoteLink: () => {} };
 	},
 
 	addProseMirrorPlugins() {
@@ -815,11 +813,11 @@ export const MarkdownSyntax = Extension.create<MarkdownSyntaxOptions>({
 					handleClick(view, _pos, event) {
 						const target = event.target;
 						if (!(target instanceof Element)) return false;
-						if (opts.wikiLinks) {
-							const el = target.closest<HTMLElement>('[data-wiki-target]');
+						if (opts.noteLinks) {
+							const el = target.closest<HTMLElement>('[data-note-link]');
 							if (el && (!view.editable || event.metaKey || event.ctrlKey)) {
 								event.preventDefault();
-								opts.onWikiLink?.(el.dataset.wikiTarget ?? '');
+								opts.onNoteLink?.(el.dataset.noteLink ?? '');
 								return true;
 							}
 						}
@@ -832,13 +830,13 @@ export const MarkdownSyntax = Extension.create<MarkdownSyntaxOptions>({
 						return true;
 					},
 					handleKeyDown(_view, event) {
-						if (!opts.wikiLinks || (event.key !== 'Enter' && event.key !== ' ')) return false;
+						if (!opts.noteLinks || (event.key !== 'Enter' && event.key !== ' ')) return false;
 						const el = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>(
-							'[data-wiki-target]'
+							'[data-note-link]'
 						);
 						if (!el) return false;
 						event.preventDefault();
-						opts.onWikiLink?.(el.dataset.wikiTarget ?? '');
+						opts.onNoteLink?.(el.dataset.noteLink ?? '');
 						return true;
 					}
 				}

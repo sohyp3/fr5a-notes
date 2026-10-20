@@ -659,6 +659,68 @@ test('note list can be hidden on wide layouts, landscape included', async ({ pag
 	await expect.poll(() => width(list(page))).toBeGreaterThan(200);
 });
 
+test('wide layouts: the list slides, the note wraps once; Animations off snaps', async ({
+	page
+}) => {
+	test.skip((await layoutOf(page)) !== 'desktop', 'three-pane layout only');
+	await list(page).locator('.card').first().tap();
+	await expect(page.locator('.ProseMirror')).toBeVisible();
+	const btn = page.getByRole('button', { name: 'Toggle note list' });
+	/** Per frame for ~0.9s: list width, text column width, the scroll's frozen width. */
+	const frames = () =>
+		page.evaluate(
+			() =>
+				new Promise<{ list: number; col: number; frozen: string }[]>((done) => {
+					const out: { list: number; col: number; frozen: string }[] = [];
+					const t0 = performance.now();
+					const tick = (): void => {
+						const scroll = document.querySelector('.editor-pane .scroll') as HTMLElement;
+						out.push({
+							list: Math.round(document.querySelector('.list-wrap')!.getBoundingClientRect().width),
+							col: (document.querySelector('.ProseMirror') as HTMLElement).offsetWidth,
+							frozen: scroll.style.width
+						});
+						if (performance.now() - t0 < 900) requestAnimationFrame(tick);
+						else done(out);
+					};
+					requestAnimationFrame(tick);
+				})
+		);
+	const colBefore = await page
+		.locator('.ProseMirror')
+		.evaluate((el) => (el as HTMLElement).offsetWidth);
+	const hiding = frames();
+	await btn.tap();
+	const hide = await hiding;
+	const moving = hide.filter((f) => f.list > 0 && f.list < 300);
+	// Slid over several frames, the text column held at its old width meanwhile.
+	expect(moving.length).toBeGreaterThan(3);
+	for (const f of moving) {
+		expect(f.col).toBe(colBefore);
+		expect(f.frozen).not.toBe('');
+	}
+	// Settled: unfrozen, the column takes the room.
+	expect(hide.at(-1)).toMatchObject({ list: 0, frozen: '' });
+	expect(hide.at(-1)!.col).toBeGreaterThan(colBefore);
+	await btn.tap();
+	await expect.poll(() => width(list(page))).toBeGreaterThan(200);
+
+	// Settings → Appearance → Animations off: the list snaps.
+	await openSettings(page);
+	await page
+		.getByRole('navigation', { name: 'Settings sections' })
+		.getByRole('button', { name: /Appearance/ })
+		.tap();
+	await page.getByRole('switch', { name: 'Animations' }).tap();
+	await expect(page.locator('html')).toHaveAttribute('data-motion', 'off');
+	await page.getByRole('button', { name: 'Close settings' }).tap();
+	await expect(page.locator('.view-overlay')).toHaveCount(0);
+	const snapping = frames();
+	await btn.tap();
+	const snap = await snapping;
+	expect(snap.filter((f) => f.list > 0 && f.list < 300)).toHaveLength(0);
+});
+
 test('phone: panes slide without remounting the editor', async ({ page }) => {
 	test.skip((await layoutOf(page)) !== 'phone', 'phone layout only');
 	await openPlan(page);
@@ -1891,9 +1953,9 @@ test('desktop: models starred in Settings are offered in the AI pane, per chat',
 	expect(body.input.filter((i: { role?: string }) => i.role === 'user')).toHaveLength(2);
 	await expect(harness.locator('.msg.ai').last()).not.toBeEmpty();
 
-	// A new chat starts on the default provider's own model.
+	// A new chat starts on the model used last, not the default provider's.
 	await harness.getByRole('button', { name: 'New session' }).click();
-	await expect(harness.locator('.ctx-sum .prov')).toHaveText('Fake · m');
+	await expect(harness.locator('.ctx-sum .prov')).toHaveText('OpenCode · gpt-5-nano');
 	await ctx.close();
 });
 

@@ -2,7 +2,7 @@
 	import { fly } from 'svelte/transition';
 	import type { Question } from '../../harness/harness.svelte';
 	import Icon from '../Icon.svelte';
-	import { reducedMotion } from '../../portal';
+	import { motionK } from '../../motion';
 
 	interface Props {
 		question: Question;
@@ -13,7 +13,6 @@
 	let { question, onanswer, onstop }: Props = $props();
 
 	const items = $derived(question.items);
-	const dur = reducedMotion() ? 0 : 1;
 
 	/** The answers so far: a new ask_user call starts the form over. */
 	const form = $derived.by(() => {
@@ -62,7 +61,7 @@
 		form.picked[i] = [label];
 		form.other[i] = '';
 		// A single pick moves straight on (and a lone question is answered).
-		setTimeout(next, items.length === 1 ? 0 : 140 * dur);
+		setTimeout(next, items.length === 1 ? 0 : 140 * motionK());
 	}
 
 	function typed(e: Event): void {
@@ -105,7 +104,7 @@
 	aria-label="Question from the AI"
 	tabindex="-1"
 	onkeydown={onKey}
-	in:fly={{ y: 16, duration: 200 * dur }}
+	in:fly={{ y: 16, duration: 200 * motionK() }}
 >
 	{#if items.length > 1}
 		<div class="steps" role="tablist" aria-label="Questions">
@@ -130,7 +129,7 @@
 	{/if}
 
 	{#key form.step}
-		<div class="qbody" in:fly={{ x: 12, duration: 160 * dur }}>
+		<div class="qbody" in:fly={{ x: 12, duration: 160 * motionK() }}>
 			<h3 class="q" dir="auto">{item.question}</h3>
 			{#if item.multiSelect}<p class="hint">Pick all that apply</p>{/if}
 

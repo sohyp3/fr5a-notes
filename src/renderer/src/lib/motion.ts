@@ -2,7 +2,7 @@ import { reducedMotion } from './portal';
 
 /**
  * JS twins of the app.css motion tokens, for Svelte transitions (which run as
- * WAAPI, so the CSS reduced-motion rule never reaches them). Keep in sync.
+ * WAAPI, so the CSS motion-off rules never reach them). Keep in sync.
  */
 
 /** A CSS `cubic-bezier()` as an easing function (Svelte samples it per frame). */
@@ -36,25 +36,69 @@ export const easeInOut = bezier(0.77, 0, 0.175, 1);
 /** `--ease-drawer`: panes, drawers, sheets. */
 export const easeDrawer = bezier(0.32, 0.72, 0, 1);
 
-const k = reducedMotion() ? 0 : 1;
-/** Durations (ms), zero under reduced motion. `out` = popovers leaving. */
+/** 1 while animations run, 0 when off (Settings → Appearance, or the OS switch). */
+export const motionK = (): number => (reducedMotion() ? 0 : 1);
+
+/** Durations (ms), zero while motion is off (read when a transition starts). */
 export const ms = {
-	fast: 120 * k,
-	out: 120 * k,
-	pop: 160 * k,
-	pane: 220 * k,
-	sheet: 280 * k,
-	exit: 200 * k
+	get fast() {
+		return 120 * motionK();
+	},
+	get out() {
+		return 120 * motionK();
+	},
+	get pop() {
+		return 160 * motionK();
+	},
+	get pane() {
+		return 220 * motionK();
+	},
+	get sheet() {
+		return 280 * motionK();
+	},
+	get exit() {
+		return 200 * motionK();
+	}
 };
 
 /** Bottom sheets: slide the whole height, no fade (they're physical). */
-export const sheetIn = { y: '100%', opacity: 1, duration: ms.sheet, easing: easeDrawer };
-export const sheetOut = { y: '100%', opacity: 1, duration: ms.exit, easing: easeOut };
+export const sheetIn = {
+	y: '100%',
+	opacity: 1,
+	get duration() {
+		return ms.sheet;
+	},
+	easing: easeDrawer
+};
+export const sheetOut = {
+	y: '100%',
+	opacity: 1,
+	get duration() {
+		return ms.exit;
+	},
+	easing: easeOut
+};
 /** Popovers / menus: grow a little from their anchor (set `transform-origin`). */
-export const popIn = { start: 0.97, opacity: 0, duration: ms.pop, easing: easeOut };
+export const popIn = {
+	start: 0.97,
+	opacity: 0,
+	get duration() {
+		return ms.pop;
+	},
+	easing: easeOut
+};
 /** Scrims: on the same clock as their sheet. */
-export const scrimIn = { duration: ms.sheet, easing: easeOut };
-export const scrimOut = { duration: ms.exit };
+export const scrimIn = {
+	get duration() {
+		return ms.sheet;
+	},
+	easing: easeOut
+};
+export const scrimOut = {
+	get duration() {
+		return ms.exit;
+	}
+};
 
 /**
  * Chromium 92 has no `inert`, which Svelte sets on outroing nodes: a menu

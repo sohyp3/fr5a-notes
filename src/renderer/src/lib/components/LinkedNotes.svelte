@@ -2,8 +2,18 @@
 	import { onMount } from 'svelte';
 	import { getAppState } from '../stores/app.svelte';
 	import { platform } from '../platform';
+	import { reducedMotion } from '../portal';
 	import { parentOf } from '../../../../shared/paths';
-	import { buildNoteGraph, connectedIds, type GraphNode, type NoteGraph } from '../linkedNotes';
+	import {
+		buildNoteGraph,
+		connectedIds,
+		layoutGraph,
+		nodeRadius,
+		tagPillWidth,
+		type GraphEdge,
+		type GraphNode,
+		type NoteGraph
+	} from '../linkedNotes';
 	import EmptyState from './EmptyState.svelte';
 	import Icon from './Icon.svelte';
 	import mascotNew from '$lib/assets/fr5a-new.png';
@@ -14,115 +24,106 @@
 	let loading = $state(true);
 	let error = $state('');
 	let query = $state('');
-	let selectedId = $state(app.activeId ?? '');
-	let zoom = $state(1);
-	let panX = $state(0);
-	let panY = $state(0);
+	let selectedId = $state('');
+	/** Notes visited through the panel, for its Back button. */
+	let trail = $state<string[]>([]);
+	let showTags = $state(true);
+	let showLinks = $state(true);
+	let showLoose = $state(false);
 	let loadRun = 0;
 	let searchEl = $state<HTMLInputElement>();
+	let svgEl = $state<SVGSVGElement>();
+	let width = $state(0);
+	let height = $state(0);
+	/** Camera: a map point p is drawn at p·k + (x, y). */
+	let cam = $state({ x: 0, y: 0, k: 1 });
 
 	const phone = $derived(app.layout === 'phone');
-	// Wide touch tablets keep the graph's tablet topology even though the app
-	// shell has enough room for its usual three-pane layout.
-	const tablet = $derived(app.layout === 'tablet' || (app.touch && app.layout === 'desktop'));
+	// Wide touch tablets keep the stacked map + panel: the panel's rows need
+	// the finger-sized room a side column can't give.
+	const stacked = $derived(app.layout !== 'desktop' || app.touch);
 	const nodeById = $derived(new Map(graph.nodes.map((node) => [node.id, node])));
 	const selected = $derived(nodeById.get(selectedId));
-	const limit = $derived(tablet ? 260 : 500);
-	const connected = $derived(selectedId ? connectedIds(graph, selectedId) : new Set<string>());
-	const displayIds = $derived.by(() => {
-		if (phone && selectedId) return connected;
-		const ids = graph.nodes.slice(0, limit).map((node) => node.id);
-		return new Set(selectedId ? [...ids, selectedId] : ids);
-	});
-	const displayNodes = $derived(graph.nodes.filter((node) => displayIds.has(node.id)));
+
+	const edgeShown = (edge: GraphEdge) => (edge.kind === 'link' ? showLinks : showTags);
+	const shownEdges = $derived(graph.edges.filter(edgeShown));
+	/** Nodes on the map: tags and broken links with their toggles, notes while something joins them. */
+	const shownIds = $derived(
+		new Set([
+			...shownEdges.flatMap((edge) => [edge.from, edge.to]),
+			...(showLoose
+				? graph.nodes.filter((node) => node.kind === 'note').map((node) => node.id)
+				: []),
+			...(nodeById.has(selectedId) ? [selectedId] : [])
+		])
+	);
+	const displayNodes = $derived(graph.nodes.filter((node) => shownIds.has(node.id)));
 	const displayEdges = $derived(
-		graph.edges.filter((edge) => displayIds.has(edge.from) && displayIds.has(edge.to))
+		shownEdges.filter((edge) => shownIds.has(edge.from) && shownIds.has(edge.to))
 	);
-	const outgoing = $derived(
-		graph.edges.filter((edge) => edge.from === selectedId).map((edge) => nodeById.get(edge.to)!)
+	/** The selected node and its neighbours stay lit; the rest of the map steps back. */
+	const focus = $derived(
+		selectedId ? connectedIds({ nodes: [], edges: displayEdges }, selectedId) : null
 	);
-	const incoming = $derived(
-		graph.edges.filter((edge) => edge.to === selectedId).map((edge) => nodeById.get(edge.from)!)
-	);
-	const noteCount = $derived(graph.nodes.filter((node) => !node.missing).length);
-	const unlinked = $derived(
-		graph.nodes.filter((node) => !node.missing && node.degree === 0).length
-	);
+
+	const notes = $derived(graph.nodes.filter((node) => node.kind === 'note'));
+	const tagCount = $derived(graph.nodes.filter((node) => node.kind === 'tag').length);
+	const linkCount = $derived(graph.edges.filter((edge) => edge.kind === 'link').length);
+	const looseCount = $derived(notes.filter((node) => node.degree === 0).length);
 	const normalizedQuery = $derived(query.trim().toLocaleLowerCase());
-	const hiddenCount = $derived(Math.max(0, graph.nodes.length - displayNodes.length));
-
-	// Phones show the selected note with its neighbours on one or two rings.
-	const phonePoints = $derived.by(
-		() =>
-			new Map<string, { x: number; y: number }>(
-				selectedId
-					? [
-							[selectedId, { x: 500, y: 340 }],
-							...displayNodes
-								.filter((node) => node.id !== selectedId)
-								.map((node, index, neighbors) => {
-									const angle = (index / Math.max(neighbors.length, 1)) * Math.PI * 2 - Math.PI / 2;
-									const ring = neighbors.length > 8 && index >= 8 ? 205 : 140;
-									return [
-										node.id,
-										{ x: 500 + Math.cos(angle) * ring, y: 340 + Math.sin(angle) * ring }
-									] as const;
-								})
-						]
-					: []
-			)
-	);
-
-	function point(node: GraphNode): { x: number; y: number } {
-		return (phone ? phonePoints.get(node.id) : undefined) ?? { x: node.x, y: node.y };
-	}
-
-	/** Dot radius: busier notes read a little larger. */
-	const radius = (node: GraphNode) => 6 + Math.min(node.degree, 7) * 0.8;
-	/** Phone labels sit under their dot, so long titles are shortened (the full one is the node's name). */
-	const label = (node: GraphNode) =>
-		phone && node.title.length > 18 ? `${node.title.slice(0, 17).trimEnd()}…` : node.title;
-
-	// The base frame of the layout, grown to take in every dot and (roughly) its
-	// label, so nothing sits outside the map.
-	const view = $derived.by(() => {
-		let x0 = phone ? 300 : 0;
-		let y0 = phone ? 100 : 0;
-		let x1 = phone ? 700 : 1000;
-		let y1 = phone ? 580 : 700;
-		for (const node of displayNodes) {
-			const at = point(node);
-			const r = radius(node);
-			const text = label(node).length * 6.6;
-			x0 = Math.min(x0, at.x - (phone ? text / 2 : r) - 16);
-			x1 = Math.max(x1, at.x + (phone ? text / 2 : r + 8 + text) + 16);
-			y0 = Math.min(y0, at.y - r - 16);
-			y1 = Math.max(y1, at.y + (phone ? r + 30 : r) + 16);
-		}
-		return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
-	});
-
-	function matches(node: GraphNode): boolean {
-		return (
-			!normalizedQuery || `${node.title} ${node.id}`.toLocaleLowerCase().includes(normalizedQuery)
-		);
-	}
-
-	/** The note's folder, for the second line of a link row. */
-	function folderOf(node: GraphNode): string {
-		if (node.missing) return 'Not created yet';
-		const dir = parentOf(node.id);
-		return dir ? `${dir}/` : '';
-	}
+	const matches = (node: GraphNode) =>
+		!normalizedQuery || `${node.title} ${node.id}`.toLocaleLowerCase().includes(normalizedQuery);
 
 	const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
 	const summary = $derived.by(() => {
-		if (loading) return 'Reading links…';
+		if (loading) return 'Reading your notes…';
 		if (error) return 'The map couldn’t be built';
-		const counts = [plural(noteCount, 'note'), plural(graph.edges.length, 'link')];
-		if (graph.edges.length) counts.push(`${unlinked} unlinked`);
-		return counts.join(' · ');
+		return [plural(notes.length, 'note'), plural(tagCount, 'tag'), plural(linkCount, 'link')].join(
+			' · '
+		);
 	});
+
+	// --- what the panel lists ---------------------------------------------------
+
+	const neighbours = (id: string, pick: (edge: GraphEdge) => string | null): GraphNode[] =>
+		graph.edges
+			.map(pick)
+			.filter((other): other is string => !!other)
+			.map((other) => nodeById.get(other)!)
+			.sort((a, b) => a.title.localeCompare(b.title));
+	const linksTo = $derived(
+		neighbours(selectedId, (e) => (e.kind === 'link' && e.from === selectedId ? e.to : null))
+	);
+	const linkedFrom = $derived(
+		neighbours(selectedId, (e) => (e.kind === 'link' && e.to === selectedId ? e.from : null))
+	);
+	const noteTags = $derived(
+		neighbours(selectedId, (e) => (e.kind === 'tag' && e.from === selectedId ? e.to : null))
+	);
+	const tagNotes = $derived(
+		neighbours(selectedId, (e) => (e.kind === 'tag' && e.to === selectedId ? e.from : null))
+	);
+	const parentTag = $derived(
+		neighbours(selectedId, (e) => (e.kind === 'nest' && e.from === selectedId ? e.to : null))
+	);
+	const childTags = $derived(
+		neighbours(selectedId, (e) => (e.kind === 'nest' && e.to === selectedId ? e.from : null))
+	);
+
+	// --- drawing ------------------------------------------------------------------
+
+	const tagLabel = (node: GraphNode) => `#${node.title}`;
+	const noteLabel = (node: GraphNode) =>
+		node.title.length > 26 ? `${node.title.slice(0, 25).trimEnd()}…` : node.title;
+	/**
+	 * Dots and labels grow slower than the map (√k), so zooming out still leaves
+	 * them legible and zooming in spreads them apart.
+	 */
+	const glyph = $derived(Math.min(1.5, Math.max(0.6, Math.sqrt(cam.k))) / cam.k);
+	/** Note titles show once there's room for them; tags always do. */
+	const labelsOn = $derived(cam.k >= 0.6);
+
+	// --- loading --------------------------------------------------------------------
 
 	async function load(): Promise<void> {
 		const run = ++loadRun;
@@ -131,9 +132,9 @@
 		try {
 			// Hidden notes stay hidden. Locked encrypted notes have no readable body and
 			// remain metadata-only until their vault is unlocked.
-			const notes = app.listedNotes.filter((note) => !note.encrypted || app.vault?.unlocked);
+			const listed = app.listedNotes.filter((note) => !note.encrypted || app.vault?.unlocked);
 			const rows = await Promise.all(
-				notes.map(async (note) => {
+				listed.map(async (note) => {
 					try {
 						return [note.id, await platform.readNote(note.id)] as const;
 					} catch {
@@ -142,9 +143,13 @@
 				})
 			);
 			if (run !== loadRun) return;
-			graph = buildNoteGraph(notes, new Map(rows));
-			if (!graph.nodes.some((node) => node.id === selectedId))
-				selectedId = graph.nodes.find((node) => node.degree > 0)?.id ?? graph.nodes[0]?.id ?? '';
+			const next = buildNoteGraph(listed, new Map(rows));
+			await layoutGraph(next, () => run !== loadRun);
+			if (run !== loadRun) return;
+			graph = next;
+			if (!next.nodes.some((node) => node.id === selectedId)) selectedId = '';
+			trail = [];
+			fit(false);
 		} catch (cause) {
 			if (run === loadRun) error = cause instanceof Error ? cause.message : String(cause);
 		} finally {
@@ -156,86 +161,298 @@
 		void load();
 		return () => {
 			loadRun++;
+			stopFlight();
 			graph = EMPTY;
 		};
 	});
 
-	function select(node: GraphNode): void {
-		selectedId = node.id;
+	// --- camera -----------------------------------------------------------------------
+
+	const K_MIN = 0.12;
+	const K_MAX = 4;
+	const clampK = (k: number) => Math.min(K_MAX, Math.max(K_MIN, k));
+	let flight = 0;
+
+	function stopFlight(): void {
+		cancelAnimationFrame(flight);
+		flight = 0;
 	}
 
-	/** Phones: leave a note's neighbourhood for the whole map. */
-	function showAll(): void {
+	/** Glide the camera to `to` (a jump when motion is off). */
+	function fly(to: { x: number; y: number; k: number }, animate = true): void {
+		stopFlight();
+		if (!animate || reducedMotion()) {
+			cam = to;
+			return;
+		}
+		const from = { ...cam };
+		const start = performance.now();
+		const step = (now: number) => {
+			const t = Math.min(1, (now - start) / 360);
+			const e = 1 - Math.pow(1 - t, 3);
+			// Zoom in log space so a big change in scale feels even.
+			const k = from.k * Math.pow(to.k / from.k, e);
+			cam = { x: from.x + (to.x - from.x) * e, y: from.y + (to.y - from.y) * e, k };
+			flight = t < 1 ? requestAnimationFrame(step) : 0;
+		};
+		flight = requestAnimationFrame(step);
+	}
+
+	/** The whole (shown) map in view. */
+	function fit(animate = true): void {
+		if (!width || !height || displayNodes.length === 0) return;
+		let x0 = Infinity;
+		let y0 = Infinity;
+		let x1 = -Infinity;
+		let y1 = -Infinity;
+		for (const node of displayNodes) {
+			x0 = Math.min(x0, node.x - 60);
+			x1 = Math.max(x1, node.x + 60);
+			y0 = Math.min(y0, node.y - 30);
+			y1 = Math.max(y1, node.y + 40);
+		}
+		// Leave the floating controls their strips at the top and bottom.
+		const top = 56;
+		const bottom = 36;
+		const k = clampK(Math.min(1.4, width / (x1 - x0), (height - top - bottom) / (y1 - y0)));
+		fly(
+			{
+				k,
+				x: width / 2 - ((x0 + x1) / 2) * k,
+				y: top + (height - top - bottom) / 2 - ((y0 + y1) / 2) * k
+			},
+			animate
+		);
+	}
+
+	/** Bring a node to the middle, close enough to read its neighbourhood. */
+	function centerOn(node: GraphNode): void {
+		const k = Math.min(Math.max(cam.k, 0.9), 1.8);
+		fly({ k, x: width / 2 - node.x * k, y: height / 2 - node.y * k });
+	}
+
+	/** Scale by `factor` keeping the map point under (px, py) — canvas pixels — in place. */
+	function zoomAt(factor: number, px = width / 2, py = height / 2, animate = false): void {
+		const k = clampK(cam.k * factor);
+		const wx = (px - cam.x) / cam.k;
+		const wy = (py - cam.y) / cam.k;
+		fly({ k, x: px - wx * k, y: py - wy * k }, animate);
+	}
+
+	// --- selection ------------------------------------------------------------------
+
+	function select(id: string, from: 'map' | 'panel' = 'map'): void {
+		const node = nodeById.get(id);
+		if (!node) return;
+		if (from === 'panel' && selectedId) trail = [...trail, selectedId];
+		else if (from === 'map') trail = [];
+		selectedId = id;
+		centerOn(node);
+	}
+
+	function back(): void {
+		const prev = trail.at(-1);
+		if (!prev) return;
+		trail = trail.slice(0, -1);
+		selectedId = prev;
+		const node = nodeById.get(prev);
+		if (node) centerOn(node);
+	}
+
+	function clearSelection(): void {
 		selectedId = '';
-		resetView();
+		trail = [];
 	}
 
-	function open(node = selected): void {
-		if (!node || node.missing) return;
+	function open(node: GraphNode | undefined = selected): void {
+		if (!node || node.kind !== 'note') return;
 		void app.openNote(node.id);
 	}
 
 	function findFirst(): void {
 		if (!normalizedQuery) return;
-		const hit = graph.nodes.find(matches);
-		if (hit) selectedId = hit.id;
+		const hit = displayNodes.find(matches) ?? graph.nodes.find(matches);
+		if (hit) select(hit.id);
 	}
 
-	function changeZoom(delta: number): void {
-		zoom = Math.min(2.2, Math.max(0.65, zoom + delta));
-	}
+	// --- gestures: drag to pan, pinch / wheel to zoom, tap to select --------------
 
-	function resetView(): void {
-		zoom = 1;
-		panX = 0;
-		panY = 0;
-	}
-
-	let drag = $state<{ x: number; y: number; panX: number; panY: number; id: number } | null>(null);
-	function panStart(event: PointerEvent): void {
-		if (event.button !== 0) return;
-		const svg = event.currentTarget as SVGSVGElement;
-		svg.setPointerCapture(event.pointerId);
-		drag = { x: event.clientX, y: event.clientY, panX, panY, id: event.pointerId };
-	}
-	function panMove(event: PointerEvent): void {
-		if (!drag || event.pointerId !== drag.id) return;
-		const box = (event.currentTarget as SVGSVGElement).getBoundingClientRect();
-		// The map is fitted whole ("meet"), so one screen pixel is this many map units.
-		const unit = Math.max(view.w / Math.max(box.width, 1), view.h / Math.max(box.height, 1));
-		panX = drag.panX + (event.clientX - drag.x) * unit;
-		panY = drag.panY + (event.clientY - drag.y) * unit;
-	}
-	function panEnd(event: PointerEvent): void {
-		if (drag?.id === event.pointerId) drag = null;
-	}
-	function wheel(event: WheelEvent): void {
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- gesture bookkeeping, never drawn
+	const pointers = new Map<number, { x: number; y: number }>();
+	let gesture: {
+		/** The node under a one-finger press, for a tap. */
+		node: string;
+		moved: boolean;
+		x: number;
+		y: number;
+		cam: { x: number; y: number; k: number };
+		/** Pinch: start distance and midpoint. */
+		dist?: number;
+		mx?: number;
+		my?: number;
+	} | null = null;
+	let dragging = $state(false);
+	let lastTap = { id: '', at: 0 };
+	/**
+	 * A tap acts on pointerup, and the panel it opens can land under the finger:
+	 * that tap's click must not press whatever is there now.
+	 */
+	let swallowClickUntil = 0;
+	function swallowClick(event: MouseEvent): void {
+		if (performance.now() > swallowClickUntil) return;
+		swallowClickUntil = 0;
 		event.preventDefault();
-		changeZoom(event.deltaY > 0 ? -0.1 : 0.1);
+		event.stopPropagation();
+	}
+
+	function local(event: PointerEvent): { x: number; y: number } {
+		const box = svgEl!.getBoundingClientRect();
+		return { x: event.clientX - box.left, y: event.clientY - box.top };
+	}
+
+	function startGesture(node: string): void {
+		const pts = [...pointers.values()];
+		if (pts.length >= 2) {
+			const [a, b] = pts;
+			gesture = {
+				node: '',
+				moved: true,
+				x: 0,
+				y: 0,
+				cam: { ...cam },
+				dist: Math.max(1, Math.hypot(b.x - a.x, b.y - a.y)),
+				mx: (a.x + b.x) / 2,
+				my: (a.y + b.y) / 2
+			};
+		} else if (pts.length === 1)
+			gesture = { node, moved: gesture?.moved ?? false, ...pts[0], cam: { ...cam } };
+	}
+
+	function pointerDown(event: PointerEvent): void {
+		if (event.pointerType === 'mouse' && event.button !== 0) return;
+		stopFlight();
+		svgEl!.setPointerCapture(event.pointerId);
+		pointers.set(event.pointerId, local(event));
+		const hit = (event.target as Element).closest<SVGGElement>('[data-id]');
+		if (pointers.size === 1) gesture = null;
+		startGesture(hit?.dataset.id ?? '');
+	}
+
+	function pointerMove(event: PointerEvent): void {
+		if (!pointers.has(event.pointerId) || !gesture) return;
+		pointers.set(event.pointerId, local(event));
+		const pts = [...pointers.values()];
+		if (pts.length >= 2 && gesture.dist) {
+			const [a, b] = pts;
+			const k = clampK(gesture.cam.k * (Math.hypot(b.x - a.x, b.y - a.y) / gesture.dist));
+			const mx = (a.x + b.x) / 2;
+			const my = (a.y + b.y) / 2;
+			const wx = (gesture.mx! - gesture.cam.x) / gesture.cam.k;
+			const wy = (gesture.my! - gesture.cam.y) / gesture.cam.k;
+			cam = { k, x: mx - wx * k, y: my - wy * k };
+			return;
+		}
+		const p = pts[0];
+		const dx = p.x - gesture.x;
+		const dy = p.y - gesture.y;
+		if (!gesture.moved && Math.hypot(dx, dy) < 6) return;
+		gesture.moved = true;
+		dragging = true;
+		cam = { ...gesture.cam, x: gesture.cam.x + dx, y: gesture.cam.y + dy };
+	}
+
+	function pointerUp(event: PointerEvent): void {
+		if (!pointers.delete(event.pointerId)) return;
+		const ended = gesture;
+		if (pointers.size > 0) {
+			// One finger of a pinch lifted: the other pans on from here.
+			startGesture('');
+			return;
+		}
+		gesture = null;
+		dragging = false;
+		if (!ended || ended.moved || event.type === 'pointercancel') return;
+		swallowClickUntil = performance.now() + 500;
+		// A tap: on a node selects it (a second tap on it opens a note); on the
+		// empty map lets go of the selection.
+		if (!ended.node) return clearSelection();
+		const now = performance.now();
+		if (lastTap.id === ended.node && now - lastTap.at < 400 && ended.node === selectedId) {
+			lastTap = { id: '', at: 0 };
+			return open(nodeById.get(ended.node));
+		}
+		lastTap = { id: ended.node, at: now };
+		select(ended.node);
+	}
+
+	/** Wheel / trackpad: zoom at the pointer (non-passive, so the page never scrolls). */
+	function wheelZoom(svg: SVGSVGElement): () => void {
+		const onWheel = (event: WheelEvent) => {
+			event.preventDefault();
+			const rate = event.deltaMode === 1 ? 0.05 : event.ctrlKey ? 0.01 : 0.002;
+			const box = svg.getBoundingClientRect();
+			zoomAt(Math.exp(-event.deltaY * rate), event.clientX - box.left, event.clientY - box.top);
+		};
+		svg.addEventListener('wheel', onWheel, { passive: false });
+		return () => svg.removeEventListener('wheel', onWheel);
+	}
+
+	function keydown(event: KeyboardEvent): void {
+		if (event.key === 'Escape' && selectedId) {
+			event.stopPropagation();
+			clearSelection();
+		}
 	}
 </script>
 
-{#snippet linkGroup(title: string, nodes: GraphNode[])}
-	<section class="links">
-		<h3>{title}</h3>
-		<ul>
-			{#each nodes as node (node.id)}
-				{@const dir = folderOf(node)}
-				<li>
-					<button class={['link-row', { missing: node.missing }]} onclick={() => select(node)}>
-						<span class="fname">
-							<span class="name">{node.title}</span>
-							{#if dir}<span class="dir">{dir}</span>{/if}
-						</span>
-						<Icon name="chevron" size={15} />
-					</button>
-				</li>
-			{/each}
-		</ul>
-	</section>
+{#snippet rows(title: string, nodes: GraphNode[])}
+	{#if nodes.length}
+		<section class="links">
+			<h3>{title}</h3>
+			<ul>
+				{#each nodes as node (node.id)}
+					{@const dir = node.kind === 'note' ? parentOf(node.id) : ''}
+					<li class="row">
+						<button
+							class={['link-row', node.kind]}
+							title="Show on the map"
+							onclick={() => select(node.id, 'panel')}
+						>
+							<span class={['mark', node.kind]} aria-hidden="true"></span>
+							<span class="fname">
+								<span class="name">{node.kind === 'tag' ? `#${node.id.slice(1)}` : node.title}</span
+								>
+								{#if node.kind === 'missing'}
+									<span class="dir">Not created yet</span>
+								{:else if dir}
+									<span class="dir">{dir}/</span>
+								{/if}
+							</span>
+						</button>
+						{#if node.kind === 'note'}
+							<button
+								class="open-btn"
+								title="Open note"
+								aria-label={`Open ${node.title}`}
+								onclick={() => open(node)}
+							>
+								<Icon name="note" size={16} />
+							</button>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
 {/snippet}
 
-<section class={['linked-notes', { phone, tablet }]} aria-label="Linked notes">
+<svelte:window onkeydown={keydown} />
+
+<section
+	class={['linked-notes', { phone, stacked }]}
+	aria-label="Linked notes"
+	onclickcapture={swallowClick}
+>
 	<header class="head">
 		<div class="titles">
 			<h1>Linked notes</h1>
@@ -246,8 +463,8 @@
 			<input
 				bind:this={searchEl}
 				bind:value={query}
-				placeholder={phone ? 'Find a note' : 'Find in the map'}
-				aria-label="Find a note in the graph"
+				placeholder="Find a note or tag"
+				aria-label="Find a note or tag on the map"
 				spellcheck="false"
 				onkeydown={(event) => {
 					if (event.key === 'Enter') findFirst();
@@ -274,8 +491,8 @@
 		</label>
 		<button
 			class={['icon-btn', { spin: loading }]}
-			title="Refresh links"
-			aria-label="Refresh links"
+			title="Read the notes again"
+			aria-label="Refresh map"
 			onclick={load}
 		>
 			<Icon name="retry" size={16} />
@@ -290,21 +507,17 @@
 		</button>
 	</header>
 
-	{#if loading}
-		<div class="state" aria-live="polite">
-			<p class="muted">Connecting your notes… Links are read on this device only.</p>
-		</div>
-	{:else if error}
+	{#if error}
 		<div class="state" role="alert">
 			<p class="error">{error}</p>
 			<button class="btn" onclick={load}>Try again</button>
 		</div>
-	{:else if graph.edges.length === 0}
+	{:else if !loading && graph.edges.length === 0}
 		<div class="state">
 			<EmptyState
 				src={mascotNew}
-				title="Your first connection starts in a note"
-				body="Type [[Note title]] in any note. The link stays plain Markdown and shows up here the next time you open the map."
+				title="Nothing connects yet"
+				body="Tag notes with #topic, or link one from another with Insert → Link to note. Notes that share a tag or a link gather here."
 			>
 				{#snippet action()}
 					<button class="cta" onclick={() => app.setView('editor')}>Back to your notes</button>
@@ -313,121 +526,205 @@
 		</div>
 	{:else}
 		<div class="workspace">
-			<div class="canvas">
-				<div class="map-tools" role="toolbar" aria-label="Map controls">
-					<button aria-label="Zoom out" title="Zoom out" onclick={() => changeZoom(-0.15)}>
-						<Icon name="minus" size={15} />
-					</button>
-					<button
-						class="zoom-value"
-						aria-label="Reset map view"
-						title="Reset view"
-						onclick={resetView}>{Math.round(zoom * 100)}%</button
-					>
-					<button aria-label="Zoom in" title="Zoom in" onclick={() => changeZoom(0.15)}>
-						<Icon name="plus" size={15} />
-					</button>
-					{#if phone && selectedId}
-						<span class="sep" aria-hidden="true"></span>
-						<button class="whole" onclick={showAll}>
-							<Icon name="graph" size={15} />
-							<span>Whole map</span>
-						</button>
-					{/if}
-				</div>
+			<div class="canvas" bind:clientWidth={width} bind:clientHeight={height}>
 				<svg
-					class={{ dragging: !!drag }}
-					viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
+					bind:this={svgEl}
+					class={{ dragging, labels: labelsOn, focused: !!focus, searching: !!normalizedQuery }}
+					style:--g={glyph}
 					role="group"
-					aria-label="Map of linked notes. Select a note for its incoming and outgoing links."
-					onpointerdown={panStart}
-					onpointermove={panMove}
-					onpointerup={panEnd}
-					onpointercancel={panEnd}
-					onwheel={wheel}
+					aria-label="Map of your notes and tags. Drag to move, pinch or scroll to zoom, select a note to see its connections."
+					onpointerdown={pointerDown}
+					onpointermove={pointerMove}
+					onpointerup={pointerUp}
+					onpointercancel={pointerUp}
+					{@attach wheelZoom}
 				>
-					<g
-						transform={`translate(${panX} ${panY}) translate(${view.x + view.w / 2} ${view.y + view.h / 2}) scale(${zoom}) translate(${-(view.x + view.w / 2)} ${-(view.y + view.h / 2)})`}
-					>
-						{#each displayEdges as edge (`${edge.from}:${edge.to}`)}
-							{@const a = point(nodeById.get(edge.from)!)}
-							{@const b = point(nodeById.get(edge.to)!)}
+					<g transform={`translate(${cam.x} ${cam.y}) scale(${cam.k})`}>
+						{#each displayEdges as edge (`${edge.from}\0${edge.to}`)}
+							{@const a = nodeById.get(edge.from)!}
+							{@const b = nodeById.get(edge.to)!}
 							<line
 								x1={a.x}
 								y1={a.y}
 								x2={b.x}
 								y2={b.y}
-								class={{ active: edge.from === selectedId || edge.to === selectedId }}
+								class={[
+									edge.kind,
+									{ lit: !!focus && (edge.from === selectedId || edge.to === selectedId) }
+								]}
 							/>
 						{/each}
 						{#each displayNodes as node (node.id)}
-							{@const at = point(node)}
-							{@const r = radius(node)}
+							{@const r = nodeRadius(node)}
 							<g
 								class={[
 									'node',
-									{ selected: node.id === selectedId, missing: node.missing, dim: !matches(node) }
+									node.kind,
+									{
+										selected: node.id === selectedId,
+										near: !!focus?.has(node.id),
+										current: node.id === app.activeId,
+										match: !!normalizedQuery && matches(node)
+									}
 								]}
-								transform={`translate(${at.x} ${at.y})`}
+								data-id={node.id}
+								transform={`translate(${node.x} ${node.y})`}
 								role="button"
 								tabindex="0"
-								aria-label={`${node.title}, ${node.degree} ${node.degree === 1 ? 'connection' : 'connections'}${node.missing ? ', missing note' : ''}`}
-								onpointerdown={(event) => event.stopPropagation()}
-								onclick={() => select(node)}
-								ondblclick={() => open(node)}
+								aria-label={node.kind === 'tag'
+									? `Tag ${node.id.slice(1)}`
+									: `${node.title}${node.kind === 'missing' ? ', missing note' : ''}`}
 								onkeydown={(event) => {
 									if (event.key === 'Enter' || event.key === ' ') {
 										event.preventDefault();
-										select(node);
+										if (node.id === selectedId) open(node);
+										else select(node.id);
 									}
 								}}
 							>
-								{#if node.id === selectedId}<circle class="halo" r={r + 9} />{/if}
-								<circle class="hit" r="28" />
-								<circle class="dot" {r} />
-								{#if phone}
-									<text y={r + 17} text-anchor="middle">{label(node)}</text>
-								{:else}
-									<text x={r + 7} y="4">{node.title}</text>
-								{/if}
-								<title>{node.id}</title>
+								<g class="glyph">
+									{#if node.kind === 'tag'}
+										{@const w = tagPillWidth(node)}
+										<rect class="pill" x={-w / 2} y="-11" width={w} height="22" rx="11" />
+										<text class="tag-label" y="4.5" text-anchor="middle">{tagLabel(node)}</text>
+									{:else}
+										{#if node.id === selectedId}<circle class="halo" r={r + 7} />{/if}
+										<circle class="hit" r={Math.max(r + 6, 16)} />
+										<circle class="dot" {r} />
+										<text y={r + 14} text-anchor="middle">{noteLabel(node)}</text>
+									{/if}
+								</g>
+								<title>{node.kind === 'tag' ? `#${node.id.slice(1)}` : node.id}</title>
 							</g>
 						{/each}
 					</g>
 				</svg>
-				<div class="map-foot">
-					{#if phone}
-						{#if !selectedId}<p>Tap a note to bring its connections into focus</p>{/if}
-					{:else}
-						<p class="legend" aria-hidden="true">
-							<span><i></i>Note</span><span><i class="broken"></i>Missing target</span>
-						</p>
-						{#if hiddenCount}
-							<p>Showing the {displayNodes.length} most connected · {hiddenCount} more</p>
-						{/if}
-					{/if}
+
+				<div class="map-tools" role="toolbar" aria-label="Map view">
+					<button
+						aria-label="Zoom out"
+						title="Zoom out"
+						onclick={() => zoomAt(1 / 1.35, undefined, undefined, true)}
+					>
+						<Icon name="minus" size={15} />
+					</button>
+					<span class="zoom-value" aria-live="polite">{Math.round(cam.k * 100)}%</span>
+					<button
+						aria-label="Zoom in"
+						title="Zoom in"
+						onclick={() => zoomAt(1.35, undefined, undefined, true)}
+					>
+						<Icon name="plus" size={15} />
+					</button>
+					<span class="sep" aria-hidden="true"></span>
+					<button class="fit" title="Fit the whole map" onclick={() => fit()}>
+						<Icon name="zenOn" size={14} />
+						<span>Fit</span>
+					</button>
 				</div>
+
+				{#if !(phone && selected)}
+					<div class="filters" role="group" aria-label="Show on the map">
+						<button
+							class={['chip', { on: showTags }]}
+							aria-pressed={showTags}
+							onclick={() => (showTags = !showTags)}
+						>
+							<span class="key tag" aria-hidden="true"></span>Tags
+						</button>
+						<button
+							class={['chip', { on: showLinks }]}
+							aria-pressed={showLinks}
+							onclick={() => (showLinks = !showLinks)}
+						>
+							<span class="key link" aria-hidden="true"></span>Links
+						</button>
+						{#if looseCount}
+							<button
+								class={['chip', { on: showLoose }]}
+								aria-pressed={showLoose}
+								title="Notes with no tags or links"
+								onclick={() => (showLoose = !showLoose)}
+							>
+								<span class="key loose" aria-hidden="true"></span>Unconnected {looseCount}
+							</button>
+						{/if}
+					</div>
+				{/if}
+
+				{#if loading}
+					<div class="busy" aria-live="polite">Laying out your notes…</div>
+				{:else if !selected}
+					<p class="hint">
+						{app.touch
+							? 'Tap a note or tag to see what it connects to · pinch to zoom'
+							: 'Click a note or tag to see what it connects to · scroll to zoom, drag to move'}
+					</p>
+				{/if}
 			</div>
 
 			{#if selected}
-				<aside class="inspector" aria-label="Selected note details">
+				<aside class="inspector" aria-label="Selected on the map">
 					<div class="detail-head">
+						{#if trail.length}
+							<button class="icon-btn small" title="Back" aria-label="Back" onclick={back}>
+								<Icon name="back" size={18} />
+							</button>
+						{/if}
 						<div class="dtitle">
-							<strong>{selected.title}</strong>
-							<span
-								>{selected.missing ? 'Linked, but no matching note exists yet' : selected.id} · {plural(
-									selected.degree,
-									'connection'
-								)}</span
-							>
+							{#if selected.kind === 'tag'}
+								<strong>#{selected.id.slice(1)}</strong>
+								<span>{plural(tagNotes.length, 'note')} tagged here</span>
+							{:else if selected.kind === 'missing'}
+								<strong>{selected.title}</strong>
+								<span>Linked to, but there’s no note with this name yet</span>
+							{:else}
+								<strong>{selected.title}</strong>
+								<span>{selected.id}</span>
+							{/if}
 						</div>
-						{#if !selected.missing}
+						{#if selected.kind === 'note'}
 							<button class="btn primary" onclick={() => open()}>Open note</button>
+						{:else if selected.kind === 'tag'}
+							<button class="btn" onclick={() => app.selectTag(selected.id.slice(1))}>
+								Show in list
+							</button>
+						{/if}
+						<button
+							class="icon-btn small"
+							title="Close (Esc)"
+							aria-label="Close"
+							onclick={clearSelection}
+						>
+							<Icon name="close" size={16} />
+						</button>
+					</div>
+					<div class="lists">
+						{#if selected.kind === 'note'}
+							{#if noteTags.length}
+								<div class="tags">
+									{#each noteTags as tag (tag.id)}
+										<button class="tag-chip" onclick={() => select(tag.id, 'panel')}>
+											#{tag.id.slice(1)}
+										</button>
+									{/each}
+								</div>
+							{/if}
+							{@render rows('Links to', linksTo)}
+							{@render rows('Linked from', linkedFrom)}
+							{#if selected.degree === 0}
+								<p class="muted quiet">
+									No tags or links yet. Add a #tag, or link it from another note.
+								</p>
+							{/if}
+						{:else if selected.kind === 'tag'}
+							{@render rows('Inside', parentTag)}
+							{@render rows('Nested tags', childTags)}
+							{@render rows('Notes', tagNotes)}
+						{:else}
+							{@render rows('Linked from', linkedFrom)}
 						{/if}
 					</div>
-					{#if outgoing.length}{@render linkGroup('Links to', outgoing)}{/if}
-					{#if incoming.length}{@render linkGroup('Linked from', incoming)}{/if}
-					{#if selected.degree === 0}<p class="muted quiet">This note is not connected yet.</p>{/if}
 				</aside>
 			{/if}
 		</div>
@@ -489,6 +786,10 @@
 		border-radius: 9px;
 		color: var(--text-muted);
 		transition: background var(--dur-fast) ease;
+	}
+	.icon-btn.small {
+		width: 32px;
+		height: 32px;
 	}
 	:global(html[data-touch]) .icon-btn {
 		width: 44px;
@@ -570,7 +871,7 @@
 		font-size: 16px;
 	}
 
-	/* --- loading / error / empty ------------------------------------------- */
+	/* --- error / empty --------------------------------------------------------- */
 	.state {
 		flex: 1;
 		min-height: 0;
@@ -616,7 +917,7 @@
 		filter: brightness(1.05);
 	}
 	.cta:active {
-		transform: scale(0.97);
+		transform: var(--press);
 	}
 
 	/* --- map ---------------------------------------------------------------- */
@@ -624,10 +925,9 @@
 		flex: 1;
 		min-height: 0;
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) 292px;
+		grid-template-columns: minmax(0, 1fr) auto;
 	}
-	.tablet .workspace,
-	.phone .workspace {
+	.stacked .workspace {
 		display: flex;
 		flex-direction: column;
 	}
@@ -641,101 +941,151 @@
 		contain: strict;
 	}
 	.phone .canvas {
-		min-height: 220px;
+		min-height: 240px;
 	}
 	.canvas svg {
+		position: absolute;
+		inset: 0;
 		width: 100%;
 		height: 100%;
 		display: block;
 		touch-action: none;
 		cursor: grab;
 		user-select: none;
+		-webkit-user-select: none;
 	}
 	.canvas svg.dragging {
 		cursor: grabbing;
 	}
-	.canvas line {
+
+	/* Edges: tags faint, nesting dashed, note links in the accent. */
+	line {
+		vector-effect: non-scaling-stroke;
 		stroke: var(--text-faint);
 		stroke-width: 1;
-		opacity: 0.55;
-		vector-effect: non-scaling-stroke;
+		opacity: 0.4;
+		transition: opacity var(--dur-fast) ease;
 	}
-	.canvas line.active {
+	line.nest {
+		stroke-dasharray: 3 3;
+		opacity: 0.5;
+	}
+	line.link {
 		stroke: var(--accent);
 		stroke-width: 1.6;
-		opacity: 0.85;
+		opacity: 0.75;
 	}
+	.focused line {
+		opacity: 0.08;
+	}
+	.focused line.lit {
+		opacity: 0.95;
+		stroke-width: 2;
+	}
+
 	.node {
 		cursor: pointer;
 		outline: none;
 		transition: opacity var(--dur-fast) ease;
 	}
+	.glyph {
+		transform: scale(var(--g));
+	}
+	.focused .node:not(.near),
+	.searching .node:not(.match) {
+		opacity: 0.18;
+	}
 	.node .hit {
 		fill: transparent;
-		pointer-events: all;
 	}
 	.node .dot {
-		fill: var(--bg-editor);
-		stroke: var(--text-muted);
-		stroke-width: 1.8;
-		vector-effect: non-scaling-stroke;
-		transition:
-			fill var(--dur-fast) ease,
-			stroke var(--dur-fast) ease;
-	}
-	.node:hover .dot {
-		stroke: var(--accent);
-	}
-	.node text {
-		fill: var(--text);
-		font: 500 12px var(--font-ui);
-		paint-order: stroke;
+		fill: var(--text-muted);
 		stroke: var(--bg-list);
-		stroke-width: 4px;
-		stroke-linejoin: round;
+		stroke-width: 1.5;
+		transition: fill var(--dur-fast) ease;
 	}
-	.phone .node text {
-		font-size: 13px;
+	.node:hover .dot,
+	.node:focus-visible .dot {
+		fill: var(--accent);
+	}
+	.node.current .dot {
+		stroke: var(--accent);
+		stroke-width: 2.5;
+	}
+	.node.selected .dot {
+		fill: var(--accent);
 	}
 	.node .halo {
 		fill: var(--accent-soft);
 	}
-	.node.selected .dot {
-		fill: var(--accent);
-		stroke: var(--accent);
+	.node.missing .dot {
+		fill: var(--bg-list);
+		stroke: var(--text-faint);
+		stroke-dasharray: 2.5 2;
+	}
+	.node text {
+		fill: var(--text);
+		font: 500 11.5px var(--font-ui);
+		paint-order: stroke;
+		stroke: var(--bg-list);
+		stroke-width: 3.5px;
+		stroke-linejoin: round;
+		pointer-events: none;
+	}
+	/* Zoomed far out, a note's title waits for hover, focus or a search hit. */
+	svg:not(.labels) .node.note text,
+	svg:not(.labels) .node.missing text {
+		opacity: 0;
+		transition: opacity var(--dur-fast) ease;
+	}
+	svg .node:hover text,
+	svg .node.near text,
+	svg .node.match text {
+		opacity: 1;
 	}
 	.node.selected text {
 		fill: var(--text-strong);
 		font-weight: 700;
 	}
-	.node.missing .dot {
-		fill: transparent;
-		stroke: var(--text-faint);
-		stroke-dasharray: 3 3;
-	}
 	.node.missing text {
 		fill: var(--text-muted);
 		font-style: italic;
 	}
-	.node.dim {
-		opacity: 0.15;
-	}
-	.node:focus-visible .dot {
+	.node.tag .pill {
+		fill: var(--accent-soft);
 		stroke: var(--accent);
-		stroke-width: 3.5;
+		stroke-width: 1;
+		stroke-opacity: 0.35;
+		transition: fill var(--dur-fast) ease;
+	}
+	.node.tag text.tag-label {
+		fill: var(--accent-ink);
+		font-weight: 650;
+		font-size: 12px;
+		stroke: none;
+	}
+	.node.tag:hover .pill,
+	.node.tag:focus-visible .pill {
+		stroke-opacity: 0.9;
+	}
+	.node.tag.selected .pill {
+		fill: var(--accent);
+		stroke-opacity: 1;
+	}
+	.node.tag.selected text.tag-label {
+		fill: var(--on-accent);
 	}
 	.node:focus-visible .hit {
 		stroke: var(--accent);
 		stroke-width: 1.5;
-		vector-effect: non-scaling-stroke;
 	}
 
-	/* Floating zoom control, the one raised surface on the map. */
-	.map-tools {
+	/* Floating controls: zoom at the top left, filters at the top right. */
+	.map-tools,
+	.filters {
 		position: absolute;
 		z-index: 2;
 		top: 12px;
-		inset-inline-start: 12px;
 		display: flex;
 		align-items: center;
 		gap: 2px;
@@ -744,124 +1094,158 @@
 		background: var(--bg-editor);
 		box-shadow: var(--shadow-pane);
 	}
-	.map-tools button {
-		display: grid;
-		place-items: center;
+	.map-tools {
+		inset-inline-start: 12px;
+	}
+	.filters {
+		inset-inline-end: 12px;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+		max-width: calc(100% - 210px);
+	}
+	.phone .filters {
+		top: auto;
+		bottom: 12px;
+		inset-inline: 12px auto;
+		max-width: calc(100% - 24px);
+	}
+	.map-tools button,
+	.chip {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
 		min-width: 30px;
 		height: 30px;
 		border-radius: 7px;
 		color: var(--text-muted);
+		font-size: 12.5px;
+		font-weight: 600;
+		white-space: nowrap;
 		transition:
 			background var(--dur-fast) ease,
-			color var(--dur-fast) ease;
+			color var(--dur-fast) ease,
+			transform var(--dur-fast) ease;
 	}
-	:global(html[data-touch]) .map-tools button {
+	:global(html[data-touch]) .map-tools button,
+	:global(html[data-touch]) .chip {
 		min-width: 44px;
 		height: 44px;
 	}
 	.map-tools button:hover,
-	.map-tools button:active {
+	.chip:hover {
 		background: var(--bg-hover);
 		color: var(--text);
 	}
-	.map-tools .zoom-value {
-		min-width: 48px;
-		padding: 0 4px;
+	.map-tools button:active,
+	.chip:active {
+		transform: var(--press);
+	}
+	.map-tools .fit {
+		padding-inline: 10px;
+	}
+	.zoom-value {
+		min-width: 44px;
+		text-align: center;
 		font-size: 11.5px;
 		font-weight: 600;
+		color: var(--text-muted);
 		font-variant-numeric: tabular-nums;
 	}
-	.map-tools .sep {
+	.sep {
 		width: 1px;
 		height: 18px;
 		margin-inline: 2px;
 		background: var(--bg-hover);
 	}
-	.map-tools .whole {
-		display: flex;
-		gap: 6px;
+	.chip {
 		padding-inline: 10px;
-		font-size: 12.5px;
-		font-weight: 600;
-	}
-	.map-foot {
-		position: absolute;
-		inset-inline: 16px;
-		bottom: 12px;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 16px;
-		pointer-events: none;
-		font-size: 11px;
-		color: var(--text-muted);
-		font-variant-numeric: tabular-nums;
-	}
-	.map-foot p {
-		margin: 0;
-	}
-	.phone .map-foot {
-		justify-content: center;
-		bottom: 10px;
 		color: var(--text-faint);
-		text-align: center;
 	}
-	.legend {
-		display: flex;
-		gap: 14px;
+	.chip.on {
+		color: var(--text);
 	}
-	.legend span {
-		display: flex;
-		align-items: center;
-		gap: 6px;
+	.chip:not(.on) .key {
+		opacity: 0.35;
 	}
-	.legend i {
+	.key {
+		flex: 0 0 auto;
+		display: inline-block;
+	}
+	.key.tag {
+		width: 14px;
+		height: 9px;
+		border-radius: 5px;
+		background: var(--accent-soft);
+		box-shadow: inset 0 0 0 1px var(--accent);
+	}
+	.key.link {
+		width: 14px;
+		height: 2px;
+		border-radius: 1px;
+		background: var(--accent);
+	}
+	.key.loose {
 		width: 8px;
 		height: 8px;
 		border-radius: 50%;
-		border: 1.5px solid var(--text-muted);
-		background: var(--bg-editor);
-	}
-	.legend i.broken {
-		border-style: dashed;
-		border-color: var(--text-faint);
-		background: transparent;
+		background: var(--text-muted);
 	}
 
-	/* --- inspector ---------------------------------------------------------- */
+	.hint,
+	.busy {
+		position: absolute;
+		inset-inline: 16px;
+		bottom: 14px;
+		margin: 0;
+		pointer-events: none;
+		text-align: center;
+		font-size: 12px;
+		color: var(--text-muted);
+	}
+	.phone .hint {
+		bottom: 72px;
+	}
+	.busy {
+		top: 50%;
+		bottom: auto;
+		font-size: 13px;
+	}
+
+	/* --- panel ---------------------------------------------------------------- */
 	.inspector {
+		width: 300px;
 		min-width: 0;
 		min-height: 0;
-		overflow-y: auto;
-		padding: 6px 8px 16px;
+		display: flex;
+		flex-direction: column;
 		box-shadow: inset 1px 0 0 var(--bg-hover);
 	}
-	.tablet .inspector,
-	.phone .inspector {
+	.stacked .inspector {
+		width: auto;
 		flex: 0 0 auto;
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-		align-content: start;
-		column-gap: 16px;
-		max-height: 36%;
-		padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
-		box-shadow: inset 0 1px 0 var(--bg-hover);
-	}
-	.phone .inspector {
-		grid-template-columns: minmax(0, 1fr);
 		max-height: 42%;
-		padding: 2px 4px max(12px, env(safe-area-inset-bottom, 0px));
+		box-shadow:
+			inset 0 1px 0 var(--bg-hover),
+			0 -6px 18px rgba(0, 0, 0, 0.06);
 	}
 	.detail-head {
-		grid-column: 1 / -1;
+		flex: 0 0 auto;
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
-		gap: 10px;
-		padding: 12px 10px 4px;
+		gap: 8px;
+		padding: 12px 8px 6px 12px;
+	}
+	/* Back, title and close keep one line; the action wraps below when it can't fit. */
+	.detail-head > .btn {
+		order: 1;
+	}
+	.stacked .detail-head > .btn {
+		order: 0;
 	}
 	.dtitle {
-		flex: 1 1 160px;
+		flex: 1 1 140px;
 		min-width: 0;
 		display: flex;
 		flex-direction: column;
@@ -879,7 +1263,22 @@
 		line-height: 1.45;
 		color: var(--text-muted);
 		overflow-wrap: anywhere;
-		font-variant-numeric: tabular-nums;
+	}
+	.lists {
+		flex: 1 1 auto;
+		min-height: 0;
+		overflow-y: auto;
+		padding: 0 8px max(12px, env(safe-area-inset-bottom, 0px));
+	}
+	.stacked .lists {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+		align-content: start;
+		column-gap: 16px;
+	}
+	.stacked .lists > .tags,
+	.stacked .lists > .quiet {
+		grid-column: 1 / -1;
 	}
 	.btn {
 		flex: 0 0 auto;
@@ -910,12 +1309,36 @@
 	.btn.primary:active {
 		filter: brightness(1.08);
 	}
+	.tags {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		padding: 4px 4px 2px;
+	}
+	.tag-chip {
+		height: 26px;
+		padding: 0 10px;
+		border-radius: 13px;
+		background: var(--accent-soft);
+		color: var(--accent-ink);
+		font-size: 12.5px;
+		font-weight: 600;
+		transition: transform var(--dur-fast) ease;
+	}
+	:global(html[data-touch]) .tag-chip {
+		height: 36px;
+		padding: 0 14px;
+		border-radius: 18px;
+	}
+	.tag-chip:active {
+		transform: var(--press);
+	}
 	.links {
 		min-width: 0;
 	}
 	.links h3 {
 		margin: 0;
-		padding: 14px 4px 4px 10px;
+		padding: 14px 4px 4px 6px;
 		font-size: 11px;
 		font-weight: 700;
 		text-transform: uppercase;
@@ -927,30 +1350,69 @@
 		padding: 0;
 		list-style: none;
 	}
+	.row {
+		display: flex;
+		align-items: center;
+		gap: 2px;
+	}
 	.link-row {
+		flex: 1;
+		min-width: 0;
 		display: flex;
 		align-items: center;
 		gap: 10px;
-		width: 100%;
 		min-height: 40px;
-		padding: 6px 8px 6px 10px;
+		padding: 6px 8px;
 		border-radius: 8px;
 		text-align: start;
-		color: var(--text-faint);
 		transition: background var(--dur-fast) ease;
 	}
 	:global(html[data-touch]) .link-row {
 		min-height: 52px;
 	}
-	.link-row:hover {
+	.link-row:hover,
+	.open-btn:hover {
 		background: var(--bg-hover);
 	}
-	.link-row:active {
+	.link-row:active,
+	.open-btn:active {
 		background: var(--bg-active);
 	}
-	.link-row:focus-visible {
+	.link-row:focus-visible,
+	.open-btn:focus-visible {
 		outline: none;
 		box-shadow: inset 0 0 0 1.5px var(--accent);
+	}
+	.open-btn {
+		flex: 0 0 auto;
+		display: grid;
+		place-items: center;
+		width: 36px;
+		height: 36px;
+		border-radius: 8px;
+		color: var(--text-muted);
+	}
+	:global(html[data-touch]) .open-btn {
+		width: 48px;
+		height: 48px;
+	}
+	.mark {
+		flex: 0 0 auto;
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: var(--text-muted);
+	}
+	.mark.tag {
+		width: 12px;
+		height: 8px;
+		border-radius: 4px;
+		background: var(--accent-soft);
+		box-shadow: inset 0 0 0 1px var(--accent);
+	}
+	.mark.missing {
+		background: none;
+		box-shadow: inset 0 0 0 1.5px var(--text-faint);
 	}
 	.fname {
 		flex: 1;
@@ -966,6 +1428,9 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
+	.link-row.tag .name {
+		color: var(--accent-ink);
+	}
 	.link-row.missing .name {
 		font-style: italic;
 		color: var(--text-muted);
@@ -978,7 +1443,7 @@
 		white-space: nowrap;
 	}
 	.quiet {
-		margin: 8px 10px 0;
+		margin: 8px 6px 0;
 		font-size: 13px;
 	}
 	@keyframes spin {

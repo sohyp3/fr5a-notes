@@ -49,6 +49,26 @@
 	}
 }
 
+/* Settings → Appearance → Animations off: the same as the OS switch. */
+:root[data-motion='off'] {
+	--dur-fast: 0ms;
+	--dur-pop: 0ms;
+	--dur-pane: 0ms;
+	--dur-sheet: 0ms;
+	--dur-exit: 0ms;
+	--press: 1;
+	--press-icon: 1;
+}
+:root[data-motion='off'] *,
+:root[data-motion='off'] *::before,
+:root[data-motion='off'] *::after {
+	transition-duration: 0s !important;
+	transition-delay: 0s !important;
+	animation-duration: 1ms !important;
+	animation-iteration-count: 1 !important;
+	scroll-behavior: auto !important;
+}
+
 /* ---- light (default) ----
    The primary/secondary/text-main triplet is overridden at runtime with
    accent-tinted values (see accents.ts applyPalette) so the entire window —
@@ -410,7 +430,7 @@ button.scrim {
 	text-decoration: none;
 }
 .md-link[href],
-.md-wiki-link {
+.md-note-link {
 	cursor: pointer;
 	text-decoration: underline;
 	text-decoration-color: transparent;
@@ -419,18 +439,18 @@ button.scrim {
 }
 .md-link[href]:hover,
 .md-link[href]:focus-visible,
-.md-wiki-link:hover,
-.md-wiki-link:focus-visible {
+.md-note-link:hover,
+.md-note-link:focus-visible {
 	text-decoration-color: currentColor;
 }
-/* View mode: wiki links are tab stops; show the same accent ring as other controls. */
-.md-wiki-link:focus-visible {
+/* View mode: note links are tab stops; show the same accent ring as other controls. */
+.md-note-link:focus-visible {
 	outline: 1.5px solid var(--accent);
 	outline-offset: 2px;
 	border-radius: 3px;
 }
 /* While editing a plain click places the caret (Mod+click follows the link). */
-.ProseMirror[contenteditable='true'] .md-wiki-link {
+.ProseMirror[contenteditable='true'] .md-note-link {
 	cursor: text;
 }
 
@@ -905,6 +925,26 @@ html.md-image-dragging * {
 }
 .tag-suggest-item.active .hash {
 	color: var(--accent-ink);
+}
+/* Note links: the title, its folder trailing in faint type. */
+.tag-suggest-item .title {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.tag-suggest-item .dir {
+	flex: 0 1 auto;
+	min-width: 0;
+	margin-inline-start: auto;
+	padding-inline-start: 14px;
+	font-size: 11.5px;
+	color: var(--text-faint);
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.tag-suggest-item.active .dir {
+	color: var(--accent-ink);
+	opacity: 0.75;
 }
 
 /* ============================================================

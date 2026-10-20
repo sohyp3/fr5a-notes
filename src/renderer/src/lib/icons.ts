@@ -36,6 +36,7 @@ import Info from '@lucide/svelte/icons/info';
 import Keyboard from '@lucide/svelte/icons/keyboard';
 import KeyRound from '@lucide/svelte/icons/key-round';
 import LayoutList from '@lucide/svelte/icons/layout-list';
+import Link from '@lucide/svelte/icons/link';
 import List from '@lucide/svelte/icons/list';
 import ListIndentDecrease from '@lucide/svelte/icons/list-indent-decrease';
 import ListIndentIncrease from '@lucide/svelte/icons/list-indent-increase';
@@ -122,6 +123,7 @@ export const ICONS = {
 	insert: TextCursor,
 	append: ListPlus,
 	table: Table,
+	link: Link,
 	image: ImagePlus,
 	highlight: Highlighter,
 	eraser: Eraser,

@@ -147,6 +147,8 @@ export interface AiConfig {
 	maxSteps: number;
 	/** Starred models, in the order they were starred. */
 	favorites: FavoriteModel[];
+	/** The model last picked or sent with (null model = the provider's own): new chats start on it. */
+	lastModel?: { provider: string; model: string | null };
 }
 
 /**

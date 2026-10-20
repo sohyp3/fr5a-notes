@@ -395,7 +395,16 @@ class HarnessState {
 	}
 
 	newTab(): void {
-		this.tabs.push(new HarnessTab(newSession(), [], true));
+		const tab = new HarnessTab(newSession(), [], true);
+		// Start on the model used last, not the default provider's own.
+		const ai = getAiSettings();
+		const last = ai.config.lastModel;
+		const p = last && ai.config.providers.find((x) => x.id === last.provider);
+		if (p && last && ai.usable(p)) {
+			tab.providerId = p.id;
+			tab.model = last.model === p.model ? null : last.model;
+		}
+		this.tabs.push(tab);
 		this.active = this.tabs.length - 1;
 	}
 
@@ -734,6 +743,7 @@ class HarnessState {
 			tab.entries.push({ kind: 'error', text: 'Add an AI provider in Settings → AI first.' });
 			return;
 		}
+		if (tab.providerId) getAiSettings().rememberModel(tab.providerId, tab.model);
 
 		const run = this.captureRunContext();
 		tab.lastRunContext = run;

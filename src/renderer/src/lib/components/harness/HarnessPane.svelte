@@ -17,6 +17,7 @@
 	} from '../../harness/types';
 	import { exaOptions } from '../../harness/web';
 	import { reducedMotion } from '../../portal';
+	import { motionK } from '../../motion';
 	import {
 		formatTokens,
 		formatUsd,
@@ -45,7 +46,6 @@
 	const skill = $derived(tab ? h.skill(tab.skill) : null);
 	const ctx = $derived(tab ? h.context(tab) : null);
 	const phone = $derived(app.layout === 'phone');
-	const dur = reducedMotion() ? 0 : 1;
 
 	let inputEl: HTMLTextAreaElement | undefined = $state();
 	let scroller: HTMLDivElement | undefined = $state();
@@ -99,6 +99,7 @@
 		tab.providerId = c.provider.id;
 		// The provider's own model: follow it when it's changed in Settings.
 		tab.model = c.model === c.provider.model ? null : c.model;
+		ai.rememberModel(tab.providerId, tab.model);
 	}
 
 	/** Context details unfolded; a question or a change to review folds them to make room. */
@@ -530,7 +531,7 @@
 	{#if historyOpen}
 		<div
 			class={['history', { sheet: phone }]}
-			transition:fly={{ y: phone ? 24 : -6, duration: 180 * dur }}
+			transition:fly={{ y: phone ? 24 : -6, duration: 180 * motionK() }}
 		>
 			<div class="hist-head">
 				<strong>Sessions <span class="muted">· on this device</span></strong>
@@ -551,7 +552,7 @@
 					</div>
 				{:else}
 					{#each h.sessionFiles as f (f)}
-						<div class="hist-row" transition:slide={{ duration: 140 * dur }}>
+						<div class="hist-row" transition:slide={{ duration: 140 * motionK() }}>
 							{#if confirmDelete === f}
 								<span class="confirm">Delete this session?</span>
 								<button class="chip-btn danger" onclick={() => deleteSession(f)}>Delete</button>
@@ -628,7 +629,7 @@
 				<span class={['chev', { open: ctxOpen }]}><Icon name="chevron" size={13} /></span>
 			</button>
 			{#if ctxOpen}
-				<div class="ctx-more" transition:slide={{ duration: 160 * dur }}>
+				<div class="ctx-more" transition:slide={{ duration: 160 * motionK() }}>
 					<div class="ctx-row">
 						<span class="k">Model</span>
 						<select
@@ -796,7 +797,7 @@
 		<div class="transcript-wrap">
 			<div class="transcript" bind:this={scroller} {@attach follow} onscroll={onScroll}>
 				{#if !tab.entries.length}
-					<div class="welcome" in:fade={{ duration: 160 * dur }}>
+					<div class="welcome" in:fade={{ duration: 160 * motionK() }}>
 						{#if keyMissing && provider}
 							<p class="lead">
 								{provider.name} needs an API key.
@@ -940,14 +941,18 @@
 				{/if}
 			</div>
 			{#if !pinned && tab.entries.length}
-				<button class="jump" onclick={jumpToLatest} transition:fly={{ y: 8, duration: 140 * dur }}>
+				<button
+					class="jump"
+					onclick={jumpToLatest}
+					transition:fly={{ y: 8, duration: 140 * motionK() }}
+				>
 					<Icon name="down" size={14} /> Latest
 				</button>
 			{/if}
 		</div>
 
 		{#if !online.current}
-			<div class="offline" role="status" transition:slide={{ duration: 160 * dur }}>
+			<div class="offline" role="status" transition:slide={{ duration: 160 * motionK() }}>
 				You're offline — messages will fail until the connection is back.
 			</div>
 		{/if}
@@ -964,7 +969,7 @@
 				class="dock approval"
 				role="group"
 				aria-label="Review change"
-				in:fly={{ y: 16, duration: 200 * dur }}
+				in:fly={{ y: 16, duration: 200 * motionK() }}
 			>
 				<div class="dock-head">
 					<span class="dock-title">Review change</span>
@@ -1028,7 +1033,7 @@
 		{/if}
 	{/if}
 
-	{#if toast}<div class="toast" role="status" transition:fade={{ duration: 120 * dur }}>
+	{#if toast}<div class="toast" role="status" transition:fade={{ duration: 120 * motionK() }}>
 			{toast}
 		</div>{/if}
 </section>

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { fade, fly } from 'svelte/transition';
+	import { untrack } from 'svelte';
 	import { Spring } from 'svelte/motion';
 	import { MediaQuery } from 'svelte/reactivity';
 	import { innerWidth } from 'svelte/reactivity/window';
@@ -21,8 +22,7 @@
 	import Resizer from './lib/components/Resizer.svelte';
 	import { isMobile } from './lib/platform';
 	import { layoutFor } from './lib/layout';
-	import { reducedMotion } from './lib/portal';
-	import { easeDrawer, easeOut, ms, scrimIn, scrimOut } from './lib/motion';
+	import { easeDrawer, easeOut, motionK, ms, scrimIn, scrimOut } from './lib/motion';
 	import {
 		EDGE_BACK_PX,
 		LOCK_PX,
@@ -35,7 +35,6 @@
 	} from './lib/gesture';
 
 	const app = getAppState();
-	const dur = reducedMotion() ? 0 : 1;
 	/** Narrowest the editor may get while panes are dragged wider. */
 	const EDITOR_MIN = 320;
 
@@ -54,8 +53,9 @@
 	);
 
 	// Spring-driven widths so toggling/Zen feels physical, not linear (critically
-	// damped: no overshoot on a layout edge).
-	const PANE_SPRING = { stiffness: 0.16, damping: 0.74 };
+	// damped: no overshoot on a layout edge). Settles within half a pixel: a
+	// tail of sub-pixel steps would re-lay out the editor for nothing.
+	const PANE_SPRING = { stiffness: 0.16, damping: 0.74, precision: 0.5 };
 	const sidebarWidth = new Spring(app.widths.sidebar, PANE_SPRING);
 	const listWidth = new Spring(app.widths.list, PANE_SPRING);
 	const harnessWidth = new Spring(0, PANE_SPRING);
@@ -127,15 +127,67 @@
 	}
 
 	function follow(spring: Spring<number>, w: number): void {
-		// While an edge is dragged the pane tracks the pointer exactly. Touch
-		// devices (a landscape tablet would re-wrap the whole note every frame)
-		// and reduced motion snap.
-		if (app.resizing || app.touch || dur === 0) void spring.set(w, { instant: true });
+		// While an edge is dragged the pane tracks the pointer exactly.
+		if (app.resizing || motionK() === 0) void spring.set(w, { instant: true });
 		else spring.target = w;
 	}
-	$effect(() => follow(sidebarWidth, fit.side));
-	$effect(() => follow(listWidth, fit.list));
-	$effect(() => follow(harnessWidth, app.harnessOpen ? fit.ai : 0));
+
+	/**
+	 * While the panes slide, the note's scroll area keeps one width (the
+	 * narrower of before and after) and moves as one block on its own layer:
+	 * the note is wrapped once, and nothing inside it is laid out or painted
+	 * again per frame (a landscape tablet can't afford either).
+	 */
+	let frozen = $state.raw<{ el: HTMLElement; w: number } | null>(null);
+	let lastWinW = 0;
+	function freezeEditor(side: number, list: number, ai: number): void {
+		// A window resize moves the editor too: no estimate, it just wraps.
+		const resized = winW !== lastWinW;
+		frozen = null;
+		if (!desktop || resized || app.resizing || motionK() === 0) return;
+		const el = paneEl.editor?.querySelector<HTMLElement>('.editor-pane .scroll');
+		if (!el) return;
+		const grow =
+			sidebarWidth.current - side + (listWidth.current - list) + (harnessWidth.current - ai);
+		const now = el.offsetWidth;
+		if (Math.abs(grow) >= 1) frozen = { el, w: Math.min(now, now + grow) };
+	}
+	$effect(() => {
+		const side = fit.side;
+		const list = fit.list;
+		const ai = app.harnessOpen ? fit.ai : 0;
+		untrack(() => {
+			freezeEditor(side, list, ai);
+			follow(sidebarWidth, side);
+			follow(listWidth, list);
+			follow(harnessWidth, ai);
+		});
+	});
+	// After the effect above, so a resize that changes `fit` is still seen as one.
+	$effect(() => {
+		lastWinW = winW;
+	});
+	const sliding = $derived(
+		[sidebarWidth, listWidth, harnessWidth].some((sp) => sp.current !== sp.target)
+	);
+	// Inline on the element: a class or an inherited CSS variable higher up
+	// would restyle the whole note at the start and end of every slide.
+	$effect(() => {
+		const f = sliding ? frozen : null;
+		if (!f) return;
+		const { el, w } = f;
+		Object.assign(el.style, {
+			width: `${w}px`,
+			right: 'auto',
+			left: '50%',
+			marginLeft: `${-w / 2}px`,
+			willChange: 'transform'
+		});
+		return () => {
+			for (const p of ['width', 'right', 'left', 'margin-left', 'will-change'])
+				el.style.removeProperty(p);
+		};
+	});
 
 	/** Resize one pane, keeping at least EDITOR_MIN for the editor. */
 	function resize(pane: PaneName, px: number): void {
@@ -676,7 +728,7 @@
 
 	{#if app.conflictOpen}
 		<!-- Same resolver the desktop opens as a second window; closes on sync done. -->
-		<div class="conflict-overlay" transition:fade={{ duration: 160 * dur }}>
+		<div class="conflict-overlay" transition:fade={{ duration: 160 * motionK() }}>
 			<ConflictWindow />
 		</div>
 	{/if}
@@ -743,6 +795,7 @@
 		min-width: 0;
 		display: flex;
 	}
+
 	/* Settings / Changes cover the list + editor, which stay mounted beneath. */
 	.view-overlay {
 		position: absolute;

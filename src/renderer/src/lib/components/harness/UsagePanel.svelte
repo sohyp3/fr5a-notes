@@ -11,7 +11,8 @@
 		type Totals,
 		type UsageReport
 	} from '../../harness/usage';
-	import { portal, reducedMotion } from '../../portal';
+	import { portal } from '../../portal';
+	import { motionK } from '../../motion';
 	import Icon from '../Icon.svelte';
 
 	let { onclose }: { onclose: () => void } = $props();
@@ -20,7 +21,6 @@
 	const ai = getAiSettings();
 	const h = getHarness();
 	const phone = $derived(app.layout === 'phone');
-	const dur = reducedMotion() ? 0 : 1;
 
 	let report = $state.raw<UsageReport | null>(null);
 	let error = $state<string | null>(null);
@@ -83,15 +83,15 @@
 			if (scrimPressed) onclose();
 			scrimPressed = false;
 		}}
-		transition:fade={{ duration: 140 * dur }}
+		transition:fade={{ duration: 140 * motionK() }}
 	></button>
 	<div
 		class="panel"
 		role="dialog"
 		aria-modal="true"
 		aria-labelledby="usage-title"
-		in:fly={{ y: phone ? 60 : 8, duration: 200 * dur, opacity: phone ? 1 : 0 }}
-		out:fade={{ duration: 120 * dur }}
+		in:fly={{ y: phone ? 60 : 8, duration: 200 * motionK(), opacity: phone ? 1 : 0 }}
+		out:fade={{ duration: 120 * motionK() }}
 	>
 		<header>
 			<h2 id="usage-title">Usage</h2>

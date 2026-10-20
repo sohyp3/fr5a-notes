@@ -14,7 +14,7 @@
 	import { UI_FONTS, EN_FONTS, AR_FONTS } from '../fonts';
 	import { ACCENTS } from '../accents';
 	import { SHORTCUTS, VIM_SHORTCUTS as vimShortcuts } from '../shortcuts';
-	import { reducedMotion } from '../portal';
+	import { motionK } from '../motion';
 	import {
 		BAR_ICONS,
 		BAR_LABELS,
@@ -28,7 +28,6 @@
 	const app = getAppState();
 	const s = $derived(app.settings);
 	const phone = $derived(app.layout === 'phone');
-	const dur = reducedMotion() ? 0 : 1;
 
 	const SECTIONS: { id: SettingsSection; label: string; icon: IconName; desc: string }[] = [
 		{ id: 'general', label: 'General', icon: 'note', desc: 'Notes folder, opening notes' },
@@ -38,7 +37,7 @@
 			id: 'linkedNotes',
 			label: 'Linked notes',
 			icon: 'graph',
-			desc: 'Wiki links and the connection map'
+			desc: 'Links between notes and a map of notes and tags'
 		},
 		{ id: 'toolbar', label: 'Toolbar', icon: 'toolbar', desc: 'Buttons in the bar or in its menu' },
 		{
@@ -84,11 +83,14 @@
 	const insertBarItems = $derived<BarItem[]>([
 		...(app.touch ? FORMAT_ITEMS : ['insert' as const]),
 		...INSERT_ITEMS.filter(
-			(id) => (id !== 'image' || !!platform.saveAsset) && (id !== 'highlight' || s.highlights)
+			(id) =>
+				(id !== 'image' || !!platform.saveAsset) &&
+				(id !== 'link' || s.linkedNotes) &&
+				(id !== 'highlight' || s.highlights)
 		)
 	]);
 	const BAR_DESC: Partial<Record<BarItem, string>> = {
-		insert: 'Image, table and highlight without a button of their own',
+		insert: 'Image, table, note link and highlight without a button of their own',
 		edit: 'Switch between reading and editing',
 		dir: 'Left-to-right or right-to-left'
 	};
@@ -155,7 +157,7 @@
 			<nav
 				class={['nav', { index: showIndex }]}
 				aria-label="Settings sections"
-				in:fly={{ x: phone ? -24 : 0, opacity: 0, duration: phone ? 180 * dur : 0 }}
+				in:fly={{ x: phone ? -24 : 0, opacity: 0, duration: phone ? 180 * motionK() : 0 }}
 			>
 				{#each SECTIONS as sec (sec.id)}
 					<button
@@ -185,7 +187,7 @@
 			{#key app.settingsSection}
 				<div
 					class="pane-body"
-					in:fly={{ x: phone ? 24 : 0, y: phone ? 0 : 6, duration: 180 * dur }}
+					in:fly={{ x: phone ? 24 : 0, y: phone ? 0 : 6, duration: 180 * motionK() }}
 					out:fade={{ duration: 0 }}
 				>
 					{#if !phone}<h2 class="section-title">{section.label}</h2>{/if}
@@ -285,6 +287,20 @@
 										></button>
 									{/each}
 								</div>
+							</div>
+						</section>
+						<section class="group">
+							<h3>Motion</h3>
+							<div class="row">
+								<div class="label">
+									<span class="name">Animations</span>
+									<span class="desc"
+										>Slides, sheets and fades. Turn off on this device if they stutter</span
+									>
+								</div>
+								{@render toggle(s.animations, 'Animations', () =>
+									app.updateSettings({ animations: !s.animations })
+								)}
 							</div>
 						</section>
 						<section class="group">
@@ -405,7 +421,7 @@
 								<div class="label">
 									<span class="name">Enable linked notes</span>
 									<span class="desc"
-										>Follow <code>[[Note title]]</code> links between notes and see how they connect (Mod+G)</span
+										>Link notes to each other and see them on a map with their tags (Mod+G)</span
 									>
 								</div>
 								{@render toggle(s.linkedNotes, 'Enable linked notes', () =>
@@ -415,17 +431,19 @@
 						</section>
 						{#if s.linkedNotes}
 							<section class="group">
-								<h3>Wiki links</h3>
+								<h3>Note links</h3>
 								<p class="prose">
-									Type <code>[[Ideas]]</code> to link by title, or
-									<code>[[work/project|Project]]</code> to show a custom label. In view mode, tap a link
-									to follow it; while editing, hold Mod and click.
+									Tags connect notes to a topic; a link connects one note to another. A link is
+									plain Markdown, <code>[text](folder/note.md)</code>: Insert → Link to note, or
+									type
+									<code>[text](</code>, and pick the note. In view mode, tap a link to follow it;
+									while editing, hold Mod and click.
 								</p>
 								<div class="row">
 									<div class="label">
 										<span class="name">Connection map</span>
 										<span class="desc"
-											>Every note and the links between them, read when you open it</span
+											>Notes gathered around their tags, with the links between them</span
 										>
 									</div>
 									<button class="btn" onclick={() => app.openGraph()}>Open map</button>

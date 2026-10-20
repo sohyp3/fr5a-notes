@@ -17,6 +17,7 @@
 	import { isHighlightColor, type HighlightColor } from '../editor/highlights';
 	import { imageSource } from '../editor/images';
 	import { TagSuggest, flattenTagTree } from '../editor/TagSuggest';
+	import { NoteLinkSuggest } from '../editor/NoteLinkSuggest';
 	import {
 		SearchBehavior,
 		clearNoteSearch,
@@ -41,7 +42,7 @@
 	import NoteTabs from './NoteTabs.svelte';
 	import Icon from './Icon.svelte';
 	import { isMobile, platform } from '../platform';
-	import { reducedMotion } from '../portal';
+	import { motionK } from '../motion';
 	import type { IconName } from '../icons';
 	import {
 		BAR_LABELS,
@@ -105,7 +106,7 @@
 	// No hardware keyboard to drive modal editing on phones/tablets: Vim stays off.
 	const vimOn = $derived(app.settings.vim && !isMobile);
 	const highlights = $derived(app.settings.highlights);
-	const wikiLinks = $derived(app.settings.linkedNotes);
+	const noteLinks = $derived(app.settings.linkedNotes);
 	const activeMeta = $derived(app.notes.find((n) => n.id === app.activeId));
 	// Locked notes are read-only. Fall back to the buffer so the badge is right
 	// even before the index round-trips.
@@ -129,7 +130,7 @@
 	// reload token. Keyed on the session — not the note id — so a draft
 	// materialising into a real file doesn't remount the editor mid-typing.
 	const editorKey = $derived(
-		`${app.editorSession}:${vimOn}:${highlights}:${wikiLinks}:${app.editorReloadToken}`
+		`${app.editorSession}:${vimOn}:${highlights}:${noteLinks}:${app.editorReloadToken}`
 	);
 	const crumb = $derived.by(() => {
 		const id = app.activeId;
@@ -158,8 +159,8 @@
 				highlights,
 				imageUrl,
 				openLink: (href) => window.open(href, '_blank', 'noopener,noreferrer'),
-				wikiLinks,
-				onWikiLink: (target) => void app.openWikiLink(target)
+				noteLinks,
+				onNoteLink: (target) => void app.openNoteLink(target)
 			}),
 			MarkdownShortcuts,
 			ListBehavior,
@@ -170,6 +171,13 @@
 			TagSuggest.configure({ getTags: () => flattenTagTree(app.tags) })
 		];
 		if (highlights) extensions.push(HighlightBehavior.configure({ color: lastHighlight }));
+		if (noteLinks)
+			extensions.push(
+				NoteLinkSuggest.configure({
+					getNotes: () => app.listedNotes,
+					fromId: () => app.activeId ?? `${app.activeDir ? `${app.activeDir}/` : ''}_`
+				})
+			);
 		if (vimOn) {
 			extensions.push(
 				Vim.configure({
@@ -476,7 +484,7 @@
 		}
 	}
 
-	// --- Insert: image, table, highlight -----------------------------------
+	// --- Insert: image, table, note link, highlight -------------------------
 
 	function pickImage(): void {
 		imageInput?.click();
@@ -513,6 +521,24 @@
 			anchor,
 			toggle
 		};
+	}
+
+	/**
+	 * Start a link to a note: `[](` at the caret (`[selection](` over a
+	 * selection, which becomes the link's text) opens the note list
+	 * (`NoteLinkSuggest`).
+	 */
+	function insertNoteLink(): void {
+		editor
+			?.chain()
+			.focus()
+			.command(({ tr, state }) => {
+				const { from, to } = state.selection;
+				const text = state.doc.textBetween(from, to).replace(/[[\]\n]/g, ' ');
+				tr.insertText(`[${text}](`, from, to);
+				return true;
+			})
+			.run();
 	}
 
 	/** The color last picked (Mod+Shift+H paints it). */
@@ -561,7 +587,7 @@
 	}
 
 	/**
-	 * Image / table / highlight while editing. Settings → Toolbar makes each a
+	 * Image / table / note link / highlight while editing. Settings → Toolbar makes each a
 	 * button (header with a mouse, formatting toolbar on touch) or a row of Insert.
 	 */
 	const inserts = $derived.by((): InsertAction[] => {
@@ -570,6 +596,8 @@
 		if (platform.saveAsset)
 			all.push({ id: 'image', label: 'Image', icon: 'image', on: false, run: pickImage });
 		all.push({ id: 'table', label: 'Table', icon: 'table', on: !!tableAt, run: openTable });
+		if (noteLinks)
+			all.push({ id: 'link', label: 'Link to note', icon: 'link', on: false, run: insertNoteLink });
 		if (highlights)
 			all.push({
 				id: 'highlight',
@@ -602,7 +630,7 @@
 	const toolAction = (a: InsertAction): ToolAction => ({
 		label: a.label,
 		icon: a.icon,
-		popup: a.id !== 'image',
+		popup: a.id !== 'image' && a.id !== 'link',
 		on: a.on,
 		do: (anchor, fromMenu) => a.run(anchor, { above: true, toggle: !fromMenu })
 	});
@@ -712,8 +740,6 @@
 		const r = insertBtn!.getBoundingClientRect();
 		insertAt = { x: r.right - 200, y: r.bottom + 6 };
 	}
-
-	const dur = reducedMotion() ? 0 : 1;
 </script>
 
 <svelte:window onkeydown={onFindWindowKey} />
@@ -765,6 +791,17 @@
 			onclick={() => tableBtn && openTable(tableBtn, { above: false, toggle: true })}
 		>
 			<Icon name="table" size={16} stroke={1.7} />
+		</button>
+	{:else if id === 'link'}
+		<button
+			data-bar="link"
+			class="act icon"
+			title="Link to note"
+			aria-label="Link to note"
+			onpointerdown={keepFocus}
+			onclick={insertNoteLink}
+		>
+			<Icon name="link" size={16} stroke={1.7} />
 		</button>
 	{:else if id === 'highlight'}
 		{@const open = !!highlightBtn && !!highlightPick?.open && highlightPick.anchor === highlightBtn}
@@ -881,7 +918,7 @@
 		<NoteTabs />
 	{/if}
 	{#if !app.workspace}
-		<div class="placeholder-screen" in:fade={{ duration: 150 * dur }}>
+		<div class="placeholder-screen" in:fade={{ duration: 150 * motionK() }}>
 			<EmptyState
 				src={logo}
 				alt="fr5a"
@@ -894,7 +931,7 @@
 			</EmptyState>
 		</div>
 	{:else if !app.activeId && !app.draft}
-		<div class="placeholder-screen" in:fade={{ duration: 150 * dur }}>
+		<div class="placeholder-screen" in:fade={{ duration: 150 * motionK() }}>
 			<EmptyState
 				src={mascotNew}
 				title="Nothing open"
@@ -1325,6 +1362,10 @@
 		inset: 0;
 		overflow-y: auto;
 		padding: 4px 40px 0;
+		/* Its size never comes from the note: an isolation boundary, so moving
+		   or resizing what's around it (pane slides) never walks the note's
+		   lines. Menus / ghosts that are position: fixed live in <body>. */
+		contain: strict;
 	}
 	.compact .scroll {
 		padding: 2px 18px 0;

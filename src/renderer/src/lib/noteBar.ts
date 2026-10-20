@@ -6,7 +6,7 @@
 import type { IconName } from './icons';
 
 /** Insert actions: their menu is Insert (+), their bar the header (mouse) or the formatting toolbar (touch). */
-export const INSERT_ITEMS = ['image', 'table', 'highlight'] as const;
+export const INSERT_ITEMS = ['image', 'table', 'link', 'highlight'] as const;
 /** Note actions: their menu is the header's ⋯. */
 export const NOTE_ITEMS = ['edit', 'ai', 'pin', 'dir', 'lock', 'changes', 'trash'] as const;
 /** Formatting (touch only): their bar is the formatting toolbar, their menu its ⋯. */
@@ -34,6 +34,7 @@ export const BAR_LABELS: Record<BarItem, string> = {
 	insert: 'Insert',
 	image: 'Image',
 	table: 'Table',
+	link: 'Link to note',
 	highlight: 'Highlight',
 	edit: 'Edit / Done',
 	ai: 'AI assistant',
@@ -55,6 +56,7 @@ export const BAR_ICONS: Record<BarItem, IconName> = {
 	insert: 'plus',
 	image: 'image',
 	table: 'table',
+	link: 'link',
 	highlight: 'highlight',
 	edit: 'edit',
 	ai: 'ai',
@@ -84,6 +86,7 @@ export function defaultSpot(id: BarItem, phone: boolean, touch: boolean): BarSpo
 	switch (id) {
 		case 'image':
 		case 'table':
+		case 'link':
 			return 'menu';
 		case 'highlight':
 			return touch ? 'bar' : 'menu';

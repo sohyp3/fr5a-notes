@@ -26,6 +26,7 @@ import {
 } from '../../../../shared/paths';
 import type { Layout } from '../layout';
 import { spotOf, type BarItem, type BarPlacement, type BarSpot } from '../noteBar';
+import { resolveNoteHref } from '../linkedNotes';
 import type { Editor } from '@tiptap/core';
 import type { Vault } from '../vault/vault.svelte';
 
@@ -114,9 +115,11 @@ export interface Settings {
 	highlightColor: HighlightColor;
 	/** Accent color id (see accents.ts). */
 	accent: string;
+	/** Slides, sheets, fades (per device: off where they stutter). The OS reduce-motion switch also stops them. */
+	animations: boolean;
 	/** AI harness on. Off: its code is never loaded, no button, no Mod+J. */
 	ai: boolean;
-	/** Wiki links + graph. Off: the graph chunk is not loaded and no graph work runs. */
+	/** Links between notes + the map. Off: the map chunk is not loaded and no map work runs. */
 	linkedNotes: boolean;
 	/** Open notes in view or edit mode. */
 	openIn: OpenIn;
@@ -152,6 +155,7 @@ const DEFAULT_SETTINGS: Settings = {
 	highlights: true,
 	highlightColor: 'yellow',
 	accent: DEFAULT_ACCENT,
+	animations: true,
 	ai: true,
 	linkedNotes: false,
 	openIn: 'auto',
@@ -424,6 +428,7 @@ class AppState {
 		}
 		this.applyFonts();
 		this.applyGhost();
+		this.applyMotion();
 		this.applyAccent();
 		if (this.settings.encryption) await this.startVault();
 
@@ -922,13 +927,16 @@ class AppState {
 		this.setView('graph');
 	}
 
-	/** Follow a wiki link the way the map resolves it (hidden folders left out). */
-	async openWikiLink(target: string): Promise<void> {
+	/**
+	 * Follow a `[text](path.md)` link to a note the way the map resolves it
+	 * (hidden folders left out).
+	 */
+	async openNoteLink(target: string): Promise<void> {
 		if (!this.settings.linkedNotes) return;
-		const { resolveWikiLink } = await import('../linkedNotes');
-		const note = resolveWikiLink(this.listedNotes, target, this.activeId ?? '');
+		const from = this.activeId ?? joinPath(this.activeDir, '_');
+		const note = resolveNoteHref(this.listedNotes, target, from);
 		if (note) await this.openNote(note.id);
-		else this.notify('error', `No note named “${target.trim()}”`);
+		else this.notify('error', `No note at “${target.trim()}”`);
 	}
 
 	// --- stacked (compact) navigation ---------------------------------------
@@ -1823,6 +1831,7 @@ class AppState {
 		void platform.setState('settings', $state.snapshot(this.settings));
 		this.applyFonts();
 		this.applyGhost();
+		this.applyMotion();
 		this.applyAccent();
 	}
 
@@ -1845,6 +1854,13 @@ class AppState {
 
 	private applyGhost(): void {
 		document.documentElement.setAttribute('data-ghost', this.settings.ghost ? 'on' : 'off');
+	}
+
+	/** `html[data-motion=off]` zeroes the CSS durations; `reducedMotion()` reads it for JS ones. */
+	private applyMotion(): void {
+		const root = document.documentElement;
+		if (this.settings.animations) delete root.dataset.motion;
+		else root.dataset.motion = 'off';
 	}
 
 	// --- auto-save (debounced 500ms) --------------------------------------

@@ -11,13 +11,13 @@
 
 	const app = getAppState();
 	/**
-	 * The list only animates edits in place (a pin floats up, a save reorders, a
-	 * note arrives); a new scope — each search keystroke, a folder / tag / Trash
-	 * switch — swaps instantly. A plain timestamp, read when the animations start.
+	 * Search results swap instantly (animating each keystroke would trail the
+	 * typing); everything else animates, folder / tag / Trash switches too. A
+	 * plain timestamp, read when the animations start.
 	 */
 	let scopeChangedAt = 0;
 	$effect.pre(() => {
-		void [app.search, app.selectedFolder, app.selectedTag, app.trashOpen];
+		void app.search;
 		scopeChangedAt = performance.now();
 	});
 	const calm = () => performance.now() - scopeChangedAt < 150;

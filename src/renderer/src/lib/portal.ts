@@ -18,7 +18,12 @@ export function haptic(ms = 10): void {
 	}
 }
 
-/** Honour the OS "reduce motion" switch in JS-driven animations. */
+/**
+ * Animations are off: Settings → Appearance → Animations (`html[data-motion=off]`)
+ * or the OS "reduce motion" switch. Read at call time, so the setting applies at once.
+ */
 export function reducedMotion(): boolean {
+	if (typeof document !== 'undefined' && document.documentElement.dataset.motion === 'off')
+		return true;
 	return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 }

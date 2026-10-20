@@ -115,7 +115,7 @@
 		{/if}
 
 		{#if folders.length > 0 && app.sidebar.foldersOpen}
-			<div class="tree" transition:slide={{ duration: app.touch ? 0 : ms.pop, easing: easeOut }}>
+			<div class="tree" transition:slide={{ duration: ms.pop, easing: easeOut }}>
 				{#each folders as node (node.path)}
 					<FolderTree {node} />
 				{/each}
@@ -147,7 +147,7 @@
 			{/if}
 		</div>
 		{#if app.sidebar.tagsOpen}
-			<div class="tree" transition:slide={{ duration: app.touch ? 0 : ms.pop, easing: easeOut }}>
+			<div class="tree" transition:slide={{ duration: ms.pop, easing: easeOut }}>
 				{#if app.tags.length === 0}
 					<p class="empty">No tags yet. Add <code>#tags</code> to your notes.</p>
 				{:else}

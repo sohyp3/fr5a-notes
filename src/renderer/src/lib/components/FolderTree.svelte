@@ -180,7 +180,7 @@
 </div>
 
 {#if hasChildren && expanded}
-	<div transition:slide={{ duration: app.touch ? 0 : ms.pop, easing: easeOut }}>
+	<div transition:slide={{ duration: ms.pop, easing: easeOut }}>
 		{#each node.children as child (child.path)}
 			<Self node={child} depth={depth + 1} />
 		{/each}
