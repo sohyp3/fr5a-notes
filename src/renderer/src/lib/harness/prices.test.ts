@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { catalogModel, catalogPrice, endpointKey, pickPrices, pricesStale } from './prices';
+import {
+	catalogModel,
+	catalogPrice,
+	endpointKey,
+	opencodeModelApi,
+	pickPrices,
+	pricesStale
+} from './prices';
 
 /** A slice of models.dev's api.json. */
 const catalog = {
@@ -133,5 +140,14 @@ describe('model prices (models.dev)', () => {
 			['api.openai.com']
 		);
 		expect(catalogModel(openai, 'https://api.openai.com/v1', 'gpt-5')).toBeNull();
+	});
+
+	it('routes new OpenCode model families before the catalog cache knows them', () => {
+		const at = 'https://opencode.ai/inference/v1';
+		expect(opencodeModelApi(at, 'gpt-6-luna')).toBe('responses');
+		expect(opencodeModelApi(at, 'gemini-4-argon')).toBe('gemini');
+		expect(opencodeModelApi(at, 'claude-haiku-5-5')).toBe('messages');
+		expect(opencodeModelApi(at, 'kimi-k2.5')).toBeUndefined();
+		expect(opencodeModelApi('https://openrouter.ai/api/v1', 'gpt-6-luna')).toBeUndefined();
 	});
 });

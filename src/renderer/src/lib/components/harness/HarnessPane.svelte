@@ -76,8 +76,8 @@
 	type Choice = { key: string; provider: ProviderProfile; model: string };
 	const choiceKey = (providerId: string, model: string) => `${providerId}|${model}`;
 	/**
-	 * The model picker: the models starred in Settings → AI of providers that
-	 * are set up, plus the one this chat uses (to show it).
+	 * The model picker: every configured provider's default, extra models starred
+	 * in Settings → AI, and the model this chat already uses (to show it).
 	 */
 	const choices = $derived.by((): Choice[] => {
 		const out: Choice[] = [];
@@ -86,9 +86,11 @@
 			if (model && !out.some((c) => c.key === key)) out.push({ key, provider: p, model });
 		};
 		for (const p of ai.config.providers) {
-			if (ai.usable(p))
-				for (const f of ai.config.favorites) if (f.provider === p.id) add(p, f.model);
-			if (provider && p.id === provider.id) add(p, provider.model);
+			const current = p.id === provider?.id;
+			if (!ai.usable(p) && !current) continue;
+			add(p, p.model);
+			if (current && provider) add(p, provider.model);
+			for (const f of ai.config.favorites) if (f.provider === p.id) add(p, f.model);
 		}
 		return out;
 	});
@@ -648,9 +650,9 @@
 						</select>
 						<button
 							class="chip"
-							title="Star models in Settings → Advanced → AI & BYOK to pick them here"
+							title="Choose provider defaults and add extra models in Settings"
 							onclick={() => app.openSettings('ai')}
-							><Icon name="star" size={12} stroke={2} /> Models…</button
+							><Icon name="star" size={12} stroke={2} /> Edit models…</button
 						>
 					</div>
 					<div class="ctx-row">

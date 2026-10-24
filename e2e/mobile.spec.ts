@@ -1813,7 +1813,7 @@ const metaKeys = (page: Page) =>
 		Object.keys((window as unknown as { __meta: Record<string, string> }).__meta).sort()
 	);
 
-test('desktop: the model picker offers starred models of providers set up; models.dev prices them', async ({
+test('desktop: the model picker offers provider defaults and extra shortcuts; models.dev prices them', async ({
 	browser
 }) => {
 	const { ctx, page } = await desktopPage(browser);
@@ -1825,7 +1825,7 @@ test('desktop: the model picker offers starred models of providers set up; model
 	const harness = page.getByRole('region', { name: 'AI harness' });
 	await harness.locator('.ctx-sum').click();
 	const picker = harness.getByLabel('Model', { exact: true });
-	// Nothing starred: only the model this chat uses.
+	// Only Fake is set up, so its default is available without any starring ceremony.
 	await expect(picker.locator('option')).toHaveText(['Fake · m']);
 
 	// A key for DeepSeek and a model starred: offered now, priced from
@@ -1847,7 +1847,11 @@ test('desktop: the model picker offers starred models of providers set up; model
 	await page.getByRole('button', { name: 'Close settings' }).click();
 	await toggle.click();
 
-	await expect(picker.locator('option')).toHaveText(['DeepSeek · m', 'Fake · m']);
+	await expect(picker.locator('option')).toHaveText([
+		'DeepSeek · deepseek-chat',
+		'DeepSeek · m',
+		'Fake · m'
+	]);
 	await picker.selectOption({ label: 'DeepSeek · m' });
 	const input = harness.locator('textarea');
 	await input.fill('md?');
@@ -1870,16 +1874,17 @@ test('desktop: models starred in Settings are offered in the AI pane, per chat',
 	await opencode.locator('#key-opencode-zen').fill('oc-test');
 	await opencode.getByRole('button', { name: 'Save', exact: true }).click();
 	const ocModels = opencode.getByRole('group', { name: 'OpenCode models' });
-	await expect(ocModels.getByRole('button')).toHaveCount(3);
-	const nano = ocModels.getByRole('button', { name: /gpt-5-nano/ });
-	await expect(nano).toContainText('OpenAI Responses API');
-	await nano.click();
+	// The default is already in the picker; only extra models need shortcut controls.
+	await expect(ocModels.getByRole('button')).toHaveCount(2);
+	const nanoRow = ocModels.locator('.mrow', { hasText: 'gpt-5-nano' });
+	await expect(nanoRow).toContainText('OpenAI Responses API');
+	await nanoRow.getByRole('button').click();
 	await ocModels.getByRole('button', { name: /^m\b/ }).click();
 	await expect(ocModels.getByRole('button', { name: /^m\b/ })).toHaveAttribute(
 		'aria-pressed',
 		'true'
 	);
-	await expect(opencode.locator('.badge', { hasText: '2 starred' })).toBeVisible();
+	await expect(opencode.locator('.badge', { hasText: '2 shortcuts' })).toBeVisible();
 
 	// The local provider: filter its list, star one.
 	await page.getByRole('button', { name: 'Show Fake details' }).click();
@@ -1898,12 +1903,13 @@ test('desktop: models starred in Settings are offered in the AI pane, per chat',
 	const harness = page.getByRole('region', { name: 'AI harness' });
 	await harness.locator('.ctx-sum').click();
 	const picker = harness.getByLabel('Model', { exact: true });
-	// Starred models only, plus the one this chat uses (the default provider's own).
+	// Provider defaults are always present; stars add extra shortcuts.
 	await expect(picker.locator('option')).toHaveText([
+		'OpenCode · big-pickle',
 		'OpenCode · gpt-5-nano',
 		'OpenCode · m',
-		'Fake · gpt-5-nano',
-		'Fake · m'
+		'Fake · m',
+		'Fake · gpt-5-nano'
 	]);
 
 	// This chat runs on OpenCode's m: the new endpoint, with a chat id and the app named.

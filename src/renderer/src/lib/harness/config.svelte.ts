@@ -5,6 +5,7 @@ import {
 	catalogModel,
 	catalogPrice,
 	endpointKey,
+	opencodeModelApi,
 	pickPrices,
 	pricesStale,
 	type PriceCache
@@ -183,7 +184,13 @@ class AiSettings {
 	modelInfo(providerId: string, model: string): ModelInfo {
 		const p = this.config.providers.find((x) => x.id === providerId);
 		const known = p ? catalogModel(this.prices, p.baseUrl, model) : null;
-		return { ...known, ...this.listed(providerId, model), id: model };
+		const fallbackApi = p ? opencodeModelApi(p.baseUrl, model) : undefined;
+		return {
+			...(fallbackApi ? { api: fallbackApi } : {}),
+			...known,
+			...this.listed(providerId, model),
+			id: model
+		};
 	}
 
 	/** Every model the provider lists, with what's known about each. */

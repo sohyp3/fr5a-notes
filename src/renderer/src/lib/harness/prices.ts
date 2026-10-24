@@ -25,6 +25,19 @@ export interface PriceCache {
 
 export type CatalogModel = Omit<ModelInfo, 'id' | 'price'>;
 
+/**
+ * OpenCode exposes model families through their native APIs. Keep this small
+ * fallback independent of the catalog cache: a newly released model can show
+ * up in `/models` before this device refreshes models.dev.
+ */
+export function opencodeModelApi(baseUrl: string, model: string): OtherApi | undefined {
+	if (!/^\s*https?:\/\/(?:www\.)?opencode\.ai\//i.test(baseUrl)) return undefined;
+	if (/^gpt-/i.test(model)) return 'responses';
+	if (/^claude-/i.test(model)) return 'messages';
+	if (/^gemini-/i.test(model)) return 'gemini';
+	return undefined;
+}
+
 /** `https://opencode.ai/inference/v1/` → `opencode.ai/inference`: host + path, no scheme, end slash or version. */
 export function endpointKey(url: string): string {
 	return url

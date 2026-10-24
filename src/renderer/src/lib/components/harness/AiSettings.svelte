@@ -34,7 +34,7 @@
 	import { folderPrivacy } from '../../harness/privacy';
 	import { cleanFolder } from '../../../../../shared/paths';
 	import { reducedMotion } from '../../portal';
-	import { catalogModel, catalogPrice } from '../../harness/prices';
+	import { catalogModel, catalogPrice, opencodeModelApi } from '../../harness/prices';
 	import { formatTokens } from '../../harness/usage';
 
 	const app = getAppState();
@@ -212,14 +212,14 @@
 
 	let modelQuery = $state<Record<string, string>>({});
 
-	/** Starred first, then the provider's own model, then by id; filtered by name or id. */
+	/** Default first, then starred models, then by id; filtered by name or id. */
 	function modelRows(p: ProviderProfile, listed: ModelInfo[], query: string): ModelInfo[] {
 		// Starred models the list no longer has stay, so they can be unstarred.
 		const gone = cfg.favorites
 			.filter((f) => f.provider === p.id && !listed.some((m) => m.id === f.model))
 			.map((f) => ai.modelInfo(p.id, f.model));
 		const q = query.trim().toLowerCase();
-		const rank = (m: ModelInfo) => (ai.isFavorite(p.id, m.id) ? 0 : m.id === p.model ? 1 : 2);
+		const rank = (m: ModelInfo) => (m.id === p.model ? 0 : ai.isFavorite(p.id, m.id) ? 1 : 2);
 		return [...gone, ...listed]
 			.filter((m) => !q || m.id.toLowerCase().includes(q) || m.name?.toLowerCase().includes(q))
 			.sort((a, b) => rank(a) - rank(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -332,7 +332,9 @@
 		try {
 			const key = draft.apiKey.trim() || (await ai.apiKey(draft.id));
 			const profile = profileOf(draft);
-			const api = catalogModel(ai.prices, profile.baseUrl, profile.model)?.api;
+			const api =
+				catalogModel(ai.prices, profile.baseUrl, profile.model)?.api ??
+				opencodeModelApi(profile.baseUrl, profile.model);
 			const res = await chatCompletion(platform, {
 				profile: { ...profile, tools: false, ...(api ? { api } : {}) },
 				apiKey: key,
@@ -433,7 +435,9 @@
 						</span>
 					</label>
 					<span class="badges">
-						{#if starred}<span class="badge" title="Starred models">{starred} starred</span>{/if}
+						{#if starred}<span class="badge" title="Extra models in the chat picker"
+								>{starred} {starred === 1 ? 'shortcut' : 'shortcuts'}</span
+							>{/if}
 						{#if p.local}<span class="badge">local</span>{/if}
 						{#if !p.local && !ai.keys[p.id]}<span class="badge warn">no key</span>{/if}
 					</span>
@@ -514,7 +518,7 @@
 								<div class="mhead">
 									<span class="small">All models</span>
 									<span class="desc"
-										>Star the ones to pick from in the AI pane (kept on this device).</span
+										>Your default is always in the chat picker. Star any extra models you use often.</span
 									>
 								</div>
 								<input
@@ -527,19 +531,31 @@
 								<div class="models" role="group" aria-label="{p.name} models">
 									{#each rows as m (m.id)}
 										{@const fav = ai.isFavorite(p.id, m.id)}
-										<button
-											class={['mrow', { on: fav }]}
-											aria-pressed={fav}
-											title={fav ? 'Unstar' : 'Star: offer it in the AI pane'}
-											onclick={() => ai.toggleFavorite(p.id, m.id)}
-										>
-											<Icon name="star" size={15} />
+										<div class={['mrow', { on: fav }]}>
 											<span class="mname">
 												<span class="mid">{m.name ?? m.id}</span>
 												{#if modelMeta(m)}<span class="desc">{modelMeta(m)}</span>{/if}
 											</span>
-											{#if m.id === p.model}<span class="badge">default</span>{/if}
-										</button>
+											{#if m.id === p.model}
+												<span class="badge">default</span>
+												<span class="shortcut">Always in picker</span>
+											{:else}
+												<button
+													class="shortcut-action"
+													aria-pressed={fav}
+													aria-label="{m.name ?? m.id}: {fav
+														? 'remove'
+														: 'add'} chat picker shortcut"
+													title={fav
+														? 'Remove shortcut from the chat picker'
+														: 'Add shortcut to the chat picker'}
+													onclick={() => ai.toggleFavorite(p.id, m.id)}
+												>
+													<Icon name="star" size={15} />
+													<span>{fav ? 'In picker' : 'Add'}</span>
+												</button>
+											{/if}
+										</div>
 									{:else}
 										<p class="desc pad">No model matches.</p>
 									{/each}
@@ -1270,20 +1286,40 @@
 		min-height: 36px;
 		padding: 4px 8px;
 		border-radius: 7px;
-		text-align: start;
 		color: var(--text-main);
 	}
 	.mrow:hover {
 		background: var(--bg-hover);
 	}
-	.mrow :global(.icon) {
+	.shortcut-action {
+		flex: 0 0 auto;
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		min-height: 32px;
+		padding: 0 7px;
+		border-radius: 7px;
+		color: var(--text-faint);
+		font-size: 11.5px;
+	}
+	.shortcut-action:hover {
+		background: var(--bg-active);
+		color: var(--text-main);
+	}
+	.shortcut-action :global(.icon) {
 		color: var(--text-faint);
 	}
-	.mrow.on :global(.icon) {
+	.mrow.on .shortcut-action {
+		color: var(--accent-ink);
+	}
+	.mrow.on .shortcut-action :global(.icon) {
 		color: var(--accent-ink);
 		fill: currentColor;
 	}
 	:global(html[data-touch]) .mrow {
+		min-height: 44px;
+	}
+	:global(html[data-touch]) .shortcut-action {
 		min-height: 44px;
 	}
 	.mname {
@@ -1299,6 +1335,11 @@
 		white-space: nowrap;
 	}
 	.mname .desc {
+		font-size: 11.5px;
+	}
+	.shortcut {
+		flex: 0 0 auto;
+		color: var(--text-faint);
 		font-size: 11.5px;
 	}
 	.models .pad {
