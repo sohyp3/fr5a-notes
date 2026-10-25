@@ -2039,6 +2039,7 @@ class AppState {
 	}
 
 	/** Other writers' pending saves (an open mind map), flushed with the note's on leave. */
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- never read reactively
 	private leaveHooks = new Set<() => Promise<void>>();
 
 	/** Run `flush` too before the window closes / the app quits or pauses. Returns the unregister. */
