@@ -218,13 +218,12 @@ describe('pure helpers', () => {
 		});
 	});
 
-	it('buildMeta detects a mind map and excludes its frontmatter from ordinary metadata', () => {
+	it('buildMeta keeps YAML frontmatter out of ordinary metadata', () => {
 		const raw =
-			'---\nmindmap:\n  version: 1\n  root: r\n  nodes:\n    - id: r\n      label: Config title\n      expand: { tags: [private/yaml] }\n---\n# Visible map\n\nBody #public\n';
+			'---\nconfig:\n  label: Config title\n  tags: [private/yaml]\n---\n# Visible note\n\nBody #public\n';
 		expect(buildMeta('map.md', '', raw, 0)).toMatchObject({
-			title: 'Visible map',
-			tags: ['public'],
-			mindMapVersion: 1
+			title: 'Visible note',
+			tags: ['public']
 		});
 	});
 });

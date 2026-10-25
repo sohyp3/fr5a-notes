@@ -7,7 +7,12 @@ describe('lightweight frontmatter boundaries', () => {
 		'---\nNormal prose\n---\n# Heading',
 		'---\n\n---\nBody',
 		'---\n- first item\n- second item\n---\nBody',
-		'---\nhttps://example.com\n---\nBody'
+		'---\nhttps://example.com\n---\nBody',
+		// A rule, a heading (a YAML comment to a YAML reader), then prose.
+		'---\n# Title\n\nSome prose\nstatus: done\n---\nBody',
+		// Key-looking first line, then prose: still Markdown.
+		'---\nNote: remember this\nand then more prose here\n---\nBody',
+		'---\nstatus: draft\nThe draft talks about things.\n---\n'
 	])('keeps ordinary rule-delimited Markdown intact: %s', (source) => {
 		expect(splitFrontmatter(source)).toBeNull();
 		expect(markdownBody(source)).toBe(source);
@@ -30,15 +35,33 @@ describe('lightweight frontmatter boundaries', () => {
 		});
 	});
 
+	it('takes Obsidian-style properties with any later key', () => {
+		const yaml =
+			'title: "Q3: plan"\naliases:\n  - Plan\nCreated (UTC): 2024-01-01T10:00\n$schema: x\nempty:\ntags: [a, b]\n';
+		expect(splitFrontmatter(`---\n${yaml}---\n# Body`)?.yaml).toBe(yaml);
+	});
+
+	it('takes nested maps and top-level list items under a key', () => {
+		const yaml = 'owner:\n  name: me\ntags:\n- one\n- two\n';
+		expect(splitFrontmatter(`---\n${yaml}---\nBody`)?.yaml).toBe(yaml);
+	});
+
+	it('closes at the first unindented rule, not at a --- inside a block scalar', () => {
+		const yaml = 'notes: |\n  ---\n  still the scalar\n  ---\nafter: 1\n';
+		const parts = splitFrontmatter(`---\n${yaml}---\n---\nBody after a rule`);
+		expect(parts?.yaml).toBe(yaml);
+		expect(parts?.body).toBe('---\nBody after a rule');
+	});
+
 	it('preserves BOM and CRLF while editing the body', () => {
-		const prefix = '\ufeff---\r\n"mindmap":\r\n  version: 1\r\n---\r\n';
+		const prefix = '\ufeff---\r\n"config":\r\n  version: 1\r\n---\r\n';
 		expect(splitFrontmatter(`${prefix}# Body`)?.lineEnding).toBe('\r\n');
 		expect(editMarkdownBody(`${prefix}# Body`, () => '# New')).toBe(`${prefix}# New`);
 	});
 
-	it('retains malformed declared map boundaries for parser diagnostics', () => {
-		expect(splitFrontmatter('---\nmindmap: [\n---\n# Body')).toMatchObject({
-			yaml: 'mindmap: [\n',
+	it('keeps the boundaries of malformed YAML that opens with a key', () => {
+		expect(splitFrontmatter('---\nconfig: [\n---\n# Body')).toMatchObject({
+			yaml: 'config: [\n',
 			body: '# Body'
 		});
 	});

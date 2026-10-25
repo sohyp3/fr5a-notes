@@ -12,8 +12,8 @@ describe('splitHeader', () => {
 		});
 	});
 
-	it('keeps map YAML encrypted while leaving lock metadata available to the host', () => {
-		const plain = '---\nmindmap:\n  version: 1\n---\n<!-- locked: true -->\n# Map\n';
+	it('keeps YAML frontmatter encrypted while leaving lock metadata available to the host', () => {
+		const plain = '---\nconfig:\n  version: 1\n---\n<!-- locked: true -->\n# Note\n';
 		const { head, body } = splitHeader(plain);
 		expect(head).toBe('<!-- locked: true -->\n');
 		expect(body.startsWith('---\n')).toBe(true);

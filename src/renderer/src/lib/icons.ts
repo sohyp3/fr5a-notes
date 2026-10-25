@@ -77,6 +77,12 @@ import TextCursorInput from '@lucide/svelte/icons/text-cursor-input';
 import Trash2 from '@lucide/svelte/icons/trash-2';
 import Undo2 from '@lucide/svelte/icons/undo-2';
 import X from '@lucide/svelte/icons/x';
+import Workflow from '@lucide/svelte/icons/workflow';
+import StickyNote from '@lucide/svelte/icons/sticky-note';
+import Scan from '@lucide/svelte/icons/scan';
+import Redo2 from '@lucide/svelte/icons/redo-2';
+import Palette from '@lucide/svelte/icons/palette';
+import Magnet from '@lucide/svelte/icons/magnet';
 
 export const ICONS = {
 	// note / folder actions
@@ -99,6 +105,12 @@ export const ICONS = {
 	collapse: ChevronsDownUp,
 	search: Search,
 	graph: Network,
+	// mind maps
+	concept: StickyNote,
+	snap: Magnet,
+	tidy: Workflow,
+	fit: Scan,
+	palette: Palette,
 	minus: Minus,
 	// sync / app chrome
 	pull: ArrowDownToLine,
@@ -137,6 +149,7 @@ export const ICONS = {
 	indent: ListIndentIncrease,
 	tag: Hash,
 	undo: Undo2,
+	redo: Redo2,
 	// AI
 	ai: Sparkles,
 	chats: MessagesSquare,

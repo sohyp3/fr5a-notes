@@ -2,11 +2,11 @@
 	import { fade } from 'svelte/transition';
 	import { ms } from '../motion';
 	import { getAppState } from '../stores/app.svelte';
-	import { SHORTCUTS, VIM_SHORTCUTS } from '../shortcuts';
+	import { SHORTCUTS, VIM_SHORTCUTS, shortcutOn } from '../shortcuts';
 	import Icon from './Icon.svelte';
 
 	const app = getAppState();
-	const shortcuts = $derived(SHORTCUTS.filter((sc) => !sc.feature || app.settings[sc.feature]));
+	const shortcuts = $derived(SHORTCUTS.filter((sc) => shortcutOn(sc, app.settings)));
 	let sheetEl = $state<HTMLDivElement | null>(null);
 	// Move focus into the dialog while it is open, and hand it back where it
 	// came from when it closes, so typing in the editor carries on.

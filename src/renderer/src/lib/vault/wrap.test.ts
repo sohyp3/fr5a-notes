@@ -40,8 +40,7 @@ function setup(files: Record<string, string>) {
 		pinned: false,
 		locked: false,
 		aiLocal: false,
-		encrypted: isEncryptedNote(files[id]),
-		mindMapVersion: null
+		encrypted: isEncryptedNote(files[id])
 	});
 	const committed: Record<string, string> = { ...files };
 	const host = {
@@ -168,25 +167,10 @@ describe('wrapNotes', () => {
 		expect((await t.api.listNotes()).find((n) => n.id === 's.md')?.title).toBe('s');
 	});
 
-	it('discovers encrypted mind maps only while the vault is unlocked', async () => {
-		const plain =
-			'---\nmindmap:\n  version: 1\n  root: r\n  nodes:\n    - { id: r, label: Root }\n---\n# Private map\n';
-		const t = setup({ 'private-map.md': enc(plain) });
-		expect((await t.api.listNotes())[0]).toMatchObject({
-			title: 'Private map',
-			mindMapVersion: 1
-		});
-		t.lock();
-		expect((await t.api.listNotes())[0].mindMapVersion).toBeNull();
-	});
-
-	it('keeps malformed encrypted maps discoverable while unlocked', async () => {
-		const t = setup({
-			'broken-map.md': enc('---\nmindmap:\n  version: broken\n  nodes: [\n---\n# Broken map\n')
-		});
-		expect((await t.api.listNotes())[0].mindMapVersion).toBe(-1);
-		t.lock();
-		expect((await t.api.listNotes())[0].mindMapVersion).toBeNull();
+	it('keeps decrypted frontmatter out of the title and tags', async () => {
+		const plain = '---\nconfig:\n  tags: [secret]\n---\n# Private note\n\nbody #seen\n';
+		const t = setup({ 'private.md': enc(plain) });
+		expect((await t.api.listNotes())[0]).toMatchObject({ title: 'Private note', tags: ['seen'] });
 	});
 
 	it('decrypts git diffs only while unlocked', async () => {

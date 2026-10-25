@@ -4,7 +4,6 @@ import { isEncryptedNote, splitHeader } from '../../../../shared/encrypted';
 import { noteSnippet } from '../../../../shared/snippet';
 import { buildTagTree, parseTags } from '../../../../main/tags';
 import { markdownBody } from '../../../../shared/frontmatter';
-import { mindMapVersion } from '../../../../shared/mindMapMetadata';
 import { isAppNotePath } from '../../../../shared/paths';
 import type { StorageRewrite } from '../../../../shared/storageMigration';
 
@@ -27,18 +26,14 @@ export interface NoteCrypt {
 }
 
 /** Note-list fields of a decrypted note (same rules as the indexers). */
-function summarize(
-	plain: string,
-	fallback: string
-): Pick<NoteMeta, 'title' | 'snippet' | 'tags' | 'mindMapVersion'> {
+function summarize(plain: string, fallback: string): Pick<NoteMeta, 'title' | 'snippet' | 'tags'> {
 	const source = splitHeader(plain).body;
 	const body = markdownBody(source);
 	const first = body.split('\n').find((l) => l.trim());
 	return {
 		title: first?.trim().replace(/^#{1,6}\s*/, '') || fallback,
 		snippet: noteSnippet(body),
-		tags: parseTags(body),
-		mindMapVersion: mindMapVersion(source)
+		tags: parseTags(body)
 	};
 }
 
@@ -73,13 +68,7 @@ export function wrapNotes(host: PlatformApi, crypt: NoteCrypt) {
 						return n; // another key, or gone meanwhile
 					}
 				}
-				return {
-					...n,
-					title: t.title,
-					snippet: t.snippet,
-					tags: t.tags,
-					mindMapVersion: t.mindMapVersion
-				};
+				return { ...n, title: t.title, snippet: t.snippet, tags: t.tags };
 			})
 		);
 	}

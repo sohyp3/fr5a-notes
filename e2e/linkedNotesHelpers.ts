@@ -28,14 +28,13 @@ export async function installLinkedApi(page: Page): Promise<void> {
 	await page.goto('/');
 }
 
-export async function enable(page: Page): Promise<void> {
+/** Settings → Links & maps: switch a feature on ("Note links & graph" or "Mind maps"). */
+export async function enable(page: Page, feature = 'Note links & graph'): Promise<void> {
 	await page.getByRole('button', { name: 'Settings', exact: true }).click();
 	await page.getByRole('button', { name: /Links & maps/ }).click();
-	await page.getByRole('switch', { name: 'Enable links and maps' }).click();
-	await expect(page.getByRole('switch', { name: 'Enable links and maps' })).toHaveAttribute(
-		'aria-checked',
-		'true'
-	);
+	const toggle = page.getByRole('switch', { name: feature, exact: true });
+	await toggle.click();
+	await expect(toggle).toHaveAttribute('aria-checked', 'true');
 }
 
 export async function desktop(browser: Browser) {

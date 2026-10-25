@@ -18,7 +18,6 @@ import {
 import { noteSnippet } from '../shared/snippet';
 import { isEncryptedNote } from '../shared/encrypted';
 import { markdownBody } from '../shared/frontmatter';
-import { mindMapVersion } from '../shared/mindMapMetadata';
 import type { StoragePlan, StorageResult } from '../shared/storageMigration';
 import { applyStorageMigration } from './storageMigration';
 
@@ -76,8 +75,7 @@ export class FileService {
 				pinned,
 				locked,
 				aiLocal,
-				encrypted: true,
-				mindMapVersion: null
+				encrypted: true
 			};
 		}
 		// Strip hidden metadata comments (dir / pinned / locked) so they never
@@ -111,8 +109,7 @@ export class FileService {
 			pinned,
 			locked,
 			aiLocal,
-			encrypted: false,
-			mindMapVersion: mindMapVersion(raw)
+			encrypted: false
 		};
 	}
 

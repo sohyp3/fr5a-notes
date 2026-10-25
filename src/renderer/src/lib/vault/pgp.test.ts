@@ -66,12 +66,12 @@ describe('notes', () => {
 		expect(await decryptNote('# plain', priv)).toBe('# plain');
 	});
 
-	it('round-trips map frontmatter with clear lock metadata and encrypted structure', async () => {
+	it('round-trips frontmatter with clear lock metadata and an encrypted body', async () => {
 		const plain =
-			'---\nmindmap:\n  version: 1\n  root: r\n  nodes: [{id: r, label: Private}]\n---\n<!-- locked: true -->\n# Private map\n';
+			'---\nconfig:\n  version: 1\n  label: Private\n---\n<!-- locked: true -->\n# Private note\n';
 		const file = await encryptNote(plain, pub);
 		expect(file.startsWith('<!-- locked: true -->\n-----BEGIN PGP MESSAGE-----')).toBe(true);
-		expect(file).not.toContain('mindmap:');
+		expect(file).not.toContain('config:');
 		expect(await decryptNote(file, priv)).toBe(plain);
 	});
 

@@ -13,8 +13,7 @@ function note(id: string): NoteMeta {
 		pinned: false,
 		locked: false,
 		aiLocal: false,
-		encrypted: false,
-		mindMapVersion: null
+		encrypted: false
 	};
 }
 

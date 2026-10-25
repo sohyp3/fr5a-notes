@@ -48,7 +48,7 @@
 				<div class="actions">
 					<!-- The safe choice has focus first. -->
 					<button {@attach (b) => b.focus()} class="btn" onclick={() => app.answerConfirm(false)}
-						>Cancel</button
+						>{req.cancel ?? 'Cancel'}</button
 					>
 					<button
 						class={['btn primary', { danger: req.danger }]}

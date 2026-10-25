@@ -6,11 +6,42 @@ export interface FrontmatterParts {
 	lineEnding: '\n' | '\r\n';
 }
 
+/** A top-level `key:` line (plain or quoted key, optionally opening a flow map). */
+const KEY_LINE =
+	/^(?:\{[ \t]*)?(?:[\p{L}\p{N}_][\p{L}\p{N}_. -]*[ \t]*:(?:[ \t]|$)|(?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')[ \t]*:)/u;
+
 /**
- * Treat an opening rule as metadata only when its first non-comment content is
- * a mapping key. This keeps ordinary rule-delimited Markdown intact without
+ * A later `key:` line: any plain key (`Created (UTC):`, `$schema:`), since the
+ * first line already showed this is metadata. Prose lines without a `key: `
+ * still fail.
+ */
+const LATER_KEY = /^[^\s#\-?:,[\]{}|>][^:]*:(?:[ \t]|$)/u;
+
+/**
+ * Whether the text between two rules reads as YAML metadata: it opens with a
+ * mapping key, and every other line is a key, a comment, an indented line
+ * (nested values, block scalars) or a `- item` of the key above. A Markdown
+ * note that merely starts with a `---` rule fails on its first prose line.
+ */
+function isMetadata(yaml: string): boolean {
+	const lines = yaml.split(/\r?\n/).filter((line) => line.trim() && !/^\s*#/.test(line));
+	if (!lines.length || !KEY_LINE.test(lines[0])) return false;
+	// A flow map (`{ … }` on one or more lines) is taken as a whole.
+	if (/^\{/.test(lines[0])) return true;
+	return lines.every(
+		(line) =>
+			KEY_LINE.test(line) ||
+			LATER_KEY.test(line) ||
+			/^[ \t]/.test(line) ||
+			/^-(?:[ \t]|$)/.test(line)
+	);
+}
+
+/**
+ * Treat an opening rule as metadata only when the block reads as YAML (see
+ * `isMetadata`). This keeps ordinary rule-delimited Markdown intact without
  * loading YAML in the editor or indexers. A note beginning with `key: value`
- * between rules is inherently ambiguous and is treated as frontmatter.
+ * lines between rules is inherently ambiguous and is treated as frontmatter.
  */
 export function splitFrontmatter(source: string): FrontmatterParts | null {
 	const bom = source.startsWith('\ufeff') ? '\ufeff' : '';
@@ -23,14 +54,7 @@ export function splitFrontmatter(source: string): FrontmatterParts | null {
 	if (!match) return null;
 	const closeStart = firstEnd + 1 + match.index;
 	const yaml = source.slice(firstEnd + 1, closeStart);
-	const firstContent = yaml.split(/\r?\n/).find((line) => line.trim() && !/^\s*#/.test(line));
-	if (
-		!firstContent ||
-		!/^(?:\{[ \t]*)?(?:[\p{L}\p{N}_][\p{L}\p{N}_. -]*[ \t]*:(?:[ \t]|$)|(?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')[ \t]*:)/u.test(
-			firstContent
-		)
-	)
-		return null;
+	if (!isMetadata(yaml)) return null;
 	const afterMarker = closeStart + match[0].length;
 	const afterLine = source.startsWith('\r\n', afterMarker)
 		? afterMarker + 2

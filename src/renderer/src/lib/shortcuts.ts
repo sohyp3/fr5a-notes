@@ -6,8 +6,16 @@
 export interface Shortcut {
 	keys: string[];
 	desc: string;
-	/** Listed only while this setting is on. */
-	feature?: 'encryption' | 'highlights' | 'tabs' | 'linkedNotes';
+	/** Listed only while this setting is on (any of them, for a list). */
+	feature?: Feature | Feature[];
+}
+
+type Feature = 'encryption' | 'highlights' | 'tabs' | 'linkedNotes' | 'mindMaps';
+
+/** The shortcut's feature is on (or it has none). */
+export function shortcutOn(sc: Shortcut, settings: Record<Feature, boolean>): boolean {
+	if (!sc.feature) return true;
+	return (Array.isArray(sc.feature) ? sc.feature : [sc.feature]).some((f) => settings[f]);
 }
 
 export const SHORTCUTS: Shortcut[] = [
@@ -17,7 +25,11 @@ export const SHORTCUTS: Shortcut[] = [
 	{ keys: ['Ctrl', 'Tab'], desc: 'Next tab  ·  ⇧ previous', feature: 'tabs' },
 	{ keys: ['Mod', '\\'], desc: 'Toggle Zen mode' },
 	{ keys: ['Mod', 'J'], desc: 'Toggle the AI harness pane' },
-	{ keys: ['Mod', 'G'], desc: 'Open mind maps', feature: 'linkedNotes' },
+	{
+		keys: ['Mod', 'G'],
+		desc: 'Open the graph / reopen the last mind map',
+		feature: ['linkedNotes', 'mindMaps']
+	},
 	{ keys: ['Mod', 'F'], desc: 'Find in the open note' },
 	{ keys: ['Mod', '⇧', 'L'], desc: 'Show / hide the note list' },
 	{ keys: ['Mod', '⇧', 'E'], desc: 'View / edit mode for the open note' },

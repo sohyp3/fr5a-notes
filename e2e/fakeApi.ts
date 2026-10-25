@@ -1,10 +1,8 @@
-import { mindMapVersion } from '../src/shared/mindMapMetadata';
-
 /**
  * In-memory stand-in for the Electron preload bridge (`window.api`), installed
  * before the app boots. Runs in the page, so it must be self-contained.
  */
-function fakeApi(detectMindMapVersion: typeof mindMapVersion): void {
+function fakeApi(): void {
 	const files: Record<string, string> = {
 		'Work/plan.md': '# Plan\n\nfirst line',
 		'hello.md': '# Hello\n\nworld'
@@ -32,8 +30,7 @@ function fakeApi(detectMindMapVersion: typeof mindMapVersion): void {
 			pinned: false,
 			locked: false,
 			aiLocal: /^<!-- ai: local -->$/m.test(raw),
-			encrypted,
-			mindMapVersion: detectMindMapVersion(raw)
+			encrypted
 		};
 	};
 	const folders = new Set(['Work']);
@@ -471,4 +468,4 @@ function fakeApi(detectMindMapVersion: typeof mindMapVersion): void {
 }
 
 // Playwright serializes init scripts: include the production detector in the page.
-export const installFakeApi = `(${fakeApi.toString()})(${mindMapVersion.toString()});`;
+export const installFakeApi = `(${fakeApi.toString()})();`;

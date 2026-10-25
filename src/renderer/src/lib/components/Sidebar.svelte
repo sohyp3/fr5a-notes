@@ -162,15 +162,16 @@
 	</div>
 
 	<footer class="foot">
-		{#if app.settings.linkedNotes}
+		{#if app.graphEnabled}
+			{@const label = app.settings.mindMaps ? 'Mind maps' : 'Graph'}
 			<button
 				class={['settings-btn', { selected: app.view === 'graph' }]}
 				aria-current={app.view === 'graph' ? 'true' : undefined}
-				title="Mind maps (Mod+G)"
+				title={`${label} (Mod+G)`}
 				onclick={() => app.openGraph()}
 			>
 				<Icon name="graph" size={16} />
-				<span>Mind maps</span>
+				<span>{label}</span>
 			</button>
 		{/if}
 		{#if app.chatNotes.length}
