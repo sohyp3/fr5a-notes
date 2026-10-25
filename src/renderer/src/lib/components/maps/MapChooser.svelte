@@ -224,11 +224,11 @@
 	.close,
 	.more {
 		flex: none;
-		width: 36px;
-		height: 36px;
+		width: var(--btn-h);
+		height: var(--btn-h);
 		display: grid;
 		place-items: center;
-		border-radius: 9px;
+		border-radius: var(--btn-radius);
 		color: var(--text-muted);
 		transition:
 			background var(--dur-fast) ease,
@@ -245,12 +245,12 @@
 		gap: 10px;
 	}
 	.actions button {
-		min-height: 36px;
+		min-height: var(--btn-h);
 		padding: 0 15px;
 		display: flex;
 		align-items: center;
 		gap: 8px;
-		border-radius: 9px;
+		border-radius: var(--btn-radius);
 		font-weight: 600;
 		transition: transform var(--dur-fast) ease;
 	}
@@ -260,6 +260,14 @@
 	.actions .primary {
 		background: var(--accent);
 		color: var(--on-accent);
+		transition:
+			filter var(--dur-fast) ease,
+			transform var(--dur-fast) ease;
+	}
+	@media (hover: hover) {
+		.actions .primary:hover {
+			filter: brightness(1.08);
+		}
 	}
 	.map-list {
 		max-width: 780px;
@@ -336,7 +344,7 @@
 		}
 	}
 	:global([data-touch]) .chooser .actions button {
-		min-height: 50px;
+		min-height: var(--btn-h-sheet);
 	}
 	:global([data-touch]) .close,
 	:global([data-touch]) .more {

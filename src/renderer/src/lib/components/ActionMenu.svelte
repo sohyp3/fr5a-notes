@@ -255,7 +255,7 @@
 	.item:focus-visible {
 		background: var(--bg-hover);
 		outline: none;
-		box-shadow: inset 0 0 0 1.5px var(--accent);
+		box-shadow: inset 0 0 0 2px var(--focus-ring);
 	}
 	.item:active:not(:disabled) {
 		background: var(--bg-active);
@@ -318,7 +318,7 @@
 		max-height: 80vh;
 		overflow-y: auto;
 		padding: 6px 10px calc(10px + env(safe-area-inset-bottom, 0px));
-		border-radius: 18px 18px 0 0;
+		border-radius: var(--sheet-radius) var(--sheet-radius) 0 0;
 		background: var(--bg-elevated);
 		box-shadow: 0 -10px 34px rgba(0, 0, 0, 0.2);
 	}

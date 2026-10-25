@@ -481,9 +481,9 @@
 						<section class="group">
 							<h3>Note links &amp; graph</h3>
 							<p class="prose">
-								A link to a note is plain Markdown, <code>[text](folder/note.md)</code>. Insert → Link
-								types it and suggests notes as you fill in the path. A tap follows a link in view
-								mode, Mod+click while editing.
+								A link to a note is plain Markdown, <code>[text](folder/note.md)</code>. Insert →
+								Link types it and suggests notes as you fill in the path. A tap follows a link in
+								view mode, Mod+click while editing.
 							</p>
 							<div class="row">
 								<div class="label">
@@ -723,9 +723,9 @@
 	.icon-btn {
 		display: grid;
 		place-items: center;
-		width: 34px;
-		height: 34px;
-		border-radius: 9px;
+		width: var(--btn-h);
+		height: var(--btn-h);
+		border-radius: var(--btn-radius);
 		color: var(--text-muted);
 		transition: background var(--dur-fast) ease;
 	}
@@ -887,7 +887,7 @@
 		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 	}
 	.advanced-tab:focus-visible {
-		outline: 2px solid var(--accent);
+		outline: 2px solid var(--focus-ring);
 		outline-offset: 1px;
 	}
 	:global(html[data-touch]) .advanced-tab {
@@ -981,9 +981,9 @@
 	}
 	.btn {
 		flex: 0 0 auto;
-		min-height: 32px;
+		min-height: var(--btn-h-dense);
 		padding: 0 14px;
-		border-radius: 8px;
+		border-radius: var(--btn-radius);
 		background: var(--bg-hover);
 		color: var(--text);
 		font-size: 13px;
@@ -993,7 +993,7 @@
 			transform var(--dur-fast) ease;
 	}
 	:global(html[data-touch]) .btn {
-		min-height: 44px;
+		min-height: var(--tap);
 	}
 	.btn:hover {
 		background: var(--bg-active);
@@ -1003,13 +1003,13 @@
 	}
 	select {
 		flex: 0 0 auto;
-		min-height: 32px;
+		min-height: var(--btn-h-dense);
 		font-family: inherit;
 		font-size: 13px;
 		color: var(--text);
 		background: var(--bg-hover);
 		border: none;
-		border-radius: 8px;
+		border-radius: var(--btn-radius);
 		padding: 0 10px;
 		cursor: pointer;
 	}
@@ -1018,7 +1018,7 @@
 		font-size: 15px;
 	}
 	select:focus {
-		outline: 2px solid var(--accent-soft);
+		outline: 2px solid var(--focus-ring);
 	}
 	.segmented {
 		flex: 0 0 auto;
@@ -1042,6 +1042,14 @@
 	:global(html[data-touch]) .seg {
 		min-height: 40px;
 		padding: 0 18px;
+	}
+	@media (hover: hover) {
+		.seg:hover:not(.on) {
+			color: var(--text);
+		}
+		.toggle:hover {
+			filter: brightness(0.97);
+		}
 	}
 	.seg.on {
 		background: var(--bg-editor);

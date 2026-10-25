@@ -48,13 +48,13 @@
 		z-index: 4;
 		left: 18px;
 		bottom: 18px;
-		min-height: 36px;
+		min-height: var(--btn-h);
 		padding: 0 13px;
 		display: flex;
 		align-items: center;
 		gap: 6px;
 		border: 1px solid var(--rule);
-		border-radius: 9px;
+		border-radius: var(--btn-radius);
 		background: var(--bg-editor);
 		color: var(--text-muted);
 		box-shadow: var(--shadow-pane);
@@ -73,6 +73,6 @@
 		transform: scale(var(--press));
 	}
 	:global([data-touch]) .chooser-back {
-		min-height: 50px;
+		min-height: var(--btn-h-sheet);
 	}
 </style>

@@ -795,7 +795,7 @@
 		min-height: 44px;
 	}
 	.bar input:focus {
-		outline: 2px solid var(--accent);
+		outline: 2px solid var(--focus-ring);
 		outline-offset: -1px;
 	}
 	.bar-acts {
@@ -830,16 +830,19 @@
 	}
 	.btn {
 		flex: 0 0 auto;
-		min-height: 32px;
+		min-height: var(--btn-h-dense);
 		padding: 0 14px;
-		border-radius: 8px;
+		border-radius: var(--btn-radius);
 		background: var(--bg-hover);
 		font-size: 13px;
 		font-weight: 600;
-		transition: background var(--dur-fast) ease;
+		transition:
+			background var(--dur-fast) ease,
+			filter var(--dur-fast) ease,
+			transform var(--dur-fast) ease;
 	}
 	:global(html[data-touch]) .btn {
-		min-height: 44px;
+		min-height: var(--tap);
 	}
 	.btn:hover,
 	.btn:active {
@@ -852,6 +855,9 @@
 	.btn.primary:hover,
 	.btn.primary:active {
 		filter: brightness(1.08);
+	}
+	.btn:active:not(:disabled) {
+		transform: scale(var(--press));
 	}
 	.btn.danger {
 		color: var(--danger);
@@ -880,6 +886,9 @@
 		font-weight: 600;
 		padding: 0;
 		font-size: inherit;
+	}
+	.link:hover {
+		text-decoration: underline;
 	}
 	@keyframes spin {
 		to {

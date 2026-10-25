@@ -380,9 +380,9 @@
 		flex: 1;
 	}
 	.qfoot button {
-		min-height: 34px;
+		min-height: var(--btn-h);
 		padding: 0 16px;
-		border-radius: 9px;
+		border-radius: var(--btn-radius);
 		font-size: 13px;
 		font-weight: 600;
 		transition:
@@ -390,7 +390,7 @@
 			transform var(--dur-fast) ease;
 	}
 	:global(html[data-touch]) .qfoot button {
-		min-height: 44px;
+		min-height: var(--tap);
 		font-size: 15px;
 	}
 	.qfoot button:active:not(:disabled) {
@@ -409,5 +409,13 @@
 	}
 	.primary:disabled {
 		opacity: 0.4;
+	}
+	@media (hover: hover) {
+		.primary:hover:not(:disabled) {
+			filter: brightness(1.08);
+		}
+		.stepper:hover:not(.on) {
+			background: var(--bg-hover);
+		}
 	}
 </style>

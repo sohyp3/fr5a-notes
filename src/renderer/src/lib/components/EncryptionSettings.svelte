@@ -474,7 +474,7 @@
 	input:focus,
 	select:focus,
 	textarea:focus {
-		outline: 2px solid var(--accent);
+		outline: 2px solid var(--focus-ring);
 		outline-offset: -1px;
 	}
 	code {
@@ -486,9 +486,9 @@
 		align-items: center;
 		justify-content: center;
 		gap: 6px;
-		min-height: 32px;
+		min-height: var(--btn-h-dense);
 		padding: 0 14px;
-		border-radius: 8px;
+		border-radius: var(--btn-radius);
 		background: var(--bg-hover);
 		color: var(--text-main);
 		font-size: 13px;
@@ -498,7 +498,7 @@
 			transform var(--dur-fast) ease;
 	}
 	:global(html[data-touch]) .btn {
-		min-height: 44px;
+		min-height: var(--tap);
 	}
 	.btn:hover {
 		background: var(--bg-active);

@@ -30,6 +30,19 @@
 	--press-icon: 0.94; /* :active scale of icon buttons */
 	--press-wide: 0.985; /* :active scale of wide rows / cards (a 0.97 row jumps) */
 	--dur-spin: 800ms; /* one turn of every loading spinner */
+
+	/* Buttons: one scale. Dialog / sheet / overlay actions and overlay header icon
+	   buttons are --btn-h; buttons inside settings-style rows sit beside 32px
+	   selects and segmented controls, so they're --btn-h-dense. On touch, row
+	   buttons grow to --tap and a sheet's actions to --btn-h-sheet. Bars (title
+	   bar, find strip, AI tabs) are denser still and keep their own sizes. */
+	--btn-h: 36px;
+	--btn-h-dense: 32px;
+	--btn-h-sheet: 50px;
+	--tap: 44px;
+	--btn-radius: 9px;
+	--sheet-radius: 18px; /* a bottom sheet's top corners */
+	--dialog-radius: 14px; /* a centred dialog / popover card */
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -459,7 +472,7 @@ button.scrim {
 }
 /* View mode: note links are tab stops; show the same accent ring as other controls. */
 .md-note-link:focus-visible {
-	outline: 1.5px solid var(--accent);
+	outline: 2px solid var(--focus-ring);
 	outline-offset: 2px;
 	border-radius: 3px;
 }

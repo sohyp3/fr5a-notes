@@ -173,7 +173,7 @@
 	}
 	.swatch:focus-visible,
 	.erase:focus-visible {
-		outline: 2px solid var(--accent);
+		outline: 2px solid var(--focus-ring);
 		outline-offset: -2px;
 	}
 	/* The swatch is the highlight itself, on the editor's surface. */

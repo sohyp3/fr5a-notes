@@ -98,7 +98,7 @@
 		max-height: 82vh;
 		overflow-y: auto;
 		padding: 20px 24px 24px;
-		border-radius: 16px;
+		border-radius: var(--dialog-radius);
 		background: var(--bg-editor);
 		box-shadow: var(--shadow-pane);
 		cursor: default;
@@ -118,9 +118,9 @@
 	.close {
 		display: grid;
 		place-items: center;
-		width: 30px;
-		height: 30px;
-		border-radius: 8px;
+		width: var(--btn-h);
+		height: var(--btn-h);
+		border-radius: var(--btn-radius);
 		color: var(--text-muted);
 		transition: background var(--dur-fast) ease;
 	}

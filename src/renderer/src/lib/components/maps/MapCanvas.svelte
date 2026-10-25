@@ -1517,9 +1517,9 @@
 		line-height: 1.55;
 	}
 	.btn {
-		min-height: 36px;
+		min-height: var(--btn-h);
 		padding: 0 16px;
-		border-radius: 9px;
+		border-radius: var(--btn-radius);
 		background: var(--bg-hover);
 		color: var(--text);
 		font-size: 13.5px;
@@ -1529,12 +1529,21 @@
 			transform var(--dur-fast) ease;
 	}
 	.map.touch .btn {
-		min-height: 50px;
+		min-height: var(--btn-h-sheet);
 		font-size: 16px;
 	}
 	.btn.primary {
 		background: var(--accent);
 		color: var(--on-accent);
+	}
+	@media (hover: hover) {
+		.btn:hover {
+			background: var(--bg-active);
+		}
+		.btn.primary:hover {
+			background: var(--accent);
+			filter: brightness(1.08);
+		}
 	}
 	.btn:active {
 		transform: scale(var(--press));

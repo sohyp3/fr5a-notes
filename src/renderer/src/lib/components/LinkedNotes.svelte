@@ -825,7 +825,7 @@
 		margin: 6px 8px 0 0;
 	}
 	.search:focus-within {
-		box-shadow: inset 0 0 0 1.5px var(--accent);
+		box-shadow: inset 0 0 0 2px var(--focus-ring);
 	}
 	.search input {
 		flex: 1 1 auto;
@@ -1282,9 +1282,9 @@
 	}
 	.btn {
 		flex: 0 0 auto;
-		min-height: 32px;
+		min-height: var(--btn-h-dense);
 		padding: 0 14px;
-		border-radius: 8px;
+		border-radius: var(--btn-radius);
 		background: var(--bg-hover);
 		color: var(--text);
 		font-size: 13px;
@@ -1292,10 +1292,11 @@
 		white-space: nowrap;
 		transition:
 			background var(--dur-fast) ease,
-			filter var(--dur-fast) ease;
+			filter var(--dur-fast) ease,
+			transform var(--dur-fast) ease;
 	}
 	:global(html[data-touch]) .btn {
-		min-height: 44px;
+		min-height: var(--tap);
 	}
 	.btn:hover,
 	.btn:active {
@@ -1308,6 +1309,9 @@
 	.btn.primary:hover,
 	.btn.primary:active {
 		filter: brightness(1.08);
+	}
+	.btn:active:not(:disabled) {
+		transform: scale(var(--press));
 	}
 	.tags {
 		display: flex;
@@ -1323,15 +1327,22 @@
 		color: var(--accent-ink);
 		font-size: 12.5px;
 		font-weight: 600;
-		transition: transform var(--dur-fast) ease;
+		transition:
+			background var(--dur-fast) ease,
+			transform var(--dur-fast) ease;
 	}
 	:global(html[data-touch]) .tag-chip {
 		height: 36px;
 		padding: 0 14px;
 		border-radius: 18px;
 	}
+	@media (hover: hover) {
+		.tag-chip:hover {
+			background: var(--selection);
+		}
+	}
 	.tag-chip:active {
-		transform: var(--press);
+		transform: scale(var(--press));
 	}
 	.links {
 		min-width: 0;
@@ -1381,7 +1392,7 @@
 	.link-row:focus-visible,
 	.open-btn:focus-visible {
 		outline: none;
-		box-shadow: inset 0 0 0 1.5px var(--accent);
+		box-shadow: inset 0 0 0 2px var(--focus-ring);
 	}
 	.open-btn {
 		flex: 0 0 auto;

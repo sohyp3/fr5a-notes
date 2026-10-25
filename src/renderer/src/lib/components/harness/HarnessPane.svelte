@@ -949,11 +949,7 @@
 				{/if}
 			</div>
 			{#if !pinned && tab.entries.length}
-				<button
-					class="jump"
-					onclick={jumpToLatest}
-					transition:fly={{ y: 8, duration: ms.pop }}
-				>
+				<button class="jump" onclick={jumpToLatest} transition:fly={{ y: 8, duration: ms.pop }}>
 					<Icon name="down" size={14} /> Latest
 				</button>
 			{/if}
@@ -1661,6 +1657,19 @@
 	.chip-btn:disabled {
 		opacity: 0.5;
 	}
+	@media (hover: hover) {
+		.chip-btn:hover:not(:disabled) {
+			box-shadow: inset 0 0 0 1px var(--rule);
+		}
+		.btn:hover,
+		.send:hover:not(:disabled),
+		.dock-foot .primary:hover:not(:disabled) {
+			filter: brightness(1.08);
+		}
+		.jump:hover {
+			opacity: 0.9;
+		}
+	}
 	.chip-btn.danger {
 		color: var(--danger);
 	}
@@ -1761,15 +1770,15 @@
 		font-size: 11px;
 	}
 	.btn {
-		min-height: 34px;
+		min-height: var(--btn-h);
 		padding: 0 14px;
-		border-radius: 9px;
+		border-radius: var(--btn-radius);
 		background: var(--accent);
 		color: var(--on-accent);
 		font-weight: 600;
 	}
 	:global(html[data-touch]) .btn {
-		min-height: 44px;
+		min-height: var(--tap);
 	}
 	kbd {
 		padding: 0 4px;
@@ -1840,15 +1849,15 @@
 		flex: 1;
 	}
 	.dock-foot button {
-		min-height: 34px;
+		min-height: var(--btn-h);
 		padding: 0 16px;
-		border-radius: 9px;
+		border-radius: var(--btn-radius);
 		font-size: 13px;
 		font-weight: 600;
 		transition: transform var(--dur-fast) ease;
 	}
 	:global(html[data-touch]) .dock-foot button {
-		min-height: 44px;
+		min-height: var(--tap);
 		font-size: 15px;
 	}
 	.dock-foot button:active {

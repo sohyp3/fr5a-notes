@@ -182,7 +182,7 @@
 		flex-direction: column;
 		width: min(640px, 100%);
 		max-height: min(720px, 100%);
-		border-radius: 14px;
+		border-radius: var(--dialog-radius);
 		background: var(--bg-editor);
 		box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
 		overflow: hidden;
@@ -190,7 +190,7 @@
 	.sheet .panel {
 		width: 100%;
 		max-height: 92%;
-		border-radius: 18px 18px 0 0;
+		border-radius: var(--sheet-radius) var(--sheet-radius) 0 0;
 		padding-bottom: env(safe-area-inset-bottom, 0px);
 	}
 	header {
@@ -208,9 +208,9 @@
 	.icon-btn {
 		display: grid;
 		place-items: center;
-		width: 32px;
-		height: 32px;
-		border-radius: 8px;
+		width: var(--btn-h);
+		height: var(--btn-h);
+		border-radius: var(--btn-radius);
 		color: var(--text-muted);
 	}
 	:global(html[data-touch]) .icon-btn {

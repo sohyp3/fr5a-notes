@@ -913,7 +913,7 @@
 		display: grid;
 		place-items: center;
 		height: 24px;
-		border-radius: 16px 16px 0 0;
+		border-radius: var(--sheet-radius) var(--sheet-radius) 0 0;
 		background: var(--bg-editor);
 		box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.12);
 		touch-action: none;
