@@ -2056,7 +2056,10 @@ test('desktop: model lists and models.dev are fetched once, then read from stora
 	await next.goto('/');
 	await openAiSettings(next);
 	await next.getByRole('button', { name: 'Show Fake details' }).click();
-	await expect(next.getByRole('group', { name: 'Fake models' }).getByRole('button')).toHaveCount(3);
+	// All three stored models are listed: the default one with its badge, the others starrable.
+	const fakeModels = next.getByRole('group', { name: 'Fake models' });
+	await expect(fakeModels.locator('.mrow')).toHaveCount(3);
+	await expect(fakeModels.getByRole('button')).toHaveCount(2);
 	await next.getByRole('button', { name: 'Close settings' }).click();
 	await sidebar(next)
 		.getByRole('button', { name: /^All Notes/ })
