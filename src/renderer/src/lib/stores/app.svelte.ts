@@ -14,11 +14,15 @@ import { setPinned, setLocked, setAiLocal, titleFromContent } from '../editor/ma
 import { ASSETS_DIR, assetName, relativeLink } from '../editor/images';
 import type { HighlightColor } from '../editor/highlights';
 import { syncErrorMessage } from '../sync';
+import type { StoragePlan, StorageResult } from '../../../../shared/storageMigration';
 import { getAiSettings } from '../harness/config.svelte';
 import { folderPrivacy, isHidden } from '../harness/privacy';
 import {
+	APP_CHATS_DIR,
 	baseOf,
 	cleanName,
+	isAppNotePath,
+	isImagePath,
 	joinPath,
 	noteStem,
 	parentOf,
@@ -353,11 +357,17 @@ class AppState {
 			? this.draftEncrypted
 			: !!this.activeId && !!this.noteMeta(this.activeId)?.encrypted;
 	});
-	/** Notes and folders the sidebar shows (hidden folders left out). */
+	/** Saved AI chats (`.fr5a/chats/`): notes, but listed only under the sidebar's "AI chats". */
+	chatNotes = $derived(this.notes.filter((n) => isAppNotePath(n.id)));
+	/** The note list shows the saved AI chats. */
+	chatsOpen = $derived(this.selectedFolder !== null && isAppNotePath(this.selectedFolder));
+	/** Notes and folders the sidebar shows (hidden folders and saved chats left out). */
 	listedNotes = $derived(
-		this.settings.hiddenFolders.length
-			? this.notes.filter((n) => !this.hiddenParent(parentOf(n.id)))
-			: this.notes
+		this.notes.filter(
+			(n) =>
+				!isAppNotePath(n.id) &&
+				!(this.settings.hiddenFolders.length && this.hiddenParent(parentOf(n.id)))
+		)
 	);
 	listedFolders = $derived(
 		this.settings.hiddenFolders.length
@@ -388,7 +398,10 @@ class AppState {
 		}
 		// Browsing into a hidden folder (from Settings) shows it; everything else leaves it out.
 		const browsing = this.selectedFolder ? this.hiddenParent(this.selectedFolder) : null;
+		const chats = this.chatsOpen;
 		return this.notes.filter((n) => {
+			// Saved chats show only under "AI chats" (and nothing else does there).
+			if (isAppNotePath(n.id) !== chats) return false;
 			const hiddenIn = this.hiddenParent(parentOf(n.id));
 			if (hiddenIn && hiddenIn !== browsing) return false;
 			if (this.selectedFolder !== null) {
@@ -682,7 +695,7 @@ class AppState {
 		const slot = this.tabIndex;
 		await this.flush(); // persist the outgoing note (or materialise a draft)
 		// New notes land in the folder currently in view ('' = workspace root).
-		this.draftFolder = this.trashOpen ? '' : (this.selectedFolder ?? '');
+		this.draftFolder = this.trashOpen || this.chatsOpen ? '' : (this.selectedFolder ?? '');
 		// A folder whose notes are all encrypted keeps new ones encrypted.
 		const sealed = !!this.vault?.hasKey && this.folderEncrypted(this.draftFolder);
 		// No file yet: open an in-memory draft on an empty H1 line. The first
@@ -812,7 +825,7 @@ class AppState {
 	 * and select it so the user drops straight into the new scope.
 	 */
 	async createFolder(name: string): Promise<void> {
-		const parent = this.selectedFolder ?? '';
+		const parent = this.chatsOpen ? '' : (this.selectedFolder ?? '');
 		const rel = await platform.createFolder(name, parent);
 		await this.refresh();
 		if (rel) this.selectFolder(rel);
@@ -922,6 +935,16 @@ class AppState {
 		this.drawerOpen = false;
 	}
 
+	/** The saved AI chats (`.fr5a/chats/`), a list of their own like Trash. */
+	openChats(): void {
+		this.view = 'editor';
+		this.trashOpen = false;
+		this.selectedTag = null;
+		this.selectedFolder = APP_CHATS_DIR;
+		this.pane = 'list';
+		this.drawerOpen = false;
+	}
+
 	/** "All Notes": clear every filter and show the whole tree. */
 	showAllNotes(): void {
 		this.view = 'editor';
@@ -1007,7 +1030,8 @@ class AppState {
 	async openNoteLink(target: string): Promise<void> {
 		if (!this.settings.linkedNotes) return;
 		const from = this.activeId ?? joinPath(this.activeDir, '_');
-		const note = resolveNoteHref(this.listedNotes, target, from);
+		// Saved chats are linkable too (the storage move re-points links to them).
+		const note = resolveNoteHref([...this.listedNotes, ...this.chatNotes], target, from);
 		if (note) await this.openNote(note.id);
 		else this.notify('error', `No note at “${target.trim()}”`);
 	}
@@ -1683,6 +1707,26 @@ class AppState {
 		);
 	}
 
+	/**
+	 * Run a storage plan (Settings → General → Storage, `lib/storage.ts`):
+	 * saves wait for it, then moved notes are re-pointed like any move and the
+	 * open note is re-read (its links may have been rewritten).
+	 */
+	async migrateStorage(plan: StoragePlan): Promise<StorageResult> {
+		if (!platform.migrateStorage) throw new Error('Not available on this device.');
+		await this.flush();
+		const run = platform.migrateStorage(plan);
+		this.moving = run;
+		try {
+			const res = await run;
+			for (const m of plan.moves) if (!isImagePath(m.from)) this.pathMoved(m.from, m.to);
+			return res;
+		} finally {
+			if (this.moving === run) this.moving = null;
+			await this.reloadFromDisk();
+		}
+	}
+
 	/** Run a host move; saves queued meanwhile wait for it. Null (and a notice) on failure. */
 	private async runMove(op: () => Promise<string>): Promise<string | null> {
 		const run = op();
@@ -1762,7 +1806,7 @@ class AppState {
 
 	/**
 	 * Save an image pasted / dropped / picked into the open note under
-	 * `assets/` (workspace root). Resolves to its link from the note's folder,
+	 * `.fr5a/assets/`. Resolves to its link from the note's folder,
 	 * or null when it couldn't be saved (already told).
 	 */
 	async saveImage(file: File): Promise<string | null> {

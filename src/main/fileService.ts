@@ -7,8 +7,10 @@ import type { NoteMeta } from '../shared/types';
 import {
 	folderDeleteError,
 	folderMoveError,
+	isAppAssetPath,
+	isAssetPathAllowed,
 	isHiddenPath,
-	isImagePath,
+	isScannedPath,
 	noteExt,
 	noteFileStem,
 	noteMoveError
@@ -17,6 +19,8 @@ import { noteSnippet } from '../shared/snippet';
 import { isEncryptedNote } from '../shared/encrypted';
 import { markdownBody } from '../shared/frontmatter';
 import { mindMapVersion } from '../shared/mindMapMetadata';
+import type { StoragePlan, StorageResult } from '../shared/storageMigration';
+import { applyStorageMigration } from './storageMigration';
 
 const MD_EXT = new Set(['.md', '.markdown', '.mdown', '.txt']);
 
@@ -131,7 +135,12 @@ export class FileService {
 		}
 	}
 
-	/** Recursively collect note paths, skipping dot-dirs and node_modules. */
+	/** Workspace-relative id with `/` separators. */
+	private relId(absPath: string): string {
+		return this.toId(absPath).replace(/\\/g, '/');
+	}
+
+	/** Recursively collect note paths, skipping dot-dirs (but `.fr5a/chats`) and node_modules. */
 	private async collect(dir: string, out: string[]): Promise<void> {
 		let entries: import('node:fs').Dirent[];
 		try {
@@ -140,8 +149,8 @@ export class FileService {
 			return;
 		}
 		for (const entry of entries) {
-			if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
 			const full = path.join(dir, entry.name);
+			if (entry.name === 'node_modules' || !isScannedPath(this.relId(full))) continue;
 			if (entry.isDirectory()) await this.collect(full, out);
 			else if (entry.isFile() && this.isNote(full)) out.push(full);
 		}
@@ -159,7 +168,12 @@ export class FileService {
 
 	private startWatching(): void {
 		this.watcher = chokidar.watch(this.root, {
-			ignored: (p) => /(^|[/\\])(\.|node_modules)/.test(p),
+			// Dot-folders (but saved chats in `.fr5a/chats`) and node_modules.
+			ignored: (p) => {
+				const rel = this.relId(p);
+				if (!rel || rel.startsWith('..')) return false;
+				return /(^|\/)node_modules(\/|$)/.test(rel) || !isScannedPath(rel);
+			},
 			ignoreInitial: true,
 			awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 }
 		});
@@ -204,12 +218,13 @@ export class FileService {
 
 	/**
 	 * Absolute path of a workspace image, for the `fr5a:` protocol: null for
-	 * anything outside the workspace or that isn't an image.
+	 * anything outside the workspace, that isn't an image, or that sits in a
+	 * dot-folder other than `.fr5a/assets`.
 	 */
 	assetPath(rel: string): string | null {
 		const root = path.resolve(this.root);
 		const abs = path.resolve(root, rel.replace(/^[/\\]+/, ''));
-		return abs.startsWith(root + path.sep) && isImagePath(abs) ? abs : null;
+		return abs.startsWith(root + path.sep) && isAssetPathAllowed(this.relId(abs)) ? abs : null;
 	}
 
 	/**
@@ -218,14 +233,41 @@ export class FileService {
 	 */
 	async saveAsset(rel: string, data: Uint8Array): Promise<string> {
 		const dest = this.safeSubdir(rel);
-		if (!dest || !isImagePath(dest) || isHiddenPath(dest))
-			throw new Error(`Not an image path: ${rel}`);
+		if (!dest || !isAssetPathAllowed(dest)) throw new Error(`Not an image path: ${rel}`);
 		const target = await this.uniquePath(path.join(this.root, dest));
 		await fs.mkdir(path.dirname(target), { recursive: true });
 		await fs.writeFile(target, data);
-		// A new `assets/` folder shows up in the sidebar.
+		// A new image folder outside `.fr5a/` shows up in the sidebar.
 		this.scheduleChange();
 		return this.toId(target).replace(/\\/g, '/');
+	}
+
+	/** Image files under workspace folder `dir` (recursive; app or non-hidden folders only). */
+	async listImages(dir: string): Promise<string[]> {
+		const from = this.safeSubdir(dir);
+		if (!from || (isHiddenPath(from) && !isAppAssetPath(`${from}/x.png`))) return [];
+		const files: string[] = [];
+		await this.collectFiles(path.join(this.root, from), files);
+		return files
+			.map((f) => this.relId(f))
+			.filter((id) => isAssetPathAllowed(id))
+			.sort();
+	}
+
+	/**
+	 * Run a storage plan (Settings → General → Storage): rewrite links, move
+	 * images and saved chats into `.fr5a/`, mtimes kept. See main/storageMigration.ts.
+	 */
+	async migrateStorage(plan: StoragePlan): Promise<StorageResult> {
+		const res = await applyStorageMigration(this.root, plan);
+		for (const id of res.written) await this.indexFile(path.join(this.root, id));
+		for (const [from, to] of res.renamed) {
+			if (!this.isNote(to)) continue;
+			this.index.remove(from);
+			await this.indexFile(path.join(this.root, to));
+		}
+		this.scheduleChange();
+		return { moved: res.moved, rewritten: res.rewritten, skipped: res.skipped };
 	}
 
 	/**

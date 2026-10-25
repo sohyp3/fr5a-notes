@@ -100,7 +100,9 @@
 				<input
 					{@attach (el) => el.focus()}
 					bind:value={newName}
-					placeholder={app.selectedFolder ? `New in ${app.selectedFolder}` : 'Folder name'}
+					placeholder={app.selectedFolder && !app.chatsOpen
+						? `New in ${app.selectedFolder}`
+						: 'Folder name'}
 					spellcheck="false"
 					onkeydown={(e) => {
 						if (e.key === 'Enter') commitAdd();
@@ -169,6 +171,18 @@
 			>
 				<Icon name="graph" size={16} />
 				<span>Mind maps</span>
+			</button>
+		{/if}
+		{#if app.chatNotes.length}
+			<button
+				class={['settings-btn', { selected: app.chatsOpen && app.view === 'editor' }]}
+				aria-current={app.chatsOpen && app.view === 'editor' ? 'true' : undefined}
+				title="Chats saved with “Save to notes”"
+				onclick={() => app.openChats()}
+			>
+				<Icon name="chats" size={16} />
+				<span>AI chats</span>
+				<span class="count">{app.chatNotes.length}</span>
 			</button>
 		{/if}
 		<button

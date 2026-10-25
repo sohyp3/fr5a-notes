@@ -7,6 +7,7 @@ import {
 	splitHeader,
 	joinHeader
 } from '../../../../shared/encrypted';
+import type { StoragePlan } from '../../../../shared/storageMigration';
 import { VaultLockedError, wrapNotes, type NoteCrypt } from './wrap';
 
 // A stand-in cipher: base64 inside real armor lines, plus a counter so every
@@ -28,6 +29,7 @@ function setup(files: Record<string, string>) {
 	let unlocked = true;
 	let decrypts = 0;
 	const writes: string[] = [];
+	const plans: StoragePlan[] = [];
 	const meta = (id: string): NoteMeta => ({
 		id,
 		absPath: id,
@@ -53,6 +55,10 @@ function setup(files: Record<string, string>) {
 		},
 		listNotes: async () => Object.keys(files).map(meta),
 		listTags: async () => [],
+		migrateStorage: async (plan: StoragePlan) => {
+			plans.push(plan);
+			return { moved: plan.moves.length, rewritten: plan.rewrites.length, skipped: plan.skipped };
+		},
 		syncConflicts: async () => [],
 		syncResolve: async () => ({ ok: true, result: { status: 'ok' } }),
 		gitChanges: async (): Promise<GitChange[]> =>
@@ -75,12 +81,33 @@ function setup(files: Record<string, string>) {
 		clear: w.clear,
 		files,
 		writes,
+		plans,
 		lock: () => (unlocked = false),
 		decrypts: () => decrypts
 	};
 }
 
 describe('wrapNotes', () => {
+	it('re-encrypts storage rewrites, and runs nothing once locked', async () => {
+		const t = setup({ 'a.md': '# A\n', 's.md': enc('# S\n![](assets/a.png)\n') });
+		const plan: StoragePlan = {
+			moves: [{ from: 'assets/a.png', to: '.fr5a/assets/a.png' }],
+			rewrites: [
+				{ id: 'a.md', text: '# A2\n' },
+				{ id: 's.md', text: '# S\n![](.fr5a/assets/a.png)\n' }
+			],
+			skipped: []
+		};
+		await t.api.migrateStorage(plan);
+		const sent = t.plans[0].rewrites;
+		expect(sent[0]).toEqual({ id: 'a.md', text: '# A2\n' });
+		expect(isEncryptedNote(sent[1].text)).toBe(true);
+		expect(dec(sent[1].text)).toBe('# S\n![](.fr5a/assets/a.png)\n');
+		t.lock();
+		await expect(t.api.migrateStorage(plan)).rejects.toBeInstanceOf(VaultLockedError);
+		expect(t.plans).toHaveLength(1);
+	});
+
 	it('leaves plain notes alone', async () => {
 		const t = setup({ 'a.md': '# A\n' });
 		expect(await t.api.readNote('a.md')).toBe('# A\n');

@@ -32,7 +32,7 @@
 	import UsagePanel from './UsagePanel.svelte';
 	import { buildFolderTree, type FolderNode } from '../../folders';
 	import { folderPrivacy } from '../../harness/privacy';
-	import { cleanFolder } from '../../../../../shared/paths';
+	import { cleanChatsFolder } from '../../../../../shared/paths';
 	import { reducedMotion } from '../../portal';
 	import { catalogModel, catalogPrice, opencodeModelApi } from '../../harness/prices';
 	import { formatTokens } from '../../harness/usage';
@@ -1056,7 +1056,8 @@
 		<label class="label" for="chats-folder">
 			<span class="name">Saved chats folder</span>
 			<span class="desc"
-				>Where ⋯ → Save to notes puts a chat (it syncs with your notes). Empty = top level.</span
+				>Where ⋯ → Save to notes puts a chat (it syncs with your notes). The default, .fr5a/chats,
+				lists them under AI chats in the sidebar, apart from your notes. Empty = top level.</span
 			>
 		</label>
 		<input
@@ -1069,27 +1070,9 @@
 			value={cfg.chatsFolder ?? ''}
 			placeholder="top level"
 			onchange={(e) =>
-				ai.update({ chatsFolder: cleanFolder((e.currentTarget as HTMLInputElement).value) })}
+				ai.update({ chatsFolder: cleanChatsFolder((e.currentTarget as HTMLInputElement).value) })}
 		/>
 	</div>
-	{#if cfg.chatsFolder}
-		<label class="check">
-			<input
-				type="checkbox"
-				checked={!!app.hiddenParent(cfg.chatsFolder)}
-				disabled={app.hiddenParent(cfg.chatsFolder) !== null &&
-					app.hiddenParent(cfg.chatsFolder) !== cfg.chatsFolder}
-				onchange={(e) => app.setFolderListed(cfg.chatsFolder, !e.currentTarget.checked)}
-			/>
-			<span>
-				<span class="name">Hide saved chats from the sidebar</span>
-				<span class="desc"
-					>Keeps “{cfg.chatsFolder}” out of the sidebar, All Notes, tags and search. Open it from
-					Settings → General.</span
-				>
-			</span>
-		</label>
-	{/if}
 	<div class="row">
 		<label class="label" for="max-steps">
 			<span class="name">Max steps per run</span>

@@ -239,7 +239,8 @@ function fakeApi(detectMindMapVersion: typeof mindMapVersion): void {
 		pickWorkspace: async () => '/notes',
 		listNotes: async () => Object.keys(files).map(meta),
 		listTags: async () => [],
-		listFolders: async () => [...folders].sort(),
+		// Like the hosts: dot-folders (`.fr5a/chats` too) never show in the tree.
+		listFolders: async () => [...folders].filter((f) => !/(^|\/)\./.test(f)).sort(),
 		listTrash: async () => Object.keys(trash).map(meta),
 		readNote: async (id: string) => files[id],
 		writeNote: async (id: string, content: string) => {
@@ -378,6 +379,28 @@ function fakeApi(detectMindMapVersion: typeof mindMapVersion): void {
 			for (let n = 2; p in assets; n++) p = path.replace(/(\.\w+)$/, ` ${n}$1`);
 			assets[p] = data.length;
 			return p;
+		},
+		listImages: async (dir: string) =>
+			Object.keys(assets)
+				.filter((p) => p.startsWith(`${dir}/`))
+				.sort(),
+		// Rewrites first, then the moves (notes and images), like the hosts.
+		migrateStorage: async (plan: {
+			moves: { from: string; to: string }[];
+			rewrites: { id: string; text: string }[];
+			skipped: string[];
+		}) => {
+			for (const r of plan.rewrites) files[r.id] = r.text;
+			for (const m of plan.moves) {
+				if (m.from in files) {
+					files[m.to] = files[m.from];
+					delete files[m.from];
+				} else if (m.from in assets) {
+					assets[m.to] = assets[m.from];
+					delete assets[m.from];
+				}
+			}
+			return { moved: plan.moves.length, rewritten: plan.rewrites.length, skipped: plan.skipped };
 		},
 		readMeta: async (rel: string) => metaFiles[rel] ?? null,
 		writeMeta: async (rel: string, content: string) => {

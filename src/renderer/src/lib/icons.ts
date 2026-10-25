@@ -57,6 +57,7 @@ import Pencil from '@lucide/svelte/icons/pencil';
 import Pilcrow from '@lucide/svelte/icons/pilcrow';
 import Pin from '@lucide/svelte/icons/pin';
 import Plus from '@lucide/svelte/icons/plus';
+import MessagesSquare from '@lucide/svelte/icons/messages-square';
 import ReceiptText from '@lucide/svelte/icons/receipt-text';
 import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
@@ -138,6 +139,7 @@ export const ICONS = {
 	undo: Undo2,
 	// AI
 	ai: Sparkles,
+	chats: MessagesSquare,
 	history: History,
 	plus: Plus,
 	send: ArrowRight,

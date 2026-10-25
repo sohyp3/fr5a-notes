@@ -18,6 +18,11 @@ const FileTimes = registerPlugin<{
 	setMtime(opts: { path: string; mtime: number }): Promise<void>;
 }>('FileTimes');
 
+/** Set a file's mtime (ms); `path` is relative to Directory.Data (`notes/a.md`). */
+export function setFileMtime(path: string, mtime: number): Promise<void> {
+	return FileTimes.setMtime({ path, mtime: Math.round(mtime) });
+}
+
 function fsError(code: 'ENOENT' | 'EEXIST' | 'ENOTDIR' | 'ENOTEMPTY', path: string): Error {
 	return Object.assign(new Error(`${code}: ${path}`), { code });
 }

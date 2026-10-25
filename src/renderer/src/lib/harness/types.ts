@@ -1,5 +1,6 @@
 import type { HttpRequest, HttpResponse } from '../../../../shared/types';
 import type { Price } from './usage';
+import { APP_CHATS_DIR } from '../../../../shared/paths';
 
 /** One OpenAI-compatible endpoint: DeepSeek, OpenRouter, opencode, llama.cpp, Ollama /v1… */
 export interface ProviderProfile {
@@ -141,7 +142,7 @@ export interface AiConfig {
 	search: SearchProfile | null;
 	/** Workspace-relative folders whose notes only go to `local` providers. */
 	localOnlyFolders: string[];
-	/** Workspace folder "Save to notes" puts chats in ('' = top level). */
+	/** Workspace folder "Save to notes" puts chats in (default `.fr5a/chats`; '' = top level). */
 	chatsFolder: string;
 	/** Max model round-trips per run (tool calls each cost one). */
 	maxSteps: number;
@@ -232,7 +233,7 @@ export const DEFAULT_AI_CONFIG: AiConfig = {
 	defaultProvider: OPENCODE.id,
 	search: null,
 	localOnlyFolders: [],
-	chatsFolder: 'AI chats',
+	chatsFolder: APP_CHATS_DIR,
 	maxSteps: 8,
 	favorites: []
 };

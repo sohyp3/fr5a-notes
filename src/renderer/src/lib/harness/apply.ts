@@ -63,7 +63,8 @@ export async function prepareWrite(
 			before: '',
 			after,
 			async apply() {
-				const folder = app.selectedFolder ?? '';
+				// Not into `.fr5a/chats` while the AI chats list is open: it's the user's note.
+				const folder = app.chatsOpen ? '' : (app.selectedFolder ?? '');
 				// A folder whose notes are all encrypted keeps new ones encrypted.
 				const seal = app.vault?.hasKey && app.folderEncrypted(folder);
 				const body = seal ? await app.vault!.encrypt(after) : after;

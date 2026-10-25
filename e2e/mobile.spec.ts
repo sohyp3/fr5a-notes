@@ -1284,6 +1284,7 @@ type FakeApi = {
 	listNotes(): Promise<{ id: string }[]>;
 	readNote(id: string): Promise<string>;
 	writeNote(id: string, content: string): Promise<void>;
+	saveAsset?(path: string, data: Uint8Array): Promise<string>;
 };
 const fakeApi = 'api' as const;
 
@@ -1458,21 +1459,21 @@ test('AI harness: a chat is saved to notes, updated, and forked', async ({ page 
 
 	await harness.getByRole('button', { name: 'Session actions' }).tap();
 	await page.getByRole('menuitem', { name: /Save to notes/ }).tap();
-	await expect(harness.locator('.toast')).toHaveText('Saved to AI chats/md-.md');
-	const saved = await readFake(page, 'AI chats/md-.md');
+	await expect(harness.locator('.toast')).toHaveText('Saved to .fr5a/chats/md-.md');
+	const saved = await readFake(page, '.fr5a/chats/md-.md');
 	expect(saved).toContain('# md?\n\n*AI chat · ');
 	expect(saved).toContain('> **You:** md?\n\n# Title');
 	// The `.fr5a/sessions/` copy stays, and remembers the note.
 	const sessions = await page.evaluate(() =>
-		Object.entries((window as unknown as { __meta: Record<string, string> }).__meta).filter(([k]) =>
-			k.startsWith('sessions/')
+		Object.entries((window as unknown as { __meta: Record<string, string> }).__meta).filter(
+			([k]) => k.startsWith('sessions/') && k.endsWith('.md')
 		)
 	);
-	expect(sessions[0][1]).toContain('saved: AI chats/md-.md');
+	expect(sessions[0][1]).toContain('saved: .fr5a/chats/md-.md');
 
 	await harness.getByRole('button', { name: 'Session actions' }).tap();
 	await page.getByRole('menuitem', { name: /Update saved note/ }).tap();
-	await expect(harness.locator('.toast')).toHaveText('AI chats/md-.md is up to date');
+	await expect(harness.locator('.toast')).toHaveText('.fr5a/chats/md-.md is up to date');
 
 	await harness.getByRole('button', { name: 'Session actions' }).tap();
 	await page.getByRole('menuitem', { name: 'Fork conversation' }).tap();
@@ -1660,13 +1661,71 @@ test('desktop: a folder can be hidden from the sidebar, shown again, and deleted
 	expect(await noteIds(page)).toEqual(['hello.md']);
 	await sidebar(page).getByRole('button', { name: /Trash/ }).click();
 	await expect(list(page).getByText('Plan', { exact: true })).toBeVisible();
+	await ctx.close();
+});
 
-	// Saved AI chats: one checkbox in Settings → AI hides their folder.
+test('desktop: saved chats list under AI chats; Storage moves old files into .fr5a', async ({
+	browser
+}) => {
+	const { ctx, page } = await desktopPage(browser, {
+		'.fr5a/chats/talk.md': '# Talk\n\n*AI chat · 2026-01-02*\n\n> **You:** hi',
+		'AI chats/old.md': '# Old chat\n\n*AI chat · 2025-12-01*\n\nhello',
+		'AI chats/mine.md': '# Mine\n\nnot a chat',
+		'pics.md': '# Pics\n\n![A cat](assets/cat.png)\nend',
+		'links.md': '# Links\n\n[the old chat](AI%20chats/old.md)'
+	});
+	await page.evaluate(async (k) => {
+		const api = (window as unknown as Record<string, FakeApi>)[k];
+		await api.saveAsset!('assets/cat.png', new Uint8Array([1, 2]));
+	}, fakeApi);
+	await sidebar(page)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	await expect(list(page).getByText('Pics', { exact: true })).toBeVisible();
+	// Saved chats stay out of All Notes and the folder tree…
+	await expect(list(page).getByText('Talk', { exact: true })).toHaveCount(0);
+	await expect(sidebar(page).getByRole('button', { name: /^\.fr5a/ })).toHaveCount(0);
+	// …and have their own entry.
+	const chats = sidebar(page).getByTitle('Chats saved with “Save to notes”');
+	await expect(chats).toHaveText(/AI chats\s*1/);
+	await chats.click();
+	await expect(list(page).getByText('Talk', { exact: true })).toBeVisible();
+	await expect(list(page).getByText('Pics', { exact: true })).toHaveCount(0);
+	await list(page).getByText('Talk', { exact: true }).click();
+	await expect(page.locator('.ProseMirror')).toContainText('hi');
+
+	// Settings → General offers the move, with counts; only chats move, not other notes.
 	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
-	await openAdvanced(page, 'AI assistant');
-	await page.getByLabel('Hide saved chats from the sidebar').check();
 	await page.getByRole('button', { name: 'General' }).click();
-	await expect(page.getByText('AI chats', { exact: true })).toBeVisible();
+	const card = page.getByRole('region', { name: 'Storage' });
+	await expect(card).toContainText('Move 1 image and 1 saved chat into .fr5a');
+	await card.getByRole('button', { name: 'Move' }).click();
+	await expect(card).toHaveCount(0);
+	expect(await readFake(page, 'pics.md')).toBe('# Pics\n\n![A cat](.fr5a/assets/cat.png)\nend');
+	const ids = await noteIds(page);
+	expect(ids).toContain('.fr5a/chats/old.md');
+	expect(ids).toContain('AI chats/mine.md');
+	expect(ids).not.toContain('AI chats/old.md');
+	const assets = await page.evaluate(() => (window as unknown as { __assets: object }).__assets);
+	expect(Object.keys(assets)).toEqual(['.fr5a/assets/cat.png']);
+	expect(await readFake(page, 'links.md')).toBe('# Links\n\n[the old chat](.fr5a/chats/old.md)');
+	await page.getByRole('button', { name: /Links & maps/ }).click();
+	await page.getByRole('switch', { name: 'Enable links and maps' }).click();
+	await page.getByRole('button', { name: 'Close settings' }).click();
+	await expect(chats).toHaveText(/AI chats\s*2/);
+	// A link to a saved chat still opens it.
+	await sidebar(page)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	await list(page).getByText('Links', { exact: true }).click();
+	await page.locator('.md-note-link').click({ modifiers: ['Control'] });
+	await expect(page.locator('.ProseMirror')).toContainText('hello');
+	// The rewritten link still shows the picture.
+	await sidebar(page)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	await list(page).getByText('Pics', { exact: true }).click();
+	await expect(page.locator('.md-image img')).toHaveCount(1);
 	await ctx.close();
 });
 
@@ -2073,7 +2132,7 @@ test('desktop: unlocked encrypted notes reach the AI; such a chat stays on this 
 	// Saved to notes, it's encrypted.
 	await harness.getByRole('button', { name: 'Session actions' }).click();
 	await page.getByRole('menuitem', { name: /Save to notes/ }).click();
-	const chatId = async () => (await noteIds(page)).find((id) => id.startsWith('AI chats/'));
+	const chatId = async () => (await noteIds(page)).find((id) => id.startsWith('.fr5a/chats/'));
 	await expect.poll(chatId).toBeTruthy();
 	await expect
 		.poll(async () => readFake(page, (await chatId())!))
@@ -2145,7 +2204,7 @@ test('desktop: images show above their hidden line, resize by the corner, paste'
 	await page.locator('.md-image-handle').dblclick();
 	await expect.poll(() => editorText(page)).toContain('cat.png)\n![](missing.png)');
 
-	// A pasted image is saved under assets/ and linked on its own line.
+	// A pasted image is saved under .fr5a/assets/ and linked on its own line.
 	await page.keyboard.press('Control+End');
 	await page.evaluate(() => {
 		const dt = new DataTransfer();
@@ -2158,9 +2217,10 @@ test('desktop: images show above their hidden line, resize by the corner, paste'
 	});
 	await expect
 		.poll(() => editorText(page))
-		.toMatch(/\nend\n!\[\]\(assets\/image-\d{8}-\d{6}\.png\)\n$/);
+		.toMatch(/\nend\n!\[\]\(\.fr5a\/assets\/image-\d{8}-\d{6}\.png\)\n$/);
 	const assets = await page.evaluate(() => (window as unknown as { __assets: object }).__assets);
 	expect(Object.values(assets)).toEqual([3]);
+	expect(Object.keys(assets)[0]).toMatch(/^\.fr5a\/assets\/image-\d{8}-\d{6}\.png$/);
 	await expect(page.locator('.md-image img')).toHaveCount(2);
 	await ctx.close();
 });

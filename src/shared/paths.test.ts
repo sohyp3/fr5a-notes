@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+	cleanChatsFolder,
 	cleanFolder,
+	isAppAssetPath,
+	isAppNotePath,
+	isAssetPathAllowed,
+	isScannedPath,
+	relativeLink,
 	cleanName,
 	folderMoveError,
 	noteFileStem,
@@ -46,5 +52,54 @@ describe('paths', () => {
 		expect(noteMoveError('a.md', 'b')).toMatch('extension');
 		expect(noteMoveError('a.md', '.git/a.md')).toMatch('hidden');
 		expect(noteMoveError('a.md', 'x/b.md')).toBeNull();
+	});
+});
+
+describe('app files under .fr5a/', () => {
+	it('lets images into .fr5a/assets only', () => {
+		expect(isAppAssetPath('.fr5a/assets/a.png')).toBe(true);
+		expect(isAppAssetPath('.fr5a/assets/sub/a.png')).toBe(true);
+		expect(isAppAssetPath('.fr5a/assets/a.md')).toBe(false);
+		expect(isAppAssetPath('.fr5a/assets/.git/a.png')).toBe(false);
+		expect(isAppAssetPath('.fr5a/sessions/a.png')).toBe(false);
+		expect(isAppAssetPath('.fr5a/assets')).toBe(false);
+		expect(isAssetPathAllowed('assets/a.png')).toBe(true);
+		expect(isAssetPathAllowed('.fr5a/assets/a.png')).toBe(true);
+		expect(isAssetPathAllowed('.git/a.png')).toBe(false);
+		expect(isAssetPathAllowed('.fr5a/skills/a.png')).toBe(false);
+	});
+
+	it('scans .fr5a/chats and nothing else hidden', () => {
+		expect(isScannedPath('Work/plan.md')).toBe(true);
+		expect(isScannedPath('.fr5a')).toBe(true);
+		expect(isScannedPath('.fr5a/chats')).toBe(true);
+		expect(isScannedPath('.fr5a/chats/a.md')).toBe(true);
+		expect(isScannedPath('.fr5a/chats/old/a.md')).toBe(true);
+		expect(isScannedPath('.fr5a/chats/.git')).toBe(false);
+		expect(isScannedPath('.fr5a/sessions/device/a.md')).toBe(false);
+		expect(isScannedPath('.fr5a/a.md')).toBe(false);
+		expect(isScannedPath('.git')).toBe(false);
+		expect(isScannedPath('.fr5a_trash/a.md')).toBe(false);
+		expect(isAppNotePath('.fr5a/chats/a.md')).toBe(true);
+		expect(isAppNotePath('.fr5a/chatsx/a.md')).toBe(false);
+	});
+
+	it('lets saved chats move in and out of .fr5a/chats', () => {
+		expect(noteMoveError('.fr5a/chats/a.md', 'Work/a.md')).toBeNull();
+		expect(noteMoveError('Work/a.md', '.fr5a/chats/a.md')).toBeNull();
+		expect(noteMoveError('Work/a.md', '.fr5a/sessions/a.md')).not.toBeNull();
+	});
+
+	it('keeps the chats folder setting inside .fr5a', () => {
+		expect(cleanChatsFolder('.fr5a/chats')).toBe('.fr5a/chats');
+		expect(cleanChatsFolder(' .fr5a / chats/ ')).toBe('.fr5a/chats');
+		expect(cleanChatsFolder('.fr5a/other')).toBe('fr5a/other');
+		expect(cleanChatsFolder('AI chats')).toBe('AI chats');
+	});
+
+	it('links relative to a folder', () => {
+		expect(relativeLink('Work', '.fr5a/assets/a b.png')).toBe('../.fr5a/assets/a%20b.png');
+		expect(relativeLink('', '.fr5a/assets/a.png')).toBe('.fr5a/assets/a.png');
+		expect(relativeLink('.fr5a/chats', 'Work/plan.md')).toBe('../../Work/plan.md');
 	});
 });

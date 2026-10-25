@@ -10,6 +10,7 @@ import {
 	sessionToNote,
 	slugify,
 	withDeviceIgnored,
+	withSavedMoved,
 	type Session
 } from './session';
 
@@ -157,5 +158,25 @@ describe('saving and forking', () => {
 				''
 			].join('\n')
 		);
+	});
+});
+
+describe('withSavedMoved', () => {
+	it('re-points only the saved line of a moved chat', () => {
+		const text =
+			'---\ntitle: Talk\nsaved: AI chats/talk.md\nsavedHash: abc\n---\n\n# Talk\n\nsaved: AI chats/talk.md\n';
+		const moved = new Map([['AI chats/talk.md', '.fr5a/chats/talk.md']]);
+		expect(withSavedMoved(text, moved)).toBe(
+			'---\ntitle: Talk\nsaved: .fr5a/chats/talk.md\nsavedHash: abc\n---\n\n# Talk\n\nsaved: AI chats/talk.md\n'
+		);
+		expect(withSavedMoved(text, new Map())).toBeNull();
+		// The migration's own link rewrite carries the hash along; a hash of later edits stays.
+		const rehash = new Map([['.fr5a/chats/talk.md', ['abc', 'def'] as const]]);
+		expect(withSavedMoved(text, moved, rehash)).toBe(
+			'---\ntitle: Talk\nsaved: .fr5a/chats/talk.md\nsavedHash: def\n---\n\n# Talk\n\nsaved: AI chats/talk.md\n'
+		);
+		const edited = new Map([['.fr5a/chats/talk.md', ['xyz', 'def'] as const]]);
+		expect(withSavedMoved(text, moved, edited)).toContain('savedHash: abc');
+		expect(withSavedMoved('# no frontmatter\n', moved)).toBeNull();
 	});
 });

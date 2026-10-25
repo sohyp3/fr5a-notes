@@ -12,6 +12,7 @@ import type {
 	SyncResponse,
 	TagNode
 } from '../../../../shared/types';
+import type { StoragePlan, StorageResult } from '../../../../shared/storageMigration';
 
 /**
  * Everything the renderer may ask of the host. The UI talks to this interface
@@ -136,6 +137,13 @@ export interface PlatformApi {
 	 * name gets a numeric suffix). Returns the path written.
 	 */
 	saveAsset?(path: string, data: Uint8Array): Promise<string>;
+	/** Image files under workspace folder `dir`, recursive (Settings → General → Storage). */
+	listImages?(dir: string): Promise<string[]>;
+	/**
+	 * Run a storage plan (`shared/storageMigration.ts`): rewrite the notes'
+	 * links, then move the files into `.fr5a/`, every mtime kept.
+	 */
+	migrateStorage?(plan: StoragePlan): Promise<StorageResult>;
 
 	/** Files under the workspace's hidden `.fr5a/` folder (paths relative to it). */
 	readMeta(rel: string): Promise<string | null>;

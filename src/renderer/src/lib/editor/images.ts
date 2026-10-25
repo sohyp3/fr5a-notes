@@ -1,4 +1,4 @@
-import { isImagePath } from '../../../../shared/paths';
+import { APP_ASSETS_DIR, isImagePath, relativeLink } from '../../../../shared/paths';
 import { codeLines } from './blocks';
 import { findHighlights } from './highlights';
 import { findTables } from './tables';
@@ -9,16 +9,18 @@ import { findTables } from './tables';
  * width is kept in a comment on the line right below, as a share of the text
  * column:
  *
- *   ![Diagram](../assets/diagram.png)
+ *   ![Diagram](../.fr5a/assets/diagram.png)
  *   <!-- size: 60% -->
  *
  * No comment: the picture's own width, never wider than the column. Pasted /
- * dropped images are saved under `assets/` at the workspace root and linked
- * relative to the note, so other Markdown tools find them too. Pure.
+ * dropped images are saved under `.fr5a/assets/` (the app's own folder at the
+ * workspace root) and linked relative to the note, so other Markdown tools
+ * find them too. Pure.
  */
 
-/** Saved images go here (workspace root). */
-export const ASSETS_DIR = 'assets';
+/** Saved images go here (workspace-relative). */
+export const ASSETS_DIR = APP_ASSETS_DIR;
+export { relativeLink };
 export const MIN_SIZE = 10;
 
 const IMAGE_RE =
@@ -97,19 +99,6 @@ export function imageSource(src: string, dir: string): ImageSource | null {
 	}
 	const out = parts.join('/');
 	return isImagePath(out) ? { kind: 'file', path: out } : null;
-}
-
-/** Characters that would end or break a Markdown link destination. */
-const encodeSegment = (s: string) =>
-	s.replace(/[\s()<>%]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`);
-
-/** Workspace path `to` as a link from folder `dir`: `../assets/a.png`. */
-export function relativeLink(dir: string, to: string): string {
-	const from = dir.split('/').filter(Boolean);
-	const target = to.split('/');
-	let i = 0;
-	while (i < from.length && i < target.length - 1 && from[i] === target[i]) i++;
-	return [...from.slice(i).map(() => '..'), ...target.slice(i).map(encodeSegment)].join('/');
 }
 
 const TYPE_EXT: Record<string, string> = {

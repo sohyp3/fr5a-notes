@@ -12,7 +12,10 @@ const mem = vi.hoisted(() => ({
 	resume: [] as (() => void)[],
 	clock: 1000,
 	/** What Capacitor.getPlatform() answers; iOS tests flip it. */
-	platform: 'android' as string
+	platform: 'android' as string,
+	/** Injected I/O failures (storage migration rollback tests). */
+	failWrite: null as ((path: string, data: string) => boolean) | null,
+	failRename: null as ((from: string, to: string) => boolean) | null
 }));
 
 vi.mock('@capacitor/filesystem', () => {
@@ -63,6 +66,7 @@ vi.mock('@capacitor/filesystem', () => {
 				data: string;
 				recursive?: boolean;
 			}) => {
+				if (mem.failWrite?.(path, data)) return fail('EIO');
 				if (!mem.dirs.has(parent(path))) {
 					if (!recursive) return fail('Parent directory missing');
 					mkdirs(parent(path));
@@ -80,6 +84,7 @@ vi.mock('@capacitor/filesystem', () => {
 				for (const f of [...mem.files.keys()]) if (under(f)) mem.files.delete(f);
 			},
 			rename: async ({ from, to }: { from: string; to: string }) => {
+				if (mem.failRename?.(from, to)) return fail('EXDEV');
 				if (!mem.dirs.has(parent(to))) return fail('Parent directory missing');
 				const f = mem.files.get(from);
 				if (f) {
@@ -141,7 +146,12 @@ vi.mock('@capacitor/core', () => ({
 		}
 	},
 	// The app's own FileTimes plugin (git sync keeps note mtimes across a pull).
-	registerPlugin: () => ({ setMtime: async () => {} })
+	registerPlugin: () => ({
+		setMtime: async ({ path, mtime }: { path: string; mtime: number }) => {
+			const f = mem.files.get(path);
+			if (f) f.mtime = mtime;
+		}
+	})
 }));
 
 import { buildMeta, createCapacitorPlatform, safeSubdir, TOKEN_KEY } from './api.capacitor';
@@ -161,6 +171,8 @@ function seed(id: string, data: string) {
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 beforeEach(() => {
+	mem.failWrite = null;
+	mem.failRename = null;
 	mem.files.clear();
 	mem.dirs.clear();
 	mem.prefs.clear();
@@ -252,6 +264,103 @@ describe('capacitor platform (android + ios)', () => {
 				children: [{ name: 'child', path: 'tag1/child', count: 1, children: [] }]
 			}
 		]);
+	});
+
+	it('indexes saved chats in .fr5a/chats, keeping them out of tags and folders', async () => {
+		seed('a.md', '# Alpha #t');
+		seed('.fr5a/chats/talk.md', '# Talk\n\n*AI chat* #t');
+		seed('.fr5a/sessions/device/s.md', '# Session');
+		seed('.fr5a/top.md', '# Top');
+		const api = createCapacitorPlatform();
+		expect((await api.listNotes()).map((n) => n.id).sort()).toEqual([
+			'.fr5a/chats/talk.md',
+			'a.md'
+		]);
+		expect((await api.listTags())[0].count).toBe(1);
+		expect(await api.listFolders()).toEqual([]);
+	});
+
+	it('saves images into .fr5a/assets and migrates old files, keeping mtimes', async () => {
+		seed('Work/plan.md', '# Plan\n\n![](../assets/cat.png)');
+		seed('assets/cat.png', 'png');
+		seed('AI chats/old.md', '# Old\n\n*AI chat*');
+		const api = createCapacitorPlatform();
+		expect(await api.saveAsset!('.fr5a/assets/dog.png', new Uint8Array([1]))).toBe(
+			'.fr5a/assets/dog.png'
+		);
+		await expect(api.saveAsset!('.fr5a/skills/x.png', new Uint8Array([1]))).rejects.toThrow();
+		expect(await api.listImages!('assets')).toEqual(['assets/cat.png']);
+		const before = (p: string) => mem.files.get(`notes/${p}`)!.mtime;
+		const times = [before('Work/plan.md'), before('assets/cat.png'), before('AI chats/old.md')];
+		const res = await api.migrateStorage!({
+			moves: [
+				{ from: 'assets/cat.png', to: '.fr5a/assets/cat.png' },
+				{ from: 'AI chats/old.md', to: '.fr5a/chats/old.md' }
+			],
+			rewrites: [{ id: 'Work/plan.md', text: '# Plan\n\n![](../.fr5a/assets/cat.png)' }],
+			skipped: []
+		});
+		expect(res).toEqual({ moved: 2, rewritten: 1, skipped: [] });
+		expect(await api.readNote('Work/plan.md')).toContain('../.fr5a/assets/cat.png');
+		expect([
+			before('Work/plan.md'),
+			before('.fr5a/assets/cat.png'),
+			before('.fr5a/chats/old.md')
+		]).toEqual(times);
+		expect((await api.listNotes()).map((n) => n.id).sort()).toEqual([
+			'.fr5a/chats/old.md',
+			'Work/plan.md'
+		]);
+		expect(mem.dirs.has('notes/assets')).toBe(false);
+		await expect(
+			api.migrateStorage!({
+				moves: [{ from: 'Work/plan.md', to: '.fr5a/maps/plan.md' }],
+				rewrites: [],
+				skipped: []
+			})
+		).rejects.toThrow();
+	});
+
+	it('puts everything back when a migration rewrite or move fails', async () => {
+		seed('Work/plan.md', '# Plan\n\n![](../assets/cat.png)');
+		seed('b.md', '# B');
+		seed('assets/cat.png', 'png');
+		seed('AI chats/old.md', '# Old\n\n*AI chat*');
+		const api = createCapacitorPlatform();
+		await api.listNotes();
+		const ids = ['Work/plan.md', 'b.md', 'assets/cat.png', 'AI chats/old.md'];
+		const snap = () => ids.map((id) => ({ ...mem.files.get(`notes/${id}`) }));
+		const before = snap();
+		const plan = {
+			moves: [
+				{ from: 'assets/cat.png', to: '.fr5a/assets/cat.png' },
+				{ from: 'AI chats/old.md', to: '.fr5a/chats/old.md' }
+			],
+			rewrites: [
+				{ id: 'Work/plan.md', text: '# Plan\n\n![](../.fr5a/assets/cat.png)' },
+				{ id: 'b.md', text: '# B2' }
+			],
+			skipped: []
+		};
+		const untouched = async () => {
+			expect(snap()).toEqual(before);
+			expect(mem.files.has('notes/.fr5a/assets/cat.png')).toBe(false);
+			expect(mem.files.has('notes/.fr5a/chats/old.md')).toBe(false);
+			expect((await api.listNotes()).map((n) => n.id).sort()).toEqual([
+				'AI chats/old.md',
+				'Work/plan.md',
+				'b.md'
+			]);
+		};
+
+		mem.failWrite = (path, data) => path === 'notes/b.md' && data === '# B2';
+		await expect(api.migrateStorage!(plan)).rejects.toThrow(/update b\.md.*nothing was changed/);
+		await untouched();
+
+		mem.failWrite = null;
+		mem.failRename = (from) => from === 'notes/AI chats/old.md';
+		await expect(api.migrateStorage!(plan)).rejects.toThrow(/move AI chats\/old\.md.*EXDEV/);
+		await untouched();
 	});
 
 	it('reads, writes and re-indexes a note', async () => {
