@@ -106,6 +106,9 @@
 		return { side, list, ai: app.harnessOpen ? ai : app.widths.harness };
 	});
 	const overlay = $derived(app.view !== 'editor');
+	// Tablets: the AI sheet sits above the content, so it steps aside while a
+	// view (Settings, Changes, the map) is over the editor and comes back after.
+	const sheetShown = $derived(tablet && app.harnessOpen && !overlay);
 
 	// Which panes are on screen for the current layout. Every pane stays mounted
 	// across layouts (only CSS changes), so rotating keeps the editor + caret.
@@ -114,7 +117,9 @@
 	);
 	const listShown = $derived(phone ? app.pane === 'list' : fit.list > 0);
 	const editorShown = $derived(phone ? app.pane === 'editor' : true);
-	const harnessShown = $derived(phone ? app.pane === 'harness' : app.harnessOpen);
+	const harnessShown = $derived(
+		phone ? app.pane === 'harness' : tablet ? sheetShown : app.harnessOpen
+	);
 
 	// Phones: panes sit side by side in this order and slide; the one on
 	// screen is "current", earlier ones wait to the left, later to the right.
@@ -564,7 +569,7 @@
 				`body layout-${app.layout}`,
 				{
 					'drawer-open': app.drawerOpen,
-					'harness-open': app.harnessOpen,
+					'harness-open': tablet ? sheetShown : app.harnessOpen,
 					'sheet-expanded': app.sheetExpanded,
 					overlay
 				}
@@ -658,7 +663,7 @@
 					</div>
 				{/if}
 			</main>
-			{#if tablet && app.harnessOpen}
+			{#if sheetShown}
 				<button
 					class="scrim sheet-scrim"
 					bind:this={sheetScrim}
