@@ -15,7 +15,7 @@
 	import { UI_FONTS, EN_FONTS, AR_FONTS } from '../fonts';
 	import { ACCENTS } from '../accents';
 	import { SHORTCUTS, VIM_SHORTCUTS as vimShortcuts, shortcutOn } from '../shortcuts';
-	import { motionK } from '../motion';
+	import { ms } from '../motion';
 	import { runStorageMigration, scanStorage, type StorageScan } from '../storage';
 	import {
 		BAR_ICONS,
@@ -192,7 +192,7 @@
 			<nav
 				class={['nav', { index: showIndex }]}
 				aria-label="Settings sections"
-				in:fly={{ x: phone ? -24 : 0, opacity: 0, duration: phone ? 180 * motionK() : 0 }}
+				in:fly={{ x: phone ? -24 : 0, opacity: 0, duration: phone ? ms.pane : 0 }}
 			>
 				{#each SECTIONS as sec (sec.id)}
 					<button
@@ -222,7 +222,7 @@
 			{#key app.settingsSection}
 				<div
 					class="pane-body"
-					in:fly={{ x: phone ? 24 : 0, y: phone ? 0 : 6, duration: 180 * motionK() }}
+					in:fly={{ x: phone ? 24 : 0, y: phone ? 0 : 6, duration: phone ? ms.pane : ms.pop }}
 					out:fade={{ duration: 0 }}
 				>
 					{#if !phone}<h2 class="section-title">{section.label}</h2>{/if}
@@ -480,12 +480,17 @@
 					{:else if section.id === 'linkedNotes'}
 						<section class="group">
 							<h3>Note links &amp; graph</h3>
+							<p class="prose">
+								A link to a note is plain Markdown, <code>[text](folder/note.md)</code>. Insert →
+								Link types it and suggests notes as you fill in the path. A tap follows a link in
+								view mode, Mod+click while editing.
+							</p>
 							<div class="row">
 								<div class="label">
 									<span class="name">Note links &amp; graph</span>
 									<span class="desc"
-										>Suggest notes inside <code>[text](</code>, follow links (a tap in view mode,
-										Mod+click while editing), and the automatic graph of links and tags</span
+										>Note suggestions inside <code>[text](</code>, following links, and the
+										automatic graph of links and tags</span
 									>
 								</div>
 								{@render toggle(s.linkedNotes, 'Note links & graph', () =>
@@ -718,9 +723,9 @@
 	.icon-btn {
 		display: grid;
 		place-items: center;
-		width: 34px;
-		height: 34px;
-		border-radius: 9px;
+		width: var(--btn-h);
+		height: var(--btn-h);
+		border-radius: var(--btn-radius);
 		color: var(--text-muted);
 		transition: background var(--dur-fast) ease;
 	}
@@ -882,7 +887,7 @@
 		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 	}
 	.advanced-tab:focus-visible {
-		outline: 2px solid var(--accent);
+		outline: 2px solid var(--focus-ring);
 		outline-offset: 1px;
 	}
 	:global(html[data-touch]) .advanced-tab {
@@ -976,9 +981,9 @@
 	}
 	.btn {
 		flex: 0 0 auto;
-		min-height: 32px;
+		min-height: var(--btn-h-dense);
 		padding: 0 14px;
-		border-radius: 8px;
+		border-radius: var(--btn-radius);
 		background: var(--bg-hover);
 		color: var(--text);
 		font-size: 13px;
@@ -988,23 +993,23 @@
 			transform var(--dur-fast) ease;
 	}
 	:global(html[data-touch]) .btn {
-		min-height: 44px;
+		min-height: var(--tap);
 	}
 	.btn:hover {
 		background: var(--bg-active);
 	}
 	.btn:active {
-		transform: scale(0.97);
+		transform: scale(var(--press));
 	}
 	select {
 		flex: 0 0 auto;
-		min-height: 32px;
+		min-height: var(--btn-h-dense);
 		font-family: inherit;
 		font-size: 13px;
 		color: var(--text);
 		background: var(--bg-hover);
 		border: none;
-		border-radius: 8px;
+		border-radius: var(--btn-radius);
 		padding: 0 10px;
 		cursor: pointer;
 	}
@@ -1013,7 +1018,7 @@
 		font-size: 15px;
 	}
 	select:focus {
-		outline: 2px solid var(--accent-soft);
+		outline: 2px solid var(--focus-ring);
 	}
 	.segmented {
 		flex: 0 0 auto;
@@ -1037,6 +1042,14 @@
 	:global(html[data-touch]) .seg {
 		min-height: 40px;
 		padding: 0 18px;
+	}
+	@media (hover: hover) {
+		.seg:hover:not(.on) {
+			color: var(--text);
+		}
+		.toggle:hover {
+			filter: brightness(0.97);
+		}
 	}
 	.seg.on {
 		background: var(--bg-editor);

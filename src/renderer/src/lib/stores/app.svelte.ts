@@ -520,7 +520,12 @@ class AppState {
 			if (document.hidden) void this.flush();
 		});
 		// Closing the window / quitting (desktop), or the app's pause (mobile).
-		platform.onLeave?.(() => this.flush());
+		// The host keeps one callback: it runs every registered flush (`beforeLeave`).
+		// allSettled + async wrappers: a failing hook neither stops the others nor
+		// settles the callback early (the host closes the window once it settles).
+		platform.onLeave?.(async () => {
+			await Promise.allSettled([this.flush(), ...[...this.leaveHooks].map(async (f) => f())]);
+		});
 		// Git sync: reload from disk after a clean sync; surface conflicts.
 		platform.onSyncDone(() => {
 			this.conflictOpen = false;
@@ -2033,6 +2038,16 @@ class AppState {
 		this.saving = true;
 		if (this.saveTimer) clearTimeout(this.saveTimer);
 		this.saveTimer = setTimeout(() => this.flush(), saveDebounce());
+	}
+
+	/** Other writers' pending saves (an open mind map), flushed with the note's on leave. */
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- never read reactively
+	private leaveHooks = new Set<() => Promise<void>>();
+
+	/** Run `flush` too before the window closes / the app quits or pauses. Returns the unregister. */
+	beforeLeave(flush: () => Promise<void>): () => void {
+		this.leaveHooks.add(flush);
+		return () => this.leaveHooks.delete(flush);
 	}
 
 	/**

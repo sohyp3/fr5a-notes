@@ -188,7 +188,7 @@
 		color: var(--text-main);
 	}
 	input:focus {
-		outline: 2px solid var(--accent);
+		outline: 2px solid var(--focus-ring);
 		outline-offset: -1px;
 	}
 	.actions {
@@ -197,12 +197,35 @@
 		gap: 8px;
 	}
 	.btn {
-		padding: 7px 14px;
-		border-radius: 8px;
+		padding: 0 14px;
+		border-radius: var(--btn-radius);
 		background: var(--bg-hover);
 		color: var(--text-main);
 		font-size: 13px;
 		font-weight: 500;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: var(--btn-h-dense);
+		transition:
+			background var(--dur-fast) ease,
+			filter var(--dur-fast) ease,
+			transform var(--dur-fast) ease;
+	}
+	:global(html[data-touch]) .btn {
+		min-height: var(--tap);
+	}
+	@media (hover: hover) {
+		.btn:hover:not(:disabled) {
+			background: var(--bg-active);
+		}
+		.btn.primary:hover:not(:disabled) {
+			background: var(--accent);
+			filter: brightness(1.08);
+		}
+	}
+	.btn:active:not(:disabled) {
+		transform: scale(var(--press));
 	}
 	.btn.primary {
 		background: var(--accent);

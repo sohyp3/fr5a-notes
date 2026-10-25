@@ -245,7 +245,7 @@
 		padding: 2px;
 	}
 	.cell:focus-visible {
-		outline: 2px solid var(--accent);
+		outline: 2px solid var(--focus-ring);
 		outline-offset: 1px;
 	}
 	.cell {
@@ -297,7 +297,7 @@
 		right: 0;
 		bottom: 0;
 		padding: 6px 16px calc(10px + env(safe-area-inset-bottom, 0px));
-		border-radius: 18px 18px 0 0;
+		border-radius: var(--sheet-radius) var(--sheet-radius) 0 0;
 		box-shadow: 0 -10px 34px rgba(0, 0, 0, 0.2);
 	}
 	.sheet .head {

@@ -143,13 +143,13 @@
 		position: relative;
 		width: min(440px, 100%);
 		padding: 18px 18px 14px;
-		border-radius: 14px;
+		border-radius: var(--dialog-radius);
 		background: var(--bg-editor);
 		box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
 	}
 	.sheet .dialog {
 		width: 100%;
-		border-radius: 18px 18px 0 0;
+		border-radius: var(--sheet-radius) var(--sheet-radius) 0 0;
 		padding: 20px 16px calc(14px + env(safe-area-inset-bottom, 0px));
 	}
 	h2 {
@@ -232,9 +232,9 @@
 		margin-top: 12px;
 	}
 	.btn {
-		min-height: 36px;
+		min-height: var(--btn-h);
 		padding: 0 16px;
-		border-radius: 9px;
+		border-radius: var(--btn-radius);
 		background: var(--bg-hover);
 		color: var(--text);
 		font-size: 13.5px;
@@ -245,7 +245,7 @@
 	}
 	.sheet .btn {
 		flex: 1;
-		min-height: 50px;
+		min-height: var(--btn-h-sheet);
 		font-size: 16px;
 	}
 	.btn:hover {

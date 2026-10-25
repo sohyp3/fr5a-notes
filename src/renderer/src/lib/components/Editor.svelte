@@ -43,7 +43,7 @@
 	import NoteTabs from './NoteTabs.svelte';
 	import Icon from './Icon.svelte';
 	import { isMobile, platform } from '../platform';
-	import { motionK } from '../motion';
+	import { ms } from '../motion';
 	import type { IconName } from '../icons';
 	import {
 		BAR_LABELS,
@@ -950,7 +950,7 @@
 		<NoteTabs />
 	{/if}
 	{#if !app.workspace}
-		<div class="placeholder-screen" in:fade={{ duration: 150 * motionK() }}>
+		<div class="placeholder-screen" in:fade={{ duration: ms.pop }}>
 			<EmptyState
 				src={logo}
 				alt="fr5a"
@@ -963,7 +963,7 @@
 			</EmptyState>
 		</div>
 	{:else if !app.activeId && !app.draft}
-		<div class="placeholder-screen" in:fade={{ duration: 150 * motionK() }}>
+		<div class="placeholder-screen" in:fade={{ duration: ms.pop }}>
 			<EmptyState
 				src={mascotNew}
 				title="Nothing open"
@@ -992,7 +992,7 @@
 						>
 							{#if crumb.dir && !narrow && !crumbTight}<span class="cdir">{crumb.dir} /</span>{/if}
 							<span class="cname">{crumb.name}</span>
-							<span class="caret-down" aria-hidden="true"><Icon name="chevron" size={11} /></span>
+							<span class="caret-down" aria-hidden="true"><Icon name="dropdown" size={11} /></span>
 						</button>
 					{:else}
 						<span class="cname">{crumb.name}</span>
@@ -1065,16 +1065,16 @@
 						: ''}
 				</span>
 				<button
-					class="find-step prev"
+					class="find-step"
 					aria-label="Previous match"
 					disabled={!findStatus.total}
-					onclick={() => stepFind(-1)}><Icon name="chevron" size={15} /></button
+					onclick={() => stepFind(-1)}><Icon name="up" size={15} /></button
 				>
 				<button
 					class="find-step"
 					aria-label="Next match"
 					disabled={!findStatus.total}
-					onclick={() => stepFind(1)}><Icon name="chevron" size={15} /></button
+					onclick={() => stepFind(1)}><Icon name="dropdown" size={15} /></button
 				>
 				<button class="find-close" aria-label="Close find" onclick={() => closeFind()}>
 					<Icon name="close" size={15} />
@@ -1289,12 +1289,6 @@
 	.find-step:disabled {
 		opacity: 0.35;
 	}
-	.find-step :global(.icon) {
-		transform: rotate(90deg);
-	}
-	.find-step.prev :global(.icon) {
-		transform: rotate(-90deg);
-	}
 	:global(html[data-touch]) .findbar {
 		min-height: 52px;
 		padding-inline: 10px 6px;
@@ -1338,7 +1332,6 @@
 	}
 	.caret-down {
 		align-self: center;
-		transform: rotate(90deg);
 		opacity: 0;
 		transition: opacity var(--dur-fast) ease;
 	}
@@ -1559,6 +1552,6 @@
 		filter: brightness(1.05);
 	}
 	.cta:active {
-		transform: scale(0.97);
+		transform: scale(var(--press));
 	}
 </style>

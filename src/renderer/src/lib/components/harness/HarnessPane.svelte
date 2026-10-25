@@ -17,7 +17,7 @@
 	} from '../../harness/types';
 	import { exaOptions } from '../../harness/web';
 	import { reducedMotion } from '../../portal';
-	import { motionK } from '../../motion';
+	import { ms } from '../../motion';
 	import {
 		formatTokens,
 		formatUsd,
@@ -535,7 +535,7 @@
 	{#if historyOpen}
 		<div
 			class={['history', { sheet: phone }]}
-			transition:fly={{ y: phone ? 24 : -6, duration: 180 * motionK() }}
+			transition:fly={{ y: phone ? 24 : -6, duration: ms.pop }}
 		>
 			<div class="hist-head">
 				<strong>Sessions <span class="muted">· on this device</span></strong>
@@ -556,7 +556,7 @@
 					</div>
 				{:else}
 					{#each h.sessionFiles as f (f)}
-						<div class="hist-row" transition:slide={{ duration: 140 * motionK() }}>
+						<div class="hist-row" transition:slide={{ duration: ms.pop }}>
 							{#if confirmDelete === f}
 								<span class="confirm">Delete this session?</span>
 								<button class="chip-btn danger" onclick={() => deleteSession(f)}>Delete</button>
@@ -635,7 +635,7 @@
 				<span class={['chev', { open: ctxOpen }]}><Icon name="chevron" size={13} /></span>
 			</button>
 			{#if ctxOpen}
-				<div class="ctx-more" transition:slide={{ duration: 160 * motionK() }}>
+				<div class="ctx-more" transition:slide={{ duration: ms.pop }}>
 					<div class="ctx-row">
 						<span class="k">Model</span>
 						<select
@@ -803,7 +803,7 @@
 		<div class="transcript-wrap">
 			<div class="transcript" bind:this={scroller} {@attach follow} onscroll={onScroll}>
 				{#if !tab.entries.length}
-					<div class="welcome" in:fade={{ duration: 160 * motionK() }}>
+					<div class="welcome" in:fade={{ duration: ms.pop }}>
 						{#if keyMissing && provider}
 							<p class="lead">
 								{provider.name} needs an API key.
@@ -949,18 +949,14 @@
 				{/if}
 			</div>
 			{#if !pinned && tab.entries.length}
-				<button
-					class="jump"
-					onclick={jumpToLatest}
-					transition:fly={{ y: 8, duration: 140 * motionK() }}
-				>
+				<button class="jump" onclick={jumpToLatest} transition:fly={{ y: 8, duration: ms.pop }}>
 					<Icon name="down" size={14} /> Latest
 				</button>
 			{/if}
 		</div>
 
 		{#if !online.current}
-			<div class="offline" role="status" transition:slide={{ duration: 160 * motionK() }}>
+			<div class="offline" role="status" transition:slide={{ duration: ms.pop }}>
 				You're offline — messages will fail until the connection is back.
 			</div>
 		{/if}
@@ -977,7 +973,7 @@
 				class="dock approval"
 				role="group"
 				aria-label="Review change"
-				in:fly={{ y: 16, duration: 200 * motionK() }}
+				in:fly={{ y: 16, duration: ms.pane }}
 			>
 				<div class="dock-head">
 					<span class="dock-title">Review change</span>
@@ -1041,7 +1037,7 @@
 		{/if}
 	{/if}
 
-	{#if toast}<div class="toast" role="status" transition:fade={{ duration: 120 * motionK() }}>
+	{#if toast}<div class="toast" role="status" transition:fade={{ duration: ms.out }}>
 			{toast}
 		</div>{/if}
 </section>
@@ -1188,7 +1184,7 @@
 		color: var(--text-strong);
 	}
 	.icon:active {
-		transform: scale(0.93);
+		transform: scale(var(--press-icon));
 	}
 
 	/* --- history: popover (wide) / full-height sheet (phone) ---------------- */
@@ -1577,7 +1573,7 @@
 		color: var(--text-strong);
 	}
 	.acts button:active:not(:disabled) {
-		transform: scale(0.96);
+		transform: scale(var(--press));
 	}
 	.acts button:disabled {
 		opacity: 0.4;
@@ -1656,10 +1652,23 @@
 		font-size: 14px;
 	}
 	.chip-btn:active:not(:disabled) {
-		transform: scale(0.96);
+		transform: scale(var(--press));
 	}
 	.chip-btn:disabled {
 		opacity: 0.5;
+	}
+	@media (hover: hover) {
+		.chip-btn:hover:not(:disabled) {
+			box-shadow: inset 0 0 0 1px var(--rule);
+		}
+		.btn:hover,
+		.send:hover:not(:disabled),
+		.dock-foot .primary:hover:not(:disabled) {
+			filter: brightness(1.08);
+		}
+		.jump:hover {
+			opacity: 0.9;
+		}
 	}
 	.chip-btn.danger {
 		color: var(--danger);
@@ -1678,7 +1687,7 @@
 		border-radius: 50%;
 		border: 2px solid var(--accent-soft);
 		border-top-color: var(--accent);
-		animation: spin 700ms linear infinite;
+		animation: spin var(--dur-spin) linear infinite;
 	}
 	.dots::after {
 		content: '';
@@ -1749,7 +1758,7 @@
 		background: var(--bg-hover);
 	}
 	.skill-btn:active {
-		transform: scale(0.98);
+		transform: scale(var(--press-wide));
 	}
 	.skill-btn span {
 		font-family: var(--font-mono);
@@ -1761,15 +1770,15 @@
 		font-size: 11px;
 	}
 	.btn {
-		min-height: 34px;
+		min-height: var(--btn-h);
 		padding: 0 14px;
-		border-radius: 9px;
+		border-radius: var(--btn-radius);
 		background: var(--accent);
 		color: var(--on-accent);
 		font-weight: 600;
 	}
 	:global(html[data-touch]) .btn {
-		min-height: 44px;
+		min-height: var(--tap);
 	}
 	kbd {
 		padding: 0 4px;
@@ -1840,19 +1849,19 @@
 		flex: 1;
 	}
 	.dock-foot button {
-		min-height: 34px;
+		min-height: var(--btn-h);
 		padding: 0 16px;
-		border-radius: 9px;
+		border-radius: var(--btn-radius);
 		font-size: 13px;
 		font-weight: 600;
 		transition: transform var(--dur-fast) ease;
 	}
 	:global(html[data-touch]) .dock-foot button {
-		min-height: 44px;
+		min-height: var(--tap);
 		font-size: 15px;
 	}
 	.dock-foot button:active {
-		transform: scale(0.97);
+		transform: scale(var(--press));
 	}
 	.ghost {
 		color: var(--text-muted);
@@ -1940,7 +1949,7 @@
 		border-radius: 12px;
 	}
 	.send:active:not(:disabled) {
-		transform: scale(0.94);
+		transform: scale(var(--press-icon));
 	}
 	.send:disabled {
 		opacity: 0.35;

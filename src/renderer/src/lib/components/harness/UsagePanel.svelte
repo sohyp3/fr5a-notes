@@ -12,7 +12,7 @@
 		type UsageReport
 	} from '../../harness/usage';
 	import { portal } from '../../portal';
-	import { motionK } from '../../motion';
+	import { ms } from '../../motion';
 	import Icon from '../Icon.svelte';
 	import EmptyState from '../EmptyState.svelte';
 	import mascotCoins from '$lib/assets/fr5a-coins.png';
@@ -85,15 +85,15 @@
 			if (scrimPressed) onclose();
 			scrimPressed = false;
 		}}
-		transition:fade={{ duration: 140 * motionK() }}
+		transition:fade={{ duration: ms.pop }}
 	></button>
 	<div
 		class="panel"
 		role="dialog"
 		aria-modal="true"
 		aria-labelledby="usage-title"
-		in:fly={{ y: phone ? 60 : 8, duration: 200 * motionK(), opacity: phone ? 1 : 0 }}
-		out:fade={{ duration: 120 * motionK() }}
+		in:fly={{ y: phone ? 60 : 8, duration: ms.pane, opacity: phone ? 1 : 0 }}
+		out:fade={{ duration: ms.out }}
 	>
 		<header>
 			<h2 id="usage-title">Usage</h2>
@@ -182,7 +182,7 @@
 		flex-direction: column;
 		width: min(640px, 100%);
 		max-height: min(720px, 100%);
-		border-radius: 14px;
+		border-radius: var(--dialog-radius);
 		background: var(--bg-editor);
 		box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
 		overflow: hidden;
@@ -190,7 +190,7 @@
 	.sheet .panel {
 		width: 100%;
 		max-height: 92%;
-		border-radius: 18px 18px 0 0;
+		border-radius: var(--sheet-radius) var(--sheet-radius) 0 0;
 		padding-bottom: env(safe-area-inset-bottom, 0px);
 	}
 	header {
@@ -208,9 +208,9 @@
 	.icon-btn {
 		display: grid;
 		place-items: center;
-		width: 32px;
-		height: 32px;
-		border-radius: 8px;
+		width: var(--btn-h);
+		height: var(--btn-h);
+		border-radius: var(--btn-radius);
 		color: var(--text-muted);
 	}
 	:global(html[data-touch]) .icon-btn {

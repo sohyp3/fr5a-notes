@@ -217,6 +217,8 @@
 	}
 
 	onDestroy(() => void flush());
+	// Closing the window / quitting mid-debounce: the store's leave hook writes it too.
+	onDestroy(app.beforeLeave(flush));
 
 	// --- changes -----------------------------------------------------------------
 
@@ -796,7 +798,7 @@
 			checkpoint();
 			await moveTo(target);
 			commit();
-			if (!only) void flow.fitView({ padding: 0.2, maxZoom: 1, duration: ms.pane });
+			if (!only) void flow.fitView({ ...fitOptions(0.2, 1), duration: ms.pane });
 		} finally {
 			tidying = false;
 		}
@@ -830,7 +832,16 @@
 		});
 	}
 
-	const fit = () => void flow.fitView({ padding: 0.2, maxZoom: 1.2, duration: ms.pane });
+	/**
+	 * Fit, but never so far out that a phone's nodes turn into unreadable specks:
+	 * there the fit stops at 60% (a wide map then overflows, centred on its content).
+	 */
+	const fitOptions = (padding: number, maxZoom: number) => ({
+		padding,
+		maxZoom,
+		minZoom: app.layout === 'phone' ? 0.6 : undefined
+	});
+	const fit = () => void flow.fitView({ ...fitOptions(0.2, 1.2), duration: ms.pane });
 
 	function moreMenu(at: { x: number; y: number }): void {
 		menu = {
@@ -885,7 +896,7 @@
 			colorMode={app.theme}
 			connectionMode={ConnectionMode.Loose}
 			fitView={nodes.length > 0}
-			fitViewOptions={{ padding: 0.25, maxZoom: 1 }}
+			fitViewOptions={fitOptions(0.25, 1)}
 			minZoom={0.1}
 			maxZoom={2.5}
 			snapGrid={snap ? [10, 10] : undefined}
@@ -943,12 +954,15 @@
 
 			<Panel position={app.touch ? 'bottom-center' : 'top-left'} class="map-toolbar">
 				<div class="bar" role="toolbar" aria-label="Map">
-					<button
-						class="ib"
-						title="All maps"
-						aria-label="All maps"
-						onclick={() => app.openMindMap(null)}><Icon name="back" size={18} /></button
-					>
+					<!-- Phones go back with the title bar's Back: one back button per screen. -->
+					{#if app.layout !== 'phone'}
+						<button
+							class="ib"
+							title="All maps"
+							aria-label="All maps"
+							onclick={() => app.openMindMap(null)}><Icon name="back" size={18} /></button
+						>
+					{/if}
 					{#if app.touch}
 						<button class="ib" title="Add" aria-label="Add" onclick={(e) => addMenu(below(e))}
 							><Icon name="plus" size={18} /></button
@@ -1121,8 +1135,8 @@
 		background: var(--bg-editor);
 		box-shadow: var(--shadow-pane);
 	}
-	:global(.layout-phone) .map,
-	.map.touch {
+	/* Phones fill the screen edge to edge; tablets keep the pane card, like the graph. */
+	:global(.layout-phone) .map {
 		border-radius: 0;
 		box-shadow: none;
 	}
@@ -1503,9 +1517,9 @@
 		line-height: 1.55;
 	}
 	.btn {
-		min-height: 36px;
+		min-height: var(--btn-h);
 		padding: 0 16px;
-		border-radius: 9px;
+		border-radius: var(--btn-radius);
 		background: var(--bg-hover);
 		color: var(--text);
 		font-size: 13.5px;
@@ -1515,12 +1529,21 @@
 			transform var(--dur-fast) ease;
 	}
 	.map.touch .btn {
-		min-height: 50px;
+		min-height: var(--btn-h-sheet);
 		font-size: 16px;
 	}
 	.btn.primary {
 		background: var(--accent);
 		color: var(--on-accent);
+	}
+	@media (hover: hover) {
+		.btn:hover {
+			background: var(--bg-active);
+		}
+		.btn.primary:hover {
+			background: var(--accent);
+			filter: brightness(1.08);
+		}
 	}
 	.btn:active {
 		transform: scale(var(--press));

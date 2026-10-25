@@ -7,8 +7,14 @@
 	// tags, so the reply's own HTML can never reach the DOM. Block by block:
 	// while a reply streams only its last block changes, so each delta parses
 	// and lays out the tail instead of the whole reply.
-	const memo: { last?: RenderedReply } = {};
-	const blocks = $derived((memo.last = renderReplyBlocks(text, memo.last)).html);
+	// The previous render lives in the derivation's own closure (no outside state is
+	// written): each run hands it to the next one.
+	const blocks = $derived.by(
+		(() => {
+			let prev: RenderedReply | undefined;
+			return () => (prev = renderReplyBlocks(text, prev)).html;
+		})()
+	);
 
 	/** Copy buttons on code blocks (event delegation over the rendered HTML). */
 	async function onclick(e: MouseEvent): Promise<void> {

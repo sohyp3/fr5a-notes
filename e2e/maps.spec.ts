@@ -263,6 +263,22 @@ test('maps: islands, connect, live drag, persist, tag nodes (touch layouts)', as
 	);
 });
 
+test('desktop maps: closing the window writes a pending map save at once', async ({
+	browser
+}, info) => {
+	test.skip(info.project.name !== 'phone 390x844', 'one desktop run is enough');
+	const { ctx, page } = await desktopPage(browser);
+	await openMaps(page);
+	await page.getByRole('button', { name: 'New map' }).click();
+	await page.getByRole('dialog').getByRole('textbox').fill('Atlas');
+	await page.getByRole('dialog').getByRole('button', { name: 'Create' }).click();
+	await addIdea(page, 'Unsaved', false);
+	// Within the 500 ms debounce: the host's leave callback (window close / quit) flushes it.
+	await page.evaluate(() => (window as unknown as { __leave: () => Promise<void> }).__leave());
+	expect((await savedMap(page))?.nodes.map((n) => n.text)).toEqual(['Unsaved']);
+	await ctx.close();
+});
+
 test('desktop maps: build, persist, tag nodes, undo, rename follows', async ({ browser }, info) => {
 	test.skip(info.project.name !== 'phone 390x844', 'one desktop run is enough');
 	const { ctx, page } = await desktopPage(browser);

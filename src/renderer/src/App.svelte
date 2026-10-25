@@ -733,7 +733,7 @@
 
 	{#if app.conflictOpen}
 		<!-- Same resolver the desktop opens as a second window; closes on sync done. -->
-		<div class="conflict-overlay" transition:fade={{ duration: 160 * motionK() }}>
+		<div class="conflict-overlay" transition:fade={{ duration: ms.pop }}>
 			<ConflictWindow />
 		</div>
 	{/if}
@@ -913,7 +913,7 @@
 		display: grid;
 		place-items: center;
 		height: 24px;
-		border-radius: 16px 16px 0 0;
+		border-radius: var(--sheet-radius) var(--sheet-radius) 0 0;
 		background: var(--bg-editor);
 		box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.12);
 		touch-action: none;

@@ -355,7 +355,7 @@
 		font-size: 11px;
 		color: var(--text-muted);
 		opacity: 0;
-		transition: opacity 240ms ease;
+		transition: opacity var(--dur-exit) ease;
 	}
 	.saving.on {
 		opacity: 1;

@@ -275,10 +275,33 @@
 	}
 	.btn {
 		font-size: 13px;
-		padding: 7px 16px;
-		border-radius: 8px;
+		padding: 0 14px;
+		border-radius: var(--btn-radius);
 		background: var(--bg-hover);
 		color: var(--text);
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: var(--btn-h-dense);
+		transition:
+			background var(--dur-fast) ease,
+			filter var(--dur-fast) ease,
+			transform var(--dur-fast) ease;
+	}
+	:global(html[data-touch]) .btn {
+		min-height: var(--tap);
+	}
+	@media (hover: hover) {
+		.btn:hover:not(:disabled) {
+			background: var(--bg-active);
+		}
+		.btn.primary:hover:not(:disabled) {
+			background: var(--accent);
+			filter: brightness(1.08);
+		}
+	}
+	.btn:active:not(:disabled) {
+		transform: scale(var(--press));
 	}
 	.btn.primary {
 		background: var(--accent);

@@ -20,7 +20,8 @@
 
 {#if graph}
 	<div class="map-shell">
-		{#if app.settings.mindMaps}
+		<!-- Phones go back with the title bar's Back (and keep the graph legend's corner). -->
+		{#if app.settings.mindMaps && app.layout !== 'phone'}
 			<button class="chooser-back" onclick={() => app.openMindMap(null)}>
 				<Icon name="back" size={17} /> Maps
 			</button>
@@ -47,24 +48,31 @@
 		z-index: 4;
 		left: 18px;
 		bottom: 18px;
-		min-height: 36px;
+		min-height: var(--btn-h);
 		padding: 0 13px;
 		display: flex;
 		align-items: center;
 		gap: 6px;
 		border: 1px solid var(--rule);
-		border-radius: 9px;
+		border-radius: var(--btn-radius);
 		background: var(--bg-editor);
 		color: var(--text-muted);
 		box-shadow: var(--shadow-pane);
 		touch-action: manipulation;
 		-webkit-tap-highlight-color: transparent;
-		transition: transform var(--dur-fast) ease;
+		transition:
+			transform var(--dur-fast) ease,
+			color var(--dur-fast) ease;
+	}
+	@media (hover: hover) {
+		.chooser-back:hover {
+			color: var(--text);
+		}
 	}
 	.chooser-back:active {
 		transform: scale(var(--press));
 	}
 	:global([data-touch]) .chooser-back {
-		min-height: 50px;
+		min-height: var(--btn-h-sheet);
 	}
 </style>

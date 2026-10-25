@@ -2,7 +2,7 @@
 	import { fly } from 'svelte/transition';
 	import type { Question } from '../../harness/harness.svelte';
 	import Icon from '../Icon.svelte';
-	import { motionK } from '../../motion';
+	import { ms } from '../../motion';
 
 	interface Props {
 		question: Question;
@@ -61,7 +61,7 @@
 		form.picked[i] = [label];
 		form.other[i] = '';
 		// A single pick moves straight on (and a lone question is answered).
-		setTimeout(next, items.length === 1 ? 0 : 140 * motionK());
+		setTimeout(next, items.length === 1 ? 0 : ms.pop);
 	}
 
 	function typed(e: Event): void {
@@ -104,7 +104,7 @@
 	aria-label="Question from the AI"
 	tabindex="-1"
 	onkeydown={onKey}
-	in:fly={{ y: 16, duration: 200 * motionK() }}
+	in:fly={{ y: 16, duration: ms.pane }}
 >
 	{#if items.length > 1}
 		<div class="steps" role="tablist" aria-label="Questions">
@@ -129,7 +129,7 @@
 	{/if}
 
 	{#key form.step}
-		<div class="qbody" in:fly={{ x: 12, duration: 160 * motionK() }}>
+		<div class="qbody" in:fly={{ x: 12, duration: ms.pop }}>
 			<h3 class="q" dir="auto">{item.question}</h3>
 			{#if item.multiSelect}<p class="hint">Pick all that apply</p>{/if}
 
@@ -288,7 +288,7 @@
 		background: var(--bg-hover);
 	}
 	button.opt:active {
-		transform: scale(0.99);
+		transform: scale(var(--press-wide));
 	}
 	.opt.on {
 		background: var(--accent-soft);
@@ -380,9 +380,9 @@
 		flex: 1;
 	}
 	.qfoot button {
-		min-height: 34px;
+		min-height: var(--btn-h);
 		padding: 0 16px;
-		border-radius: 9px;
+		border-radius: var(--btn-radius);
 		font-size: 13px;
 		font-weight: 600;
 		transition:
@@ -390,11 +390,11 @@
 			transform var(--dur-fast) ease;
 	}
 	:global(html[data-touch]) .qfoot button {
-		min-height: 44px;
+		min-height: var(--tap);
 		font-size: 15px;
 	}
 	.qfoot button:active:not(:disabled) {
-		transform: scale(0.97);
+		transform: scale(var(--press));
 	}
 	.ghost {
 		color: var(--text-muted);
@@ -409,5 +409,13 @@
 	}
 	.primary:disabled {
 		opacity: 0.4;
+	}
+	@media (hover: hover) {
+		.primary:hover:not(:disabled) {
+			filter: brightness(1.08);
+		}
+		.stepper:hover:not(.on) {
+			background: var(--bg-hover);
+		}
 	}
 </style>

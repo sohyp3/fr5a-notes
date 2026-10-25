@@ -141,13 +141,13 @@
 		position: relative;
 		width: min(400px, 100%);
 		padding: 20px 20px 16px;
-		border-radius: 14px;
+		border-radius: var(--dialog-radius);
 		background: var(--bg-editor);
 		box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
 	}
 	.sheet .dialog {
 		width: 100%;
-		border-radius: 18px 18px 0 0;
+		border-radius: var(--sheet-radius) var(--sheet-radius) 0 0;
 		padding: 22px 18px calc(16px + env(safe-area-inset-bottom, 0px));
 	}
 	h2 {
@@ -177,7 +177,7 @@
 		font-size: 14px;
 	}
 	input:focus {
-		outline: 2px solid var(--accent);
+		outline: 2px solid var(--focus-ring);
 		outline-offset: -1px;
 	}
 	input[aria-invalid='true'] {
@@ -203,9 +203,9 @@
 		flex-direction: column-reverse;
 	}
 	.btn {
-		min-height: 36px;
+		min-height: var(--btn-h);
 		padding: 0 16px;
-		border-radius: 9px;
+		border-radius: var(--btn-radius);
 		background: var(--bg-hover);
 		color: var(--text);
 		font-size: 13.5px;
@@ -215,14 +215,14 @@
 			transform var(--dur-fast) ease;
 	}
 	.sheet .btn {
-		min-height: 50px;
+		min-height: var(--btn-h-sheet);
 		font-size: 16px;
 	}
 	.btn:hover:not(:disabled) {
 		background: var(--bg-active);
 	}
 	.btn:active:not(:disabled) {
-		transform: scale(0.97);
+		transform: scale(var(--press));
 	}
 	.btn:disabled {
 		opacity: 0.5;
