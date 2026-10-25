@@ -834,12 +834,12 @@
 
 	/**
 	 * Fit, but never so far out that a phone's nodes turn into unreadable specks:
-	 * there the fit stops at 65% (a wide map then overflows, centred on its content).
+	 * there the fit stops at 60% (a wide map then overflows, centred on its content).
 	 */
 	const fitOptions = (padding: number, maxZoom: number) => ({
 		padding,
 		maxZoom,
-		minZoom: app.layout === 'phone' ? 0.65 : undefined
+		minZoom: app.layout === 'phone' ? 0.6 : undefined
 	});
 	const fit = () => void flow.fitView({ ...fitOptions(0.2, 1.2), duration: ms.pane });
 
