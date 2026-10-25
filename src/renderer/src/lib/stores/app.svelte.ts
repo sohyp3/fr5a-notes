@@ -521,8 +521,10 @@ class AppState {
 		});
 		// Closing the window / quitting (desktop), or the app's pause (mobile).
 		// The host keeps one callback: it runs every registered flush (`beforeLeave`).
+		// allSettled + async wrappers: a failing hook neither stops the others nor
+		// settles the callback early (the host closes the window once it settles).
 		platform.onLeave?.(async () => {
-			await Promise.all([this.flush(), ...[...this.leaveHooks].map((f) => f())]);
+			await Promise.allSettled([this.flush(), ...[...this.leaveHooks].map(async (f) => f())]);
 		});
 		// Git sync: reload from disk after a clean sync; surface conflicts.
 		platform.onSyncDone(() => {
