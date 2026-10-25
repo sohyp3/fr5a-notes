@@ -461,6 +461,10 @@ function fakeApi(): void {
 			}
 			return { ok: true };
 		},
+		onLeave: (cb: () => Promise<void>) => {
+			(window as unknown as { __leave: () => Promise<void> }).__leave = cb;
+			return () => {};
+		},
 		onSyncConflict: noop,
 		onSyncDone: noop,
 		onNotesChanged: noop

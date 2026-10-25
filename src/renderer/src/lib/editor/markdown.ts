@@ -29,6 +29,36 @@ export function docToText(editor: Editor): string {
 	return lines.join('\n');
 }
 
+/**
+ * Make the editor's text `next` by replacing only the lines that differ (the
+ * metadata comments at the top, say): the caret stays where it was, and the
+ * step stays out of undo. Its update queues the save like any edit.
+ */
+export function replaceLines(editor: Editor, next: string): void {
+	const { doc, schema } = editor.state;
+	const from = docToText(editor).split('\n');
+	const to = next.replace(/\r\n?/g, '\n').split('\n');
+	let a = 0;
+	while (a < from.length && a < to.length && from[a] === to[a]) a++;
+	let b = 0;
+	while (
+		b < from.length - a &&
+		b < to.length - a &&
+		from[from.length - 1 - b] === to[to.length - 1 - b]
+	)
+		b++;
+	let start = 0;
+	for (let k = 0; k < a; k++) start += doc.child(k).nodeSize;
+	let end = start;
+	for (let k = a; k < from.length - b; k++) end += doc.child(k).nodeSize;
+	const lines = to
+		.slice(a, to.length - b)
+		.map((line) => schema.nodes.paragraph.create(null, line ? schema.text(line) : null));
+	editor.view.dispatch(
+		editor.state.tr.replaceWith(start, end, lines).setMeta('addToHistory', false)
+	);
+}
+
 // --- title derivation ---------------------------------------------------------
 
 /**

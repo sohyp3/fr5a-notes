@@ -181,6 +181,9 @@ export const Channels = {
 	windowMinimize: 'window:minimize',
 	windowMaximize: 'window:maximize',
 	windowClose: 'window:close',
+	/** main → renderer: write queued edits now (the window is closing); answered by `windowFlushed`. */
+	windowFlush: 'window:flush',
+	windowFlushed: 'window:flushed',
 	// Git sync (system git CLI). Resolve/abort/conflicts are used by the conflict window.
 	syncPull: 'sync:pull',
 	syncPush: 'sync:push',

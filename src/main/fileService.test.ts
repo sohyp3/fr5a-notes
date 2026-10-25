@@ -85,6 +85,16 @@ describe('FileService move / rename', () => {
 		expect(notes.get('rule.md')?.snippet).toContain('Intro text');
 	});
 
+	it('leaves the file (and its mtime) alone when the content is unchanged', async () => {
+		const file = path.join(root, 'c.md');
+		const past = new Date('2020-01-01T00:00:00Z');
+		await utimes(file, past, past);
+		await svc.write('c.md', '# C\n');
+		expect((await stat(file)).mtimeMs).toBe(past.getTime());
+		await svc.write('c.md', '# C\n\nmore');
+		expect((await stat(file)).mtimeMs).toBeGreaterThan(past.getTime());
+	});
+
 	it('creates note filenames with underscores instead of spaces', async () => {
 		const first = await svc.create('Project meeting notes');
 		const second = await svc.create('Project meeting notes');

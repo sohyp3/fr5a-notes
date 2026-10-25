@@ -2392,6 +2392,214 @@ test('desktop: note tabs — every note opened gets a tab, @tabs for the AI', as
 	await ctx.close();
 });
 
+// --- tabs: auto-save integrity ----------------------------------------------------
+
+/** The page's fake host with `createNote` / `readNote` that can be held mid-call. */
+type Gated = {
+	api: {
+		readNote(id: string): Promise<string>;
+	};
+	__writes: { id: string; content: string }[];
+	__creates: string[];
+	holdCreate?: boolean;
+	holdRead?: string;
+	/** Resolvers of the calls being held, released together by `releaseAll`. */
+	release: (() => void)[];
+};
+
+/** A mouse window with tabs on, the host gated, and `ids` (titles) opened as tabs in order. */
+async function tabsPage(browser: Browser, titles: string[]) {
+	const { ctx, page } = await desktopPage(browser, {
+		'alpha.md': '# Alpha\n\none',
+		'beta.md': '# Beta\n\ntwo'
+	});
+	await page.addInitScript(() => {
+		const w = window as unknown as Gated & {
+			api: {
+				setState(k: string, v: unknown): Promise<void>;
+				createNote(...a: unknown[]): Promise<unknown>;
+			};
+		};
+		void w.api.setState('settings', { tabs: true });
+		w.__creates = [];
+		w.release = [];
+		const hold = () => new Promise<void>((resolve) => w.release.push(resolve));
+		const create = w.api.createNote.bind(w.api);
+		w.api.createNote = async (...args: unknown[]) => {
+			w.__creates.push(String(args[0]));
+			if (w.holdCreate) await hold();
+			return create(...args);
+		};
+		const read = w.api.readNote.bind(w.api);
+		w.api.readNote = async (id: string) => {
+			if (w.holdRead === id) await hold();
+			return read(id);
+		};
+	});
+	await page.reload();
+	await sidebar(page)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	const tabs = page.getByRole('tablist', { name: 'Open notes' }).getByRole('tab');
+	for (const title of titles) await list(page).getByText(title, { exact: true }).click();
+	await expect(tabs).toHaveText(titles);
+	return { ctx, page, tabs };
+}
+
+const creates = (page: Page) => page.evaluate(() => (window as unknown as Gated).__creates);
+const writeCount = (page: Page) =>
+	page.evaluate(() => (window as unknown as Gated).__writes.length);
+const fileText = (page: Page, id: string) =>
+	page.evaluate((id) => (window as unknown as Gated).api.readNote(id), id);
+const hold = (page: Page, what: { create?: boolean; read?: string }) =>
+	page.evaluate((what) => {
+		const w = window as unknown as Gated;
+		w.holdCreate = what.create;
+		w.holdRead = what.read;
+	}, what);
+/** Wait until `n` host calls are being held. */
+const held = (page: Page, n = 1) =>
+	expect.poll(() => page.evaluate(() => (window as unknown as Gated).release.length)).toBe(n);
+const releaseAll = (page: Page) =>
+	page.evaluate(() => {
+		const w = window as unknown as Gated;
+		w.holdCreate = false;
+		w.holdRead = undefined;
+		for (const r of w.release.splice(0)) r();
+	});
+
+test('desktop tabs: closing tabs nobody edited writes nothing', async ({ browser }) => {
+	const { ctx, page, tabs } = await tabsPage(browser, ['Alpha', 'Beta']);
+	await page.waitForTimeout(700);
+	const before = await writeCount(page);
+	await page.keyboard.press('Control+w');
+	await expect(tabs).toHaveText(['Alpha']);
+	await expect(page.locator('.ProseMirror')).toContainText('one');
+	await list(page).getByText('Beta', { exact: true }).click();
+	await page.getByRole('button', { name: 'Close Alpha' }).click();
+	await expect(tabs).toHaveText(['Beta']);
+	await page.waitForTimeout(700);
+	expect(await writeCount(page)).toBe(before);
+	await ctx.close();
+});
+
+test('desktop tabs: a draft closed while its file is being created is created once', async ({
+	browser
+}) => {
+	const { ctx, page, tabs } = await tabsPage(browser, ['Alpha']);
+	await page.keyboard.press('Control+n');
+	await expect(page.locator('.ProseMirror')).toBeFocused();
+	await hold(page, { create: true });
+	await page.keyboard.type('Foo');
+	// The auto-save starts creating Foo.md, which the host holds.
+	await expect.poll(async () => (await creates(page)).length).toBe(1);
+	await page.keyboard.press('Enter');
+	await page.keyboard.type('more text');
+	await page.keyboard.press('Control+w');
+	await page.waitForTimeout(700);
+	await releaseAll(page);
+	await expect(tabs).toHaveText(['Alpha']);
+	await expect(page.locator('.ProseMirror')).toContainText('one');
+	await page.waitForTimeout(700);
+	expect(await creates(page)).toEqual(['Foo']);
+	expect(await noteIds(page)).not.toContain('Foo_2.md');
+	expect(await fileText(page, 'Foo.md')).toBe('# Foo\nmore text');
+	expect(await fileText(page, 'alpha.md')).toBe('# Alpha\n\none');
+	await ctx.close();
+});
+
+test('desktop tabs: text typed while the neighbour loads stays in the closed note', async ({
+	browser
+}) => {
+	const { ctx, page, tabs } = await tabsPage(browser, ['Alpha']);
+	await page.keyboard.press('Control+n');
+	await expect(page.locator('.ProseMirror')).toBeFocused();
+	await page.keyboard.type('Foo');
+	await expect(tabs).toHaveText(['Alpha', 'Foo']);
+	await hold(page, { read: 'alpha.md' });
+	await page.keyboard.press('Control+w');
+	await held(page);
+	await page.keyboard.type(' bar');
+	await page.waitForTimeout(700);
+	await releaseAll(page);
+	await expect(tabs).toHaveText(['Alpha']);
+	await expect(page.locator('.ProseMirror')).toContainText('one');
+	await page.waitForTimeout(700);
+	expect(await fileText(page, 'alpha.md')).toBe('# Alpha\n\none');
+	expect(await fileText(page, 'Foo.md')).toBe('# Foo bar');
+	expect(await creates(page)).toEqual(['Foo']);
+	await ctx.close();
+});
+
+test('desktop tabs: typing through Ctrl+Tab stays in the tab it was typed in', async ({
+	browser
+}) => {
+	const { ctx, page, tabs } = await tabsPage(browser, ['Alpha', 'Beta']);
+	await tabs.first().click();
+	await expect(page.locator('.ProseMirror')).toContainText('one');
+	await page.keyboard.press('Control+End');
+	await page.keyboard.type(' aaa');
+	await hold(page, { read: 'beta.md' });
+	await page.keyboard.press('Control+Tab');
+	await held(page);
+	// Still Alpha on screen until Beta has loaded.
+	await page.keyboard.type(' bbb');
+	await releaseAll(page);
+	await expect(page.locator('.ProseMirror')).toContainText('two');
+	await page.keyboard.press('Control+End');
+	await page.keyboard.type(' ccc');
+	await page.waitForTimeout(700);
+	expect(await fileText(page, 'alpha.md')).toBe('# Alpha\n\none aaa bbb');
+	expect(await fileText(page, 'beta.md')).toBe('# Beta\n\ntwo ccc');
+	await ctx.close();
+});
+
+test('desktop tabs: pinning while typing loses no keystroke', async ({ browser }) => {
+	const { ctx, page } = await tabsPage(browser, ['Alpha']);
+	await page.keyboard.press('Control+End');
+	await page.keyboard.type(' abc');
+	await hold(page, { read: 'alpha.md' });
+	await page.keyboard.press('Control+p');
+	await page.keyboard.type(' def');
+	await page.waitForTimeout(300);
+	await releaseAll(page);
+	await page.waitForTimeout(700);
+	await expect(page.locator('.ProseMirror')).toContainText('one abc def');
+	const text = await fileText(page, 'alpha.md');
+	expect(text).toContain('<!-- pinned: true -->');
+	expect(text).toContain('one abc def');
+	await ctx.close();
+});
+
+test('desktop: closing the window writes the edit still waiting for the auto-save', async ({
+	browser
+}) => {
+	const { ctx, page } = await tabsPage(browser, ['Alpha']);
+	await page.keyboard.press('Control+End');
+	await page.keyboard.type(' bye');
+	// What main asks for when the window closes; it answers well inside the 500ms debounce.
+	await page.evaluate(() => (window as unknown as { __leave: () => Promise<void> }).__leave());
+	expect(await fileText(page, 'alpha.md')).toBe('# Alpha\n\none bye');
+	await ctx.close();
+});
+
+test("desktop tabs: trashing another note keeps the open note's unsaved edit", async ({
+	browser
+}) => {
+	const { ctx, page } = await tabsPage(browser, ['Alpha']);
+	await page.keyboard.press('Control+End');
+	await page.keyboard.type(' abc');
+	await list(page).getByText('Beta', { exact: true }).click({ button: 'right' });
+	await page.getByRole('menuitem', { name: 'Move to Trash' }).click();
+	// (The fake host only records the trashed id.)
+	await expect
+		.poll(() => page.evaluate(() => (window as unknown as { __trashed?: string[] }).__trashed))
+		.toEqual(['beta.md']);
+	await page.waitForTimeout(700);
+	expect(await fileText(page, 'alpha.md')).toBe('# Alpha\n\none abc');
+	await ctx.close();
+});
+
 test('desktop: past the tab limit a note opens in the current tab', async ({ browser }) => {
 	const { ctx, page } = await desktopPage(browser, {
 		'alpha.md': '# Alpha\n\none',

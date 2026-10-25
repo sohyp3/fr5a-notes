@@ -485,6 +485,9 @@ export const Vim = Extension.create<VimOptions>({
 							event.preventDefault();
 							return true;
 						}
+						// Other Ctrl / Cmd combos are app shortcuts (Mod+P pins, Mod+W closes a
+						// tab): left alone, or `p` would paste before the app sees Mod+P.
+						if (event.ctrlKey || event.metaKey) return false;
 						const handled = handleNormal(view, event, vs, options);
 						if (handled) event.preventDefault();
 						return handled;

@@ -15,6 +15,7 @@ import { createSecrets } from './secrets';
 import { deleteMeta, listMeta, readMeta, writeMeta } from './metaFiles';
 import { workspaceChanges } from './gitChanges';
 import { findNestedRepos } from './repos';
+import { flushBeforeClose } from './closeGuard';
 import { Channels } from '../shared/types';
 import type { HttpRequest, NoteMeta, StateKey } from '../shared/types';
 // electron-vite copies the file into the build output and rewrites this to the
@@ -109,6 +110,25 @@ async function openWorkspace(root: string): Promise<void> {
 
 // --- window ----------------------------------------------------------------
 
+/** Set by a quit: a close held for the flush re-issues it (macOS keeps the app otherwise). */
+let quitting = false;
+app.on('before-quit', () => (quitting = true));
+
+/** Ask the window's renderer to write its queued edits; resolves when it says it has. */
+function rendererFlush(win: BrowserWindow): Promise<void> {
+	if (win.webContents.isCrashed()) return Promise.resolve();
+	return new Promise((resolve) => {
+		const done = (e: Electron.IpcMainEvent) => {
+			if (e.sender !== win.webContents) return;
+			ipcMain.off(Channels.windowFlushed, done);
+			resolve();
+		};
+		ipcMain.on(Channels.windowFlushed, done);
+		win.once('closed', () => ipcMain.off(Channels.windowFlushed, done));
+		win.webContents.send(Channels.windowFlush);
+	});
+}
+
 function createWindow(): void {
 	mainWindow = new BrowserWindow({
 		width: 1180,
@@ -132,6 +152,13 @@ function createWindow(): void {
 	});
 
 	mainWindow.on('ready-to-show', () => mainWindow?.show());
+	// The auto-save waits 500ms: closing (or quitting) first lets the renderer write it.
+	const win = mainWindow;
+	flushBeforeClose(
+		win,
+		() => rendererFlush(win),
+		() => quitting && app.quit()
+	);
 
 	// Native right-click menu (Electron shows none by default): spelling
 	// suggestions + clipboard actions. Renderer menus that preventDefault

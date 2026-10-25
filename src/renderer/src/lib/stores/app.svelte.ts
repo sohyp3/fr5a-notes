@@ -9,7 +9,14 @@ import type {
 } from '../../../../shared/types';
 import { uiStack, editorStack } from '../fonts';
 import { accentById, applyPalette, DEFAULT_ACCENT } from '../accents';
-import { setPinned, setLocked, setAiLocal, titleFromContent } from '../editor/markdown';
+import {
+	docToText,
+	replaceLines,
+	setPinned,
+	setLocked,
+	setAiLocal,
+	titleFromContent
+} from '../editor/markdown';
 import { ASSETS_DIR, assetName, relativeLink } from '../editor/images';
 import type { HighlightColor } from '../editor/highlights';
 import { syncErrorMessage } from '../sync';
@@ -44,6 +51,18 @@ const THEME_KEY = 'fr5a-theme';
 const SETTINGS_KEY = 'fr5a-settings';
 /** Pending-save id for a draft note that has no file yet. */
 const DRAFT_ID = '\0draft';
+
+/**
+ * A queued save: the text, the note it was typed into (DRAFT_ID for a draft,
+ * with where the draft lands), and the editor session that typed it. Fixed at
+ * queue time, so a note opened meanwhile can't redirect it.
+ */
+type Pending = {
+	id: string;
+	content: string;
+	session: number;
+	draft?: { folder: string; encrypted: boolean };
+};
 
 const DEFAULT_SIDEBAR: SidebarState = {
 	foldersOpen: true,
@@ -346,7 +365,14 @@ class AppState {
 	saving = $state(false);
 
 	private saveTimer: ReturnType<typeof setTimeout> | null = null;
-	private pending: { id: string; content: string } | null = null;
+	/** The edit waiting for the debounce, filed under its note when it was typed (see `Pending`). */
+	private pending: Pending | null = null;
+	/** The write in flight: each flush chains onto it, so `await flush()` means on disk. */
+	private flushing: Promise<void> | null = null;
+	/** The file a draft became, by the draft's editor session: its later saves go there. */
+	private drafted: { session: number; id: string } | null = null;
+	/** A tab close in progress (Mod+W held down repeats). */
+	private closingTab = false;
 	/** A move / rename in flight: saves wait for it, then write to the new path. */
 	private moving: Promise<unknown> | null = null;
 	private moveListeners: ((from: string, to: string) => void)[] = [];
@@ -493,6 +519,8 @@ class AppState {
 		document.addEventListener('visibilitychange', () => {
 			if (document.hidden) void this.flush();
 		});
+		// Closing the window / quitting (desktop), or the app's pause (mobile).
+		platform.onLeave?.(() => this.flush());
 		// Git sync: reload from disk after a clean sync; surface conflicts.
 		platform.onSyncDone(() => {
 			this.conflictOpen = false;
@@ -645,15 +673,14 @@ class AppState {
 	}
 
 	async pickWorkspace(): Promise<void> {
+		// Note ids are relative: an edit still queued would land in the new folder.
+		await this.flush();
 		const path = await platform.pickWorkspace();
 		if (path) {
 			this.workspace = path;
-			this.activeId = null;
-			this.activeContent = '';
-			this.draft = false;
+			this.closeEditor();
 			this.selectedTag = null;
 			this.setTabs([]);
-			void platform.setState('lastOpenFile', null);
 			await this.refresh();
 		}
 	}
@@ -766,15 +793,24 @@ class AppState {
 			this.setTabs(this.tabs.filter((_, k) => k !== i));
 			return;
 		}
-		await this.flush(); // a draft with text becomes a note (and keeps its place)
-		const at = this.tabIndex;
-		const rest = this.tabs.filter((_, k) => k !== at);
-		this.setTabs(rest);
-		const next = rest[Math.min(at, rest.length - 1)];
-		const closing = this.activeId;
-		if (next) await this.openNote(next);
-		// Nothing left, or the next one stayed shut (a locked note): no note open.
-		if (!next || this.activeId === closing) this.closeEditor();
+		if (this.closingTab) return;
+		this.closingTab = true;
+		try {
+			await this.flush(); // a draft with text becomes a note (and keeps its place)
+			// The open note may have no tab by now (-1): its neighbour is still the one at `i`.
+			const at = this.tabIndex;
+			const closing = this.draft ? null : this.activeId;
+			// Leftover draft tabs (null) go too: the only draft is the one closing.
+			const rest = this.tabs.filter((t, k) => k !== at && t !== null);
+			const next = rest[Math.min(at >= 0 ? at : i, rest.length - 1)];
+			if (next) await this.openNote(next);
+			// Nothing left, or the next one stayed shut (a locked note): no note open.
+			if (!next || this.activeId !== next) this.closeEditor();
+			// The tab goes once its neighbour is open, so the strip never shows a gap.
+			this.setTabs(this.tabs.filter((t) => t !== null && t !== closing));
+		} finally {
+			this.closingTab = false;
+		}
 	}
 
 	/** Step to the next (`1`) / previous (`-1`) tab, round the ends. */
@@ -847,6 +883,8 @@ class AppState {
 			this.activeContent = '';
 			void platform.setState('lastOpenFile', null);
 		}
+		// A write still in flight would put the file back after the delete.
+		await this.settle(id);
 		const tab = this.tabs.indexOf(id);
 		if (tab >= 0) this.setTabs(this.tabs.filter((t) => t !== id));
 		await platform.deleteNote(id);
@@ -864,6 +902,7 @@ class AppState {
 			this.cancelPending();
 			this.activeId = null;
 			this.activeContent = '';
+			await this.settle(trashId);
 		}
 		await platform.restoreNote(trashId);
 		await this.refresh();
@@ -875,6 +914,7 @@ class AppState {
 			this.cancelPending();
 			this.activeId = null;
 			this.activeContent = '';
+			await this.settle(trashId);
 		}
 		await platform.permanentDelete(trashId);
 		await this.refresh();
@@ -1167,19 +1207,39 @@ class AppState {
 	// --- pinning -----------------------------------------------------------
 
 	async setPinned(id: string, pinned: boolean): Promise<void> {
-		// Persist any live edits first so we toggle against current content.
-		if (id === this.activeId) await this.flush();
+		if (await this.rewriteMeta(id, (text) => setPinned(text, pinned))) await this.refresh();
+	}
+
+	/**
+	 * Rewrite a note's metadata comments (`edit`: its text → the new text);
+	 * false when nothing changed. The open note is edited in the editor itself,
+	 * from its own text and in one step: no keystroke falls between reading the
+	 * text and writing the result (a remount would drop the keys typed while it
+	 * ran, and their save would drop the new comment). Its update queues the
+	 * save, which the flush writes after any write in flight.
+	 */
+	private async rewriteMeta(id: string, edit: (text: string) => string): Promise<boolean> {
+		const ed = this.editor;
+		if (id === this.activeId && ed && !this.draft) {
+			const text = docToText(ed);
+			const next = edit(text);
+			if (next === text) return false;
+			replaceLines(ed, next);
+			this.queueSave(docToText(ed), this.editorSession); // as its update did (a no-op then)
+			await this.flush();
+			return true;
+		}
+		await this.flush();
 		const content = await this.readForMeta(id);
-		const next = setPinned(content, pinned);
-		if (next === content) return;
+		const next = edit(content);
+		if (next === content) return false;
 		await platform.writeNote(id, next);
-		if (id === this.activeId) {
+		if (id === this.activeId && !this.draft) {
+			// Open but without an editor: the next mount reads the new text.
 			this.activeContent = next;
-			// Recreate the editor so the (hidden) metadata line is part of its doc
-			// and survives subsequent auto-saves.
 			this.editorReloadToken++;
 		}
-		await this.refresh();
+		return true;
 	}
 
 	async togglePin(id: string): Promise<void> {
@@ -1195,18 +1255,7 @@ class AppState {
 	 * `setPinned`: flush live edits, rewrite the file, recreate the editor.
 	 */
 	async setLocked(id: string, locked: boolean): Promise<void> {
-		if (id === this.activeId) await this.flush();
-		const content = await this.readForMeta(id);
-		const next = setLocked(content, locked);
-		if (next === content) return;
-		await platform.writeNote(id, next);
-		if (id === this.activeId) {
-			this.activeContent = next;
-			// Recreate the editor so its editable state (and the hidden metadata
-			// line) reflect the new lock.
-			this.editorReloadToken++;
-		}
-		await this.refresh();
+		if (await this.rewriteMeta(id, (text) => setLocked(text, locked))) await this.refresh();
 	}
 
 	async toggleLock(id: string): Promise<void> {
@@ -1228,15 +1277,7 @@ class AppState {
 
 	/** Add / drop the note's `<!-- ai: local -->` marker (mirrors `setLocked`). */
 	async setHiddenFromAi(id: string, hidden: boolean): Promise<void> {
-		if (id === this.activeId) await this.flush();
-		const content = await this.readForMeta(id);
-		const next = setAiLocal(content, hidden);
-		if (next === content) return;
-		await platform.writeNote(id, next);
-		if (id === this.activeId) {
-			this.activeContent = next;
-			this.editorReloadToken++;
-		}
+		if (!(await this.rewriteMeta(id, (text) => setAiLocal(text, hidden)))) return;
 		await this.refresh();
 		this.notify('ok', hidden ? 'Hidden from cloud AI' : 'Cloud AI may read this note');
 	}
@@ -1475,14 +1516,19 @@ class AppState {
 		if (!ok) return;
 		const activeInside = !!this.activeId && inside(this.activeId);
 		if (activeInside) await this.flush();
+		// Saves typed meanwhile wait for the delete (as for a move): then they're dropped, not written back.
+		const run = platform.deleteFolder(path);
+		this.moving = run;
 		try {
-			await platform.deleteFolder(path);
+			await run;
+			if (activeInside) this.cancelPending();
 		} catch (err) {
 			this.notify('error', err instanceof Error ? err.message : String(err));
 			return;
+		} finally {
+			if (this.moving === run) this.moving = null;
 		}
 		if (activeInside) {
-			this.cancelPending();
 			this.activeId = null;
 			this.activeContent = '';
 			this.baseline = null;
@@ -1646,8 +1692,9 @@ class AppState {
 		await this.flush();
 		const next = await this.runMove(() => platform.moveFolder(from, to));
 		if (next === null) return;
-		await getAiSettings().folderMoved(from, next);
+		// Re-point first: a save waiting on the move writes as soon as it ends.
 		this.pathMoved(from, next);
+		await getAiSettings().folderMoved(from, next);
 		await this.refresh();
 		// Into an encrypted folder: its plain notes are encrypted too.
 		const plain = seal ? this.notesUnder(next).filter((n) => !n.encrypted) : [];
@@ -1732,6 +1779,7 @@ class AppState {
 			void platform.setState('lastOpenFile', active);
 		}
 		if (this.pending) this.pending.id = remapPath(this.pending.id, from, to) ?? this.pending.id;
+		if (this.drafted) this.drafted.id = remapPath(this.drafted.id, from, to) ?? this.drafted.id;
 		if (this.tabs.some((t) => t !== null && remapPath(t, from, to) !== null))
 			this.setTabs(this.tabs.map((t) => (t === null ? t : (remapPath(t, from, to) ?? t))));
 		if (this.selectedFolder)
@@ -1955,7 +2003,16 @@ class AppState {
 
 	// --- auto-save (debounced 500ms) --------------------------------------
 
-	queueSave(content: string): void {
+	/** Queue an edit from the editor of `session`; one from an editor already replaced is dropped. */
+	queueSave(content: string, session: number): void {
+		if (session !== this.editorSession) return;
+		const prior = this.pending;
+		if (prior && prior.session !== session) {
+			// An older editor's last edit, not taken yet (a write was in flight): it
+			// goes to its own note first, rather than being replaced or cancelled here.
+			this.pending = null;
+			void this.flush(prior);
+		}
 		if (!this.activeId && !this.draft) return;
 		// Only write real edits. Opening a note can emit editor updates without
 		// changing the text; writing then would bump the file's mtime and float
@@ -1965,61 +2022,93 @@ class AppState {
 			this.cancelPending();
 			return;
 		}
-		this.pending = { id: this.activeId ?? DRAFT_ID, content };
+		this.pending = this.activeId
+			? { id: this.activeId, content, session }
+			: {
+					id: DRAFT_ID,
+					content,
+					session,
+					draft: { folder: this.draftFolder, encrypted: this.draftEncrypted }
+				};
 		this.saving = true;
 		if (this.saveTimer) clearTimeout(this.saveTimer);
 		this.saveTimer = setTimeout(() => this.flush(), saveDebounce());
 	}
 
-	/** Write any pending edit to disk immediately. */
-	async flush(): Promise<void> {
+	/**
+	 * Write any pending edit to disk. Flushes run one at a time, each after the
+	 * one before it, so awaiting one waits for every edit queued before it.
+	 */
+	flush(handed?: Pending): Promise<void> {
+		const prev = this.flushing;
+		// Always a tick later: called from an editor's teardown, reads of state
+		// still see the values from before the switch that removed the editor.
+		const run = (async () => {
+			await prev;
+			await this.writePending(handed);
+		})();
+		const done = run.then(
+			() => {},
+			() => {}
+		);
+		this.flushing = done;
+		void done.then(() => {
+			if (this.flushing === done) this.flushing = null;
+		});
+		return run;
+	}
+
+	private async writePending(handed?: Pending): Promise<void> {
 		// Mid-move the old path is going away: write once the new one is known.
 		if (this.moving) await this.moving.catch(() => {});
-		if (this.saveTimer) {
-			clearTimeout(this.saveTimer);
+		const p = handed ?? this.pending;
+		if (!handed) {
+			if (this.saveTimer) clearTimeout(this.saveTimer);
 			this.saveTimer = null;
+			this.pending = null;
 		}
-		if (!this.pending) return;
-		const { id, content } = this.pending;
-		this.pending = null;
+		if (!p) return;
+		let id = p.id;
 		if (id === DRAFT_ID) {
-			await this.materializeDraft(content);
-			return;
+			// The draft's file exists already (created by an earlier flush): write there.
+			if (this.drafted?.session !== p.session) return this.materializeDraft(p);
+			id = this.drafted.id;
 		}
 		// Keep the in-memory copy in sync so re-derived UI (and a later reopen)
 		// reflect what we just wrote without a round-trip.
-		if (id === this.activeId) this.activeContent = content;
-		await platform.writeNote(id, content);
-		this.saving = false;
+		if (p.session === this.editorSession && id === this.activeId) this.activeContent = p.content;
+		await platform.writeNote(id, p.content);
+		this.saving = this.pending !== null;
 	}
 
 	/**
 	 * First save of a draft: derive the filename from the first H1 typed and
 	 * create the file. The editor instance is left alone (its key is
-	 * editorSession, not the id), so typing continues uninterrupted.
+	 * editorSession, not the id), so typing continues uninterrupted. Runs inside
+	 * a flush, so a second flush can't create the file again.
 	 */
-	private async materializeDraft(content: string): Promise<void> {
-		if (!this.draft) {
-			// The draft became a file while this save sat in the queue — write there.
-			if (this.activeId) await platform.writeNote(this.activeId, content);
-			this.saving = false;
-			return;
-		}
-		const title = titleFromContent(content);
-		if (title === null) {
+	private async materializeDraft(p: Pending): Promise<void> {
+		const title = titleFromContent(p.content);
+		if (title === null || !p.draft) {
 			// Still blank (just the empty H1 scaffold) — keep it off the disk.
-			this.saving = false;
+			this.saving = this.pending !== null;
 			return;
 		}
-		const body = this.draftEncrypted && this.vault ? await this.vault.encrypt(content) : content;
-		const meta = await platform.createNote(title, this.draftFolder, body);
-		this.draft = false;
-		this.draftEncrypted = false;
-		this.activeId = meta.id;
-		this.activeContent = content;
-		this.saving = false;
-		if (this.tabs.includes(null)) this.setTabs(this.tabs.map((t) => t ?? meta.id));
-		void platform.setState('lastOpenFile', meta.id);
+		const { folder, encrypted } = p.draft;
+		const body = encrypted && this.vault ? await this.vault.encrypt(p.content) : p.content;
+		const meta = await platform.createNote(title, folder, body);
+		this.drafted = { session: p.session, id: meta.id };
+		this.saving = this.pending !== null;
+		// Still the open buffer: the draft becomes the open note. Left meanwhile
+		// (another note opened), its text just lands in its own file.
+		if (p.session === this.editorSession && this.draft) {
+			this.draft = false;
+			this.draftEncrypted = false;
+			this.activeId = meta.id;
+			this.activeContent = p.content;
+			if (this.tabs.includes(null)) this.setTabs(this.tabs.map((t) => t ?? meta.id));
+			void platform.setState('lastOpenFile', meta.id);
+		}
 		await this.refresh();
 	}
 
@@ -2028,6 +2117,15 @@ class AppState {
 		this.saveTimer = null;
 		this.pending = null;
 		this.saving = false;
+	}
+
+	/**
+	 * Before note `id`'s file is deleted: drop its queued edit and wait out the
+	 * write in flight. Another note's queued edit is written, not dropped.
+	 */
+	private async settle(id: string): Promise<void> {
+		if (this.pending?.id === id) this.cancelPending();
+		await this.flush();
 	}
 
 	// --- git sync ---------------------------------------------------------
@@ -2066,7 +2164,9 @@ class AppState {
 		await this.refresh();
 		const id = this.activeId;
 		if (!id || this.draft || !this.notes.some((n) => n.id === id)) return;
-		// Keystrokes typed while the sync ran are newer than disk — keep them.
+		// Keystrokes typed while the sync ran are newer than disk — keep them
+		// (a write in flight too: disk may not have it yet).
+		await this.flushing;
 		if (this.pending) return;
 		const content = await platform.readNote(id).catch(() => null);
 		if (content === null || id !== this.activeId || content === this.activeContent) return;
