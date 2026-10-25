@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile, access } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile, access, stat, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -87,6 +87,16 @@ describe('FileService move / rename', () => {
 			'---\nmindmap:\n  version: broken\n  nodes: [\n---\n# Broken map\n'
 		);
 		expect(notes.get('broken-map.md')?.mindMapVersion).toBe(-1);
+	});
+
+	it('leaves the file (and its mtime) alone when the content is unchanged', async () => {
+		const file = path.join(root, 'c.md');
+		const past = new Date('2020-01-01T00:00:00Z');
+		await utimes(file, past, past);
+		await svc.write('c.md', '# C\n');
+		expect((await stat(file)).mtimeMs).toBe(past.getTime());
+		await svc.write('c.md', '# C\n\nmore');
+		expect((await stat(file)).mtimeMs).toBeGreaterThan(past.getTime());
 	});
 
 	it('creates note filenames with underscores instead of spaces', async () => {

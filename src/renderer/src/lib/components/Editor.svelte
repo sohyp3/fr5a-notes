@@ -161,7 +161,7 @@
 
 	const saveImage = (file: File) => app.saveImage(file);
 
-	function buildEditor(node: HTMLElement, content: string): Editor {
+	function buildEditor(node: HTMLElement, content: string, session: number): Editor {
 		const extensions = [
 			Document,
 			Paragraph,
@@ -221,7 +221,8 @@
 			},
 			onUpdate: ({ editor }) => {
 				if (loading) return;
-				app.queueSave(docToText(editor));
+				// Filed under this instance's session: once another note has opened, it saves nothing.
+				app.queueSave(docToText(editor), session);
 			}
 		});
 	}
@@ -235,13 +236,15 @@
 			const content = app.activeContent;
 			dir = detectDir(content) ?? 'ltr';
 			vimMode = 'normal';
-			return buildEditor(node, content);
+			return buildEditor(node, content, app.editorSession);
 		});
 		editor = ed;
 		app.editor = ed;
 		if (findQuery) findStatus = setNoteSearch(ed.view, findQuery);
 		return () => {
-			app.flush();
+			// Writes this instance's last edit, which knows its own note. (Don't
+			// read app state here: a teardown sees it as it was before the switch.)
+			void app.flush();
 			ed.destroy();
 			// Only clear the shared ref if it still points at *this* instance —
 			// during a keyed swap the next editor may already have claimed it.
@@ -352,7 +355,7 @@
 		editor.commands.setContent(textToDoc(text), { emitUpdate: false });
 		loading = false;
 		dir = next;
-		app.queueSave(text);
+		app.queueSave(text, app.editorSession);
 	}
 
 	async function deleteNote(): Promise<void> {

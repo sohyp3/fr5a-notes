@@ -16,6 +16,16 @@ function selectPlatform(): PlatformApi {
 /** The host itself: note files exactly as they are on disk. */
 export const hostPlatform: PlatformApi = selectPlatform();
 
+// Dev builds log every note write with its caller, so a stray write (one that
+// bumps an unedited note's mtime, or lands in the wrong note) shows who made it.
+if (import.meta.env.DEV) {
+	const write = hostPlatform.writeNote.bind(hostPlatform);
+	hostPlatform.writeNote = (id, content) => {
+		console.debug('[writeNote]', id, new Error().stack?.split('\n').slice(2).join('\n'));
+		return write(id, content);
+	};
+}
+
 /**
  * True on the phone/tablet hosts (Android, iOS): on-screen keyboard, no hover,
  * touch-sized controls. Derived from the chosen host — never true on desktop,
