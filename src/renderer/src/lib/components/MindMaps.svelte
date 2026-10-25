@@ -20,7 +20,8 @@
 
 {#if graph}
 	<div class="map-shell">
-		{#if app.settings.mindMaps}
+		<!-- Phones go back with the title bar's Back (and keep the graph legend's corner). -->
+		{#if app.settings.mindMaps && app.layout !== 'phone'}
 			<button class="chooser-back" onclick={() => app.openMindMap(null)}>
 				<Icon name="back" size={17} /> Maps
 			</button>
@@ -59,7 +60,14 @@
 		box-shadow: var(--shadow-pane);
 		touch-action: manipulation;
 		-webkit-tap-highlight-color: transparent;
-		transition: transform var(--dur-fast) ease;
+		transition:
+			transform var(--dur-fast) ease,
+			color var(--dur-fast) ease;
+	}
+	@media (hover: hover) {
+		.chooser-back:hover {
+			color: var(--text);
+		}
 	}
 	.chooser-back:active {
 		transform: scale(var(--press));
