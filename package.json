@@ -1,9 +1,9 @@
 {
 	"name": "fr5a-notes",
 	"private": true,
-	"version": "0.1.3",
+	"version": "0.2.1",
 	"type": "module",
-	"description": "fr5a — a polished Bear-style Markdown editor for Linux",
+	"description": "fr5a — Best md based note taking app, with great ai harness built in",
 	"author": {
 		"name": "sohyp3",
 		"email": "thetit4nsh3@gmail.com"
