@@ -351,12 +351,15 @@ test('AI harness: question → approved write → saved session', async ({ page 
 	await expect(harness.getByText('Done: Applied to Work/plan.md (append)')).toBeVisible();
 	expect(await editorText(page)).toBe('# Plan\n\nfirst line\n\nAI line\n');
 
+	// The working transcript is device-only: `sessions/device/`, which
+	// `sessions/.gitignore` keeps out of sync.
 	const sessions = await page.evaluate(() =>
-		Object.entries((window as unknown as { __meta: Record<string, string> }).__meta).filter(([k]) =>
-			k.startsWith('sessions/')
+		Object.entries((window as unknown as { __meta: Record<string, string> }).__meta).filter(
+			([k]) => k.startsWith('sessions/') && k.endsWith('.md')
 		)
 	);
 	expect(sessions).toHaveLength(1);
+	expect(sessions[0][0]).toMatch(/^sessions\/device\/[^/]+\.md$/);
 	expect(sessions[0][1]).toContain('<!-- turn: you -->\n\nhelp me with tone');
 	expect(sessions[0][1]).toContain('<!-- turn: tool ask_user -->');
 
@@ -2069,7 +2072,7 @@ test('desktop: model lists and models.dev are fetched once, then read from stora
 	await ctx.close();
 });
 
-test('desktop: unlocked encrypted notes reach the AI; such a chat stays on this device until synced', async ({
+test('desktop: unlocked encrypted notes reach the AI; such a chat is marked private and saves encrypted', async ({
 	browser
 }) => {
 	const { ctx, page } = await desktopPage(browser);
@@ -2095,7 +2098,8 @@ test('desktop: unlocked encrypted notes reach the AI; such a chat stays on this 
 	await list(page).getByText('Hello', { exact: true }).click();
 	await expect(page.locator('.ProseMirror')).toContainText('world');
 
-	// Not allowed: the open note stays out, and the chat syncs as usual.
+	// Not allowed: the open note stays out. Working chats always stay on this
+	// device (`sessions/device/`, git-ignored), whatever they read.
 	await page.getByRole('button', { name: 'Toggle AI harness' }).click();
 	const harness = page.getByRole('region', { name: 'AI harness' });
 	const input = harness.locator('textarea');
@@ -2104,10 +2108,17 @@ test('desktop: unlocked encrypted notes reach the AI; such a chat stays on this 
 	await expect(harness.getByText('ctx:', { exact: true })).toBeVisible();
 	await expect
 		.poll(() => metaKeys(page))
-		.toContainEqual(expect.stringMatching(/^sessions\/[^/]+\.md$/));
-	await expect(harness.locator('.pill', { hasText: 'device' })).toHaveCount(0);
+		.toContainEqual(expect.stringMatching(/^sessions\/device\/[^/]+\.md$/));
+	expect((await metaKeys(page)).filter((k) => /^sessions\/[^/]+\.md$/.test(k))).toEqual([]);
+	expect(
+		await page.evaluate(
+			() => (window as unknown as { __meta: Record<string, string> }).__meta['sessions/.gitignore']
+		)
+	).toMatch(/^device\/$/m);
+	const privateCtx = harness.locator('.pill', { hasText: 'private context' });
+	await expect(privateCtx).toHaveCount(0);
 
-	// Allowed: it reads the note, and the chat moves out of sync.
+	// Allowed: it reads the note, and the chat is marked as holding decrypted text.
 	const toggle = page.getByRole('button', { name: 'Toggle AI harness' });
 	await toggle.click();
 	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
@@ -2118,18 +2129,19 @@ test('desktop: unlocked encrypted notes reach the AI; such a chat stays on this 
 	await input.fill('context?');
 	await input.press('Enter');
 	await expect(harness.getByText('ctx: hello.md')).toBeVisible();
-	await expect(harness.locator('.pill', { hasText: 'device' })).toBeVisible();
+	await expect(privateCtx).toBeVisible();
 	await expect
-		.poll(() => metaKeys(page))
-		.toEqual(expect.arrayContaining([expect.stringMatching(/^sessions\/device\/[^/]+\.md$/)]));
-	expect((await metaKeys(page)).filter((k) => /^sessions\/[^/]+\.md$/.test(k))).toEqual([]);
-	expect(
-		await page.evaluate(
-			() => (window as unknown as { __meta: Record<string, string> }).__meta['sessions/.gitignore']
+		.poll(() =>
+			page.evaluate(() =>
+				Object.entries((window as unknown as { __meta: Record<string, string> }).__meta)
+					.filter(([k]) => k.startsWith('sessions/device/'))
+					.map(([, v]) => v)
+			)
 		)
-	).toMatch(/^device\/$/m);
+		.toContainEqual(expect.stringMatching(/^sensitive: yes$/m));
+	expect((await metaKeys(page)).filter((k) => /^sessions\/[^/]+\.md$/.test(k))).toEqual([]);
 
-	// Saved to notes, it's encrypted.
+	// Saved to notes (the only way a chat syncs), it's encrypted.
 	await harness.getByRole('button', { name: 'Session actions' }).click();
 	await page.getByRole('menuitem', { name: /Save to notes/ }).click();
 	const chatId = async () => (await noteIds(page)).find((id) => id.startsWith('.fr5a/chats/'));
@@ -2137,16 +2149,6 @@ test('desktop: unlocked encrypted notes reach the AI; such a chat stays on this 
 	await expect
 		.poll(async () => readFake(page, (await chatId())!))
 		.toContain('-----BEGIN PGP MESSAGE-----');
-
-	// Synced on request: back in the synced folder.
-	await harness.getByRole('button', { name: 'Session actions' }).click();
-	await page.getByRole('menuitem', { name: /Sync this chat/ }).click();
-	await page.getByRole('alertdialog').getByRole('button', { name: 'Sync it' }).click();
-	await expect(harness.locator('.pill', { hasText: 'device' })).toHaveCount(0);
-	await expect
-		.poll(async () => (await metaKeys(page)).filter((k) => k.startsWith('sessions/device/')))
-		.toEqual([]);
-	expect((await metaKeys(page)).filter((k) => /^sessions\/[^/]+\.md$/.test(k))).toHaveLength(1);
 	await ctx.close();
 });
 
