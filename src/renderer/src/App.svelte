@@ -44,12 +44,11 @@
 			? import('./lib/components/harness/HarnessPane.svelte')
 			: null
 	);
-	// Mind maps are a true optional chunk: disabled means no import, no graph
-	// state, no note-body reads, and no graph-specific event handlers.
+	// The graph / mind maps are a true optional chunk: disabled means no import,
+	// no graph state, no note-body reads, and no graph-specific event handlers.
+	// The chooser in turn loads the graph or the map editor only when opened.
 	const graphModule = $derived(
-		app.settings.linkedNotes && app.view === 'graph'
-			? import('./lib/components/MindMaps.svelte')
-			: null
+		app.graphEnabled && app.view === 'graph' ? import('./lib/components/MindMaps.svelte') : null
 	);
 
 	// Spring-driven widths so toggling/Zen feels physical, not linear (critically
@@ -497,8 +496,8 @@
 			app.toggleHarness();
 			return;
 		}
-		// Mod+G opens the linked-note map when the feature is enabled.
-		if (mod && !e.shiftKey && (e.key === 'g' || e.key === 'G') && app.settings.linkedNotes) {
+		// Mod+G opens the last mind map / the graph when either feature is on.
+		if (mod && !e.shiftKey && (e.key === 'g' || e.key === 'G') && app.graphEnabled) {
 			e.preventDefault();
 			app.openGraph();
 			return;

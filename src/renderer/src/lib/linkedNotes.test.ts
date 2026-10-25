@@ -19,8 +19,7 @@ const note = (id: string, title = id.replace(/\.md$/, ''), tags: string[] = []):
 	pinned: false,
 	locked: false,
 	aiLocal: false,
-	encrypted: false,
-	mindMapVersion: null
+	encrypted: false
 });
 
 describe('linked notes', () => {

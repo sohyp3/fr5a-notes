@@ -44,15 +44,6 @@
 			];
 		return [
 			{ label: 'Open', icon: 'note', action: () => void app.openNote(n.id) },
-			...(n.mindMapVersion !== null && app.settings.linkedNotes
-				? [
-						{
-							label: 'Open mind map',
-							icon: 'graph',
-							action: () => app.openMindMap(n.id)
-						} as MenuItem
-					]
-				: []),
 			{ label: n.pinned ? 'Unpin' : 'Pin', icon: 'pin', action: () => void app.togglePin(n.id) },
 			{
 				label: n.locked ? 'Unlock' : 'Lock',

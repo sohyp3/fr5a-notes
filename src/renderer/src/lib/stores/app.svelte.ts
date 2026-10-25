@@ -7,7 +7,6 @@ import type {
 	TagNode,
 	SidebarState
 } from '../../../../shared/types';
-import type { MindMapConfig } from '../../../../shared/types';
 import { uiStack, editorStack } from '../fonts';
 import { accentById, applyPalette, DEFAULT_ACCENT } from '../accents';
 import { setPinned, setLocked, setAiLocal, titleFromContent } from '../editor/markdown';
@@ -76,6 +75,8 @@ export interface ConfirmRequest {
 	title: string;
 	body?: string;
 	confirm: string;
+	/** Label of the safe choice (default Cancel). */
+	cancel?: string;
 	danger?: boolean;
 	resolve(ok: boolean): void;
 }
@@ -120,8 +121,10 @@ export interface Settings {
 	animations: boolean;
 	/** AI harness on. Off: its code is never loaded, no button, no Mod+J. */
 	ai: boolean;
-	/** Links between notes + the map. Off: the map chunk is not loaded and no map work runs. */
+	/** Note links (suggest, follow) + the automatic graph. Off: no link rules, the graph chunk is never loaded. */
 	linkedNotes: boolean;
+	/** Mind maps (`.fr5a/maps/*.canvas`). Off: the map chunk is never loaded and no map work runs. */
+	mindMaps: boolean;
 	/** Open notes in view or edit mode. */
 	openIn: OpenIn;
 	/** Note tabs above the editor: every note opened (or created) gets a tab. */
@@ -159,6 +162,7 @@ const DEFAULT_SETTINGS: Settings = {
 	animations: true,
 	ai: true,
 	linkedNotes: false,
+	mindMaps: false,
 	openIn: 'auto',
 	tabs: false,
 	maxTabs: 5,
@@ -304,7 +308,7 @@ class AppState {
 
 	/** Which top-level view is showing in the main window. */
 	view = $state<View>('editor');
-	/** null opens the chooser; 'all' is the automatic workspace graph. */
+	/** null opens the chooser; 'all' is the automatic graph; else a map's name (`.fr5a/maps/<name>.canvas`). */
 	activeMindMap = $state<string | 'all' | null>(null);
 	/** Lets the active graph surface dismiss transient UI before navigation. */
 	graphDismiss: (() => boolean) | null = null;
@@ -454,12 +458,9 @@ class AppState {
 		// Folder privacy (hidden from cloud AI) shows in the sidebar and list.
 		if (this.settings.ai) void getAiSettings().load();
 		await this.refresh();
+		// A map that's gone by now sends the chooser back (MindMaps.svelte).
 		const lastMap = await platform.getState<string>('lastMindMap');
-		if (
-			lastMap === 'all' ||
-			this.notes.some((note) => note.id === lastMap && note.mindMapVersion !== null)
-		)
-			this.activeMindMap = lastMap;
+		if (typeof lastMap === 'string' && lastMap) this.activeMindMap = lastMap;
 
 		if (this.settings.tabs) {
 			const tabs = (await platform.getState<string[]>('tabs')) ?? [];
@@ -932,72 +933,32 @@ class AppState {
 		this.drawerOpen = false;
 	}
 
-	/** Open the last-used mind map; a missing/locked map falls back to the chooser. */
+	/** The graph / mind-map view is available: either feature is on. */
+	get graphEnabled(): boolean {
+		return this.settings.linkedNotes || this.settings.mindMaps;
+	}
+
+	/** What `activeMindMap` may show with the features that are on (null = the chooser). */
+	private mapTarget(id: string | 'all' | null): string | 'all' | null {
+		if (id === 'all') return this.settings.linkedNotes ? 'all' : null;
+		if (id !== null && !this.settings.mindMaps) return null;
+		// Graph only: no chooser, Mod+G opens the graph itself.
+		if (id === null && !this.settings.mindMaps) return 'all';
+		return id;
+	}
+
+	/** Mod+G: reopen the last map (or the graph); a missing map falls back to the chooser. */
 	openGraph(): void {
-		if (!this.settings.linkedNotes) return;
-		if (
-			this.activeMindMap &&
-			this.activeMindMap !== 'all' &&
-			!this.notes.some(
-				(note) =>
-					note.id === this.activeMindMap &&
-					!note.locked &&
-					(!note.encrypted || this.vault?.unlocked)
-			)
-		)
-			this.activeMindMap = null;
+		if (!this.graphEnabled) return;
+		this.activeMindMap = this.mapTarget(this.activeMindMap);
 		this.setView('graph');
 	}
 
 	openMindMap(id: string | 'all' | null): void {
-		if (!this.settings.linkedNotes) return;
-		this.activeMindMap = id;
+		if (!this.graphEnabled) return;
+		this.activeMindMap = this.mapTarget(id);
 		this.setView('graph');
-		void platform.setState('lastMindMap', id);
-	}
-
-	async createMindMap(fromCurrent = false): Promise<void> {
-		if (!this.settings.linkedNotes) return;
-		const { updateMindMap } = await import('../../../../shared/mindMap');
-		await this.flush();
-		const current = fromCurrent && this.activeId ? this.noteMeta(this.activeId) : null;
-		const folder = current ? parentOf(current.id) : (this.selectedFolder ?? '');
-		const title = current ? `${current.title} Map` : 'Mind map';
-		const root: MindMapConfig['nodes'][number] = current
-			? { id: 'root', label: current.title, note: baseOf(current.id), position: { x: 0, y: 0 } }
-			: { id: 'root', label: 'Central idea', position: { x: 0, y: 0 } };
-		const config: MindMapConfig = { version: 1, root: 'root', nodes: [root], edges: [] };
-		const content = updateMindMap(
-			`# ${title}\n\nStart shaping this map visually or edit its YAML.\n`,
-			config
-		);
-		const meta = await platform.createNote(title, folder, content);
-		await this.refresh();
-		this.openMindMap(meta.id);
-	}
-
-	/** Completed canvas transactions use the same platform write path as the editor. */
-	async writeMindMap(id: string, content: string, expectedSource?: string): Promise<void> {
-		await this.flush();
-		const meta = this.noteMeta(id);
-		if (
-			!this.settings.linkedNotes ||
-			!meta ||
-			meta.locked ||
-			(meta.encrypted && !this.vault?.unlocked)
-		)
-			throw new Error('This map is unavailable or read-only. Reopen it after unlocking.');
-		if (expectedSource !== undefined && (await platform.readNote(id)) !== expectedSource)
-			throw new Error(
-				'The source changed outside the canvas. Reload the map before editing again.'
-			);
-		await platform.writeNote(id, content);
-		if (this.activeId === id) {
-			this.activeContent = content;
-			this.baseline = { id, text: content.replace(/\r\n?/g, '\n') };
-			this.editorReloadToken++;
-		}
-		await this.refresh();
+		void platform.setState('lastMindMap', this.activeMindMap);
 	}
 
 	/**
@@ -1097,7 +1058,7 @@ class AppState {
 			this.settingsDrill = false;
 			return true;
 		}
-		if (this.view === 'graph' && this.activeMindMap !== null) {
+		if (this.view === 'graph' && this.activeMindMap !== null && this.settings.mindMaps) {
 			this.openMindMap(null);
 			return true;
 		}
@@ -1715,12 +1676,10 @@ class AppState {
 
 	/** Re-point everything that names a moved note / folder (open note, filters, expansion…). */
 	private pathMoved(from: string, to: string): void {
-		if (this.activeMindMap && this.activeMindMap !== 'all') {
-			const map = remapPath(this.activeMindMap, from, to);
-			if (map !== null) {
-				this.activeMindMap = map;
-				void platform.setState('lastMindMap', map);
-			}
+		// Mind maps name notes by path: re-point them (the open map patches itself via onMoved).
+		if (this.settings.mindMaps) {
+			const open = this.view === 'graph' ? this.activeMindMap : null;
+			void import('../maps/files').then((m) => m.rewriteMapsOnMove(from, to, open ?? undefined));
 		}
 		const active = this.activeId && remapPath(this.activeId, from, to);
 		if (active) {
@@ -1906,7 +1865,10 @@ class AppState {
 		}
 		// The graph view owns every graph allocation and listener. Leaving it
 		// unmounts the component immediately; the disabled feature has no runtime work.
-		if (patch.linkedNotes === false && this.view === 'graph') this.setView('editor');
+		if (this.view === 'graph' && (patch.linkedNotes === false || patch.mindMaps === false)) {
+			if (this.mapTarget(this.activeMindMap) !== this.activeMindMap || !this.graphEnabled)
+				this.setView('editor');
+		}
 		if (patch.encryption !== undefined)
 			void (patch.encryption ? this.startVault() : this.stopVault());
 		if (patch.autoLockMinutes !== undefined) this.vault?.rearm();

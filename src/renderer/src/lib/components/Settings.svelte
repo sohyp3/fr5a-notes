@@ -13,7 +13,7 @@
 	import type { IconName } from '../icons';
 	import { UI_FONTS, EN_FONTS, AR_FONTS } from '../fonts';
 	import { ACCENTS } from '../accents';
-	import { SHORTCUTS, VIM_SHORTCUTS as vimShortcuts } from '../shortcuts';
+	import { SHORTCUTS, VIM_SHORTCUTS as vimShortcuts, shortcutOn } from '../shortcuts';
 	import { motionK } from '../motion';
 	import {
 		BAR_ICONS,
@@ -37,7 +37,7 @@
 			id: 'linkedNotes',
 			label: 'Links & maps',
 			icon: 'graph',
-			desc: 'Note-link suggestions, link following, and mind maps'
+			desc: 'Note links & graph, mind maps'
 		},
 		{ id: 'toolbar', label: 'Toolbar', icon: 'toolbar', desc: 'Buttons in the bar or in its menu' },
 		{
@@ -54,7 +54,7 @@
 		{ id: 'encryption', label: 'Encryption' }
 	];
 
-	const shortcuts = $derived(SHORTCUTS.filter((sc) => !sc.feature || s[sc.feature]));
+	const shortcuts = $derived(SHORTCUTS.filter((sc) => shortcutOn(sc, s)));
 
 	const section = $derived(SECTIONS.find((x) => x.id === app.settingsSection) ?? SECTIONS[0]);
 	// Phones: a list of sections first, then one section at a time.
@@ -414,37 +414,47 @@
 						{/if}
 					{:else if section.id === 'linkedNotes'}
 						<section class="group">
+							<h3>Note links &amp; graph</h3>
 							<div class="row">
 								<div class="label">
-									<span class="name">Enable links and maps</span>
+									<span class="name">Note links &amp; graph</span>
 									<span class="desc"
-										>Suggest and follow note links in the editor, and open mind maps with Mod+G</span
+										>Suggest notes inside <code>[text](</code>, follow links (a tap in view mode,
+										Mod+click while editing), and the automatic graph of links and tags</span
 									>
 								</div>
-								{@render toggle(s.linkedNotes, 'Enable links and maps', () =>
+								{@render toggle(s.linkedNotes, 'Note links & graph', () =>
 									app.updateSettings({ linkedNotes: !s.linkedNotes })
 								)}
 							</div>
 						</section>
-						{#if s.linkedNotes}
-							<section class="group">
-								<h3>Maps are notes</h3>
-								<p class="prose">
-									A curated map is an ordinary Markdown note with YAML frontmatter, so it stays
-									local, readable, and Git-friendly. Tags appear only when you opt a branch into
-									them. <strong>All notes</strong> keeps the automatic workspace view.
-								</p>
+						<section class="group">
+							<h3>Mind maps</h3>
+							<div class="row">
+								<div class="label">
+									<span class="name">Mind maps</span>
+									<span class="desc"
+										>Canvases of ideas, notes and tags you arrange yourself, saved as JSON Canvas
+										files in <code>.fr5a/maps</code>. Their text isn’t encrypted, even when
+										encryption is on.</span
+									>
+								</div>
+								{@render toggle(s.mindMaps, 'Mind maps', () =>
+									app.updateSettings({ mindMaps: !s.mindMaps })
+								)}
+							</div>
+							{#if s.mindMaps || s.linkedNotes}
 								<div class="row">
 									<div class="label">
-										<span class="name">Mind maps</span>
-										<span class="desc"
-											>Curated branches first, with the automatic all-notes map still available</span
-										>
+										<span class="name">{s.mindMaps ? 'Your maps' : 'The graph'}</span>
+										<span class="desc">Mod+G opens {s.mindMaps ? 'the last one' : 'it'}</span>
 									</div>
-									<button class="btn" onclick={() => app.openGraph()}>Open mind maps</button>
+									<button class="btn" onclick={() => app.openGraph()}
+										>{s.mindMaps ? 'Open mind maps' : 'Open the graph'}</button
+									>
 								</div>
-							</section>
-						{/if}
+							{/if}
+						</section>
 					{:else if section.id === 'toolbar'}
 						<section class="group">
 							<h3>Note bar</h3>

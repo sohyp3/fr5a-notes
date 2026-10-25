@@ -30,10 +30,19 @@ it('migrates an existing SQLite index without losing notes or tags', async () =>
 			runtime._compile(compiled, sourcePath);
 			const index = new runtime.exports.NoteIndex(file);
 			const before = index.all();
-			index.upsert({ ...before[0], id: 'map.md', title: 'Map', mindMapVersion: 1 });
+			index.upsert({ ...before[0], id: 'map.md', title: 'Map' });
 			const after = index.all();
 			index.close();
-			console.log(JSON.stringify({ before, after }));
+			// An index from a build with YAML mind maps still has their column.
+			const mapFile = ${JSON.stringify(path.join(temporary, 'maps.sqlite'))};
+			const withMaps = new Database(mapFile);
+			withMaps.exec("CREATE TABLE notes (id TEXT PRIMARY KEY, absPath TEXT NOT NULL, title TEXT NOT NULL, snippet TEXT NOT NULL, mtime INTEGER NOT NULL, pinned INTEGER NOT NULL DEFAULT 0, locked INTEGER NOT NULL DEFAULT 0, aiLocal INTEGER NOT NULL DEFAULT 0, encrypted INTEGER NOT NULL DEFAULT 0, mindMapVersion INTEGER DEFAULT NULL); CREATE TABLE tags (note_id TEXT NOT NULL, tag TEXT NOT NULL, PRIMARY KEY(note_id, tag)); INSERT INTO notes VALUES ('m.md', '/notes/m.md', 'M', '', 1, 0, 0, 0, 0, 1);");
+			withMaps.close();
+			const legacy = new runtime.exports.NoteIndex(mapFile);
+			legacy.upsert({ ...before[0], id: 'new.md', title: 'New' });
+			const legacyNotes = legacy.all();
+			legacy.close();
+			console.log(JSON.stringify({ before, after, legacyNotes }));
 		`;
 		const result = spawnSync(require('electron') as string, ['-e', script], {
 			env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
@@ -42,21 +51,22 @@ it('migrates an existing SQLite index without losing notes or tags', async () =>
 		});
 		expect(result.error, result.stderr).toBeUndefined();
 		expect(result.status, result.stderr).toBe(0);
-		const { before, after } = JSON.parse(result.stdout);
+		const { before, after, legacyNotes } = JSON.parse(result.stdout);
 		expect(before).toEqual([
 			expect.objectContaining({
 				id: 'old.md',
 				title: 'Old',
 				tags: ['work'],
-				pinned: true,
-				mindMapVersion: null
+				pinned: true
 			})
 		]);
 		expect(after).toHaveLength(2);
 		expect(after.find((note: { id: string }) => note.id === 'map.md')).toMatchObject({
-			mindMapVersion: 1,
 			tags: ['work']
 		});
+		expect(after[0]).not.toHaveProperty('mindMapVersion');
+		expect(legacyNotes.map((note: { id: string }) => note.id).sort()).toEqual(['m.md', 'new.md']);
+		expect(legacyNotes[0]).not.toHaveProperty('mindMapVersion');
 	} finally {
 		await rm(temporary, { recursive: true, force: true });
 	}

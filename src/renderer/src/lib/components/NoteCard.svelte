@@ -398,12 +398,6 @@
 	>
 		<div class="row">
 			<span class="title">
-				{#if note.mindMapVersion !== null && note.mindMapVersion !== undefined}<span
-						class="shield map"
-						role="img"
-						title="Mind map"
-						aria-label="Mind map"><Icon name="graph" size={11} stroke={2} /></span
-					>{/if}
 				{#if note.pinned && !trash}<span
 						class="shield pinned"
 						role="img"

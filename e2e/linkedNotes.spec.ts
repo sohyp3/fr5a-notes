@@ -11,16 +11,14 @@ test.beforeEach(async ({ page }) => {
 	await expect(page.locator('.body[data-layout]')).toBeVisible();
 });
 
-test('mind maps stay dormant until enabled; All notes walks notes and tags', async ({
-	page
-}, info) => {
+test('the graph stays dormant until enabled; it walks notes and tags', async ({ page }, info) => {
 	const layout = await page.locator('.body').getAttribute('data-layout');
 	if (layout === 'tablet') await page.getByRole('button', { name: 'Open folders' }).tap();
 
-	await expect(page.getByRole('button', { name: /Mind maps/ })).toHaveCount(0);
+	await expect(page.getByRole('button', { name: /^(Graph|Mind maps)/ })).toHaveCount(0);
 	await enable(page);
-	await page.getByRole('button', { name: 'Open mind maps' }).tap();
-	await page.getByRole('button', { name: /All notes/ }).tap();
+	// Mind maps off: no chooser, the graph itself.
+	await page.getByRole('button', { name: 'Open the graph' }).tap();
 
 	const map = page.getByRole('region', { name: 'All notes map' });
 	await expect(map).toBeVisible();
@@ -132,7 +130,6 @@ test('desktop: [text]( suggests notes; Insert → Link; Mod+click follows', asyn
 
 	// The map takes the desktop's side panel.
 	await page.keyboard.press('Control+g');
-	await page.getByRole('button', { name: /All notes/ }).click();
 	const map = page.getByRole('region', { name: 'All notes map' });
 	await map.getByRole('button', { name: 'Hello', exact: true }).click();
 	await expect(map.locator('.inspector')).toHaveCSS('width', '300px');

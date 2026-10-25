@@ -45,7 +45,7 @@ export function splitHeader(text: string): { head: string; body: string } {
 	return { head: text.slice(0, n), body: text.slice(n) };
 }
 
-/** Restore clear metadata after YAML, so an unlocked map stays a valid note. */
+/** Restore clear metadata after YAML frontmatter, so an unlocked note keeps it first. */
 export function joinHeader(head: string, body: string): string {
 	const frontmatter = splitFrontmatter(body);
 	if (!frontmatter) return head + body;

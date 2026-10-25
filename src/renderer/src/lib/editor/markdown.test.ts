@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseMindMap } from '../../../../shared/mindMap';
+import { splitFrontmatter } from '../../../../shared/frontmatter';
 import {
 	textToDoc,
 	titleFromContent,
@@ -12,12 +12,13 @@ import {
 	setAiLocal
 } from './markdown';
 
-it('keeps frontmatter first when changing ordinary map-note metadata', () => {
-	const source =
-		'---\nmindmap:\n  version: 1\n  root: r\n  nodes: [{id: r, label: Root}]\n---\n# Map\n';
+it('keeps frontmatter first when changing metadata lines', () => {
+	const source = '---\nconfig:\n  version: 1\n  nodes: [{id: r, label: Root}]\n---\n# Map\n';
 	const edited = setAiLocal(setLocked(setPinned(setDir(source, 'rtl'), true), true), true);
 	expect(edited.startsWith('---\n')).toBe(true);
-	expect(parseMindMap(edited).config?.root).toBe('r');
+	expect(splitFrontmatter(edited)?.yaml).toBe(
+		'config:\n  version: 1\n  nodes: [{id: r, label: Root}]\n'
+	);
 	expect(detectDir(edited)).toBe('rtl');
 	expect(detectPinned(edited)).toBe(true);
 	expect(detectLocked(edited)).toBe(true);

@@ -68,25 +68,20 @@ describe('FileService move / rename', () => {
 		expect(notes.get('c.md')?.encrypted).toBe(false);
 	});
 
-	it('indexes mind maps without treating YAML labels or tags as note content', async () => {
+	it('keeps YAML frontmatter out of the title, snippet and tags', async () => {
 		await svc.write(
-			'atlas-map.md',
-			'---\nmindmap:\n  version: 1\n  root: root\n  nodes:\n    - id: root\n      label: YAML title\n      expand:\n        tags: [secret/config]\n---\n# Atlas map\n\nVisible body #work\n'
+			'atlas.md',
+			'---\nowner: me\ntags: [secret/config]\n---\n# Atlas\n\nVisible body #work\n'
 		);
-		expect(notes.get('atlas-map.md')).toMatchObject({
-			title: 'Atlas map',
-			tags: ['work'],
-			mindMapVersion: 1
-		});
-		expect(notes.get('atlas-map.md')?.snippet).toContain('Visible body');
+		expect(notes.get('atlas.md')).toMatchObject({ title: 'Atlas', tags: ['work'] });
+		expect(notes.get('atlas.md')?.snippet).toContain('Visible body');
 	});
 
-	it('keeps malformed declared maps discoverable in the index', async () => {
-		await svc.write(
-			'broken-map.md',
-			'---\nmindmap:\n  version: broken\n  nodes: [\n---\n# Broken map\n'
-		);
-		expect(notes.get('broken-map.md')?.mindMapVersion).toBe(-1);
+	it('reads a note that opens with a --- rule as body, not frontmatter', async () => {
+		await svc.write('rule.md', '---\nIntro text #kept\nstatus: draft\n---\nmore\n');
+		// Frontmatter would have hidden the tag and the intro.
+		expect(notes.get('rule.md')?.tags).toEqual(['kept']);
+		expect(notes.get('rule.md')?.snippet).toContain('Intro text');
 	});
 
 	it('creates note filenames with underscores instead of spaces', async () => {
