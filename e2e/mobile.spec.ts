@@ -2595,3 +2595,59 @@ test('toolbar on touch: formatting into ⋯, Highlight into Insert, Image a butt
 	await expect(page.getByRole('menuitem', { name: 'Pin note' })).toBeVisible();
 	await expect(page.getByRole('menuitem', { name: 'Customize toolbar…' })).toBeVisible();
 });
+
+test('desktop: a middle click never pastes, but still closes a tab', async ({ browser }) => {
+	const { ctx, page } = await desktopPage(browser, {
+		'alpha.md': '# Alpha\n\none two',
+		'beta.md': '# Beta\n\nthree'
+	});
+	const body = page.locator('.ProseMirror');
+	const tabs = page.getByRole('tablist', { name: 'Open notes' }).getByRole('tab');
+	await sidebar(page)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	await list(page).getByText('Alpha', { exact: true }).click();
+	await expect(body).toHaveAttribute('contenteditable', 'true');
+	// Record whether each middle-button mouseup reached the default action (Linux's
+	// PRIMARY-selection paste happens there).
+	await page.evaluate(() => {
+		const w = window as unknown as { middleUps: boolean[] };
+		w.middleUps = [];
+		window.addEventListener('mouseup', (e) => {
+			if (e.button === 1) w.middleUps.push(e.defaultPrevented);
+		});
+	});
+	const middleUps = () =>
+		page.evaluate(() => (window as unknown as { middleUps: boolean[] }).middleUps);
+
+	// Select a word (fills PRIMARY on Linux), then middle-click elsewhere in the note.
+	await body.getByText('one two').dblclick();
+	const before = await body.innerText();
+	await body.getByText('Alpha').click({ button: 'middle' });
+	await page.waitForTimeout(200);
+	expect(await body.innerText()).toBe(before);
+	expect(await middleUps()).toEqual([true]);
+
+	// A text field too.
+	await page.keyboard.press('Control+f');
+	const find = page.getByRole('textbox', { name: 'Find text' });
+	await find.click({ button: 'middle' });
+	await page.waitForTimeout(200);
+	await expect(find).toHaveValue('');
+	expect(await middleUps()).toEqual([true, true]);
+	await page.keyboard.press('Escape');
+
+	// Middle-click on a tab still closes it.
+	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
+	await page
+		.getByRole('navigation', { name: 'Settings sections' })
+		.getByRole('button', { name: /Editor/ })
+		.click();
+	await page.getByRole('switch', { name: 'Tabs' }).click();
+	await page.getByRole('button', { name: 'Close settings' }).click();
+	await list(page).getByText('Beta', { exact: true }).click();
+	await expect(tabs).toHaveText(['Alpha', 'Beta']);
+	await tabs.first().click({ button: 'middle' });
+	await expect(tabs).toHaveText(['Beta']);
+	await ctx.close();
+});
