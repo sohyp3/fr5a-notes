@@ -1710,7 +1710,7 @@ test('desktop: saved chats list under AI chats; Storage moves old files into .fr
 	expect(Object.keys(assets)).toEqual(['.fr5a/assets/cat.png']);
 	expect(await readFake(page, 'links.md')).toBe('# Links\n\n[the old chat](.fr5a/chats/old.md)');
 	await page.getByRole('button', { name: /Links & maps/ }).click();
-	await page.getByRole('switch', { name: 'Enable links and maps' }).click();
+	await page.getByRole('switch', { name: 'Note links & graph', exact: true }).click();
 	await page.getByRole('button', { name: 'Close settings' }).click();
 	await expect(chats).toHaveText(/AI chats\s*2/);
 	// A link to a saved chat still opens it.
