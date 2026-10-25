@@ -544,10 +544,16 @@
 		}
 	}
 
+	/** Linux pastes the PRIMARY selection on a middle-button mouseup unless it's cancelled.
+	 *  auxclick still fires, so middle-click closes a tab / opens a link as before. */
+	function onMouseUp(e: MouseEvent): void {
+		if (e.button === 1) e.preventDefault();
+	}
+
 	app.init();
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} onmouseupcapture={onMouseUp} />
 
 <div class={['app', { zen: app.zen, resizing: app.resizing }]}>
 	<TitleBar />
