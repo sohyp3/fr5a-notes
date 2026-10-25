@@ -1396,12 +1396,9 @@ test('desktop: hiding a folder or a note from cloud AI shows where it applies', 
 	await expect(shields).toHaveCount(2);
 	expect(await readFake(page, 'hello.md')).toBe('<!-- ai: local -->\n# Hello\n\nworld');
 
-	// Settings → AI lists both, with what each folder inherits.
+	// Settings → Advanced → AI lists both, with what each folder inherits.
 	await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();
-	await page
-		.getByRole('navigation', { name: 'Settings sections' })
-		.getByRole('button', { name: /AI/ })
-		.click();
+	await openAdvanced(page, 'AI assistant');
 	const tree = page.getByRole('group', { name: 'Folders hidden from cloud AI' });
 	await expect(tree.locator('.prow.on')).toHaveText(/Work.*Hidden/);
 	await expect(page.locator('.psum')).toContainText('2 of 2 notes hidden');
