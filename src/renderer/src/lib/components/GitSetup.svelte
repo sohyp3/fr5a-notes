@@ -171,12 +171,14 @@
 	:global(html[data-touch]) .btn {
 		min-height: var(--tap);
 	}
-	.btn:hover:not(:disabled) {
-		background: var(--bg-active);
-	}
-	.btn.primary:hover:not(:disabled) {
-		background: var(--accent);
-		filter: brightness(1.08);
+	@media (hover: hover) {
+		.btn:hover:not(:disabled) {
+			background: var(--bg-active);
+		}
+		.btn.primary:hover:not(:disabled) {
+			background: var(--accent);
+			filter: brightness(1.08);
+		}
 	}
 	.btn:active:not(:disabled) {
 		transform: scale(var(--press));

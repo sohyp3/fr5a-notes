@@ -887,8 +887,10 @@
 		padding: 0;
 		font-size: inherit;
 	}
-	.link:hover {
-		text-decoration: underline;
+	@media (hover: hover) {
+		.link:hover {
+			text-decoration: underline;
+		}
 	}
 	@keyframes spin {
 		to {
