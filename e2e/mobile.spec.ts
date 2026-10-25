@@ -59,6 +59,12 @@ async function openPlan(page: Page) {
 	await openFolder(page, /^Work \d+$/);
 	await list(page).getByText('Plan', { exact: true }).tap();
 	await expect(page.locator('.ProseMirror')).toContainText('first line');
+	// Phone: the editor slides in; a gesture that starts mid-slide grabs the
+	// moving pane where it is, so let it land first.
+	if ((await layoutOf(page)) === 'phone')
+		await expect
+			.poll(() => page.locator('.editor-wrap').evaluate((el) => el.getBoundingClientRect().x))
+			.toBe(0);
 }
 
 /** Touch devices open notes in view mode: switch to editing. */
