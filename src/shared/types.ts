@@ -1,5 +1,7 @@
 /** Types shared across the main, preload and renderer processes. */
 
+import { isAppNotePath, isHiddenPath } from './paths';
+
 export interface NoteMeta {
 	/** Stable id — the path relative to the workspace root. */
 	id: string;
@@ -183,9 +185,9 @@ export interface GitChange {
 	after: string | null;
 }
 
-/** Note files git status looks at: Markdown / text outside dot-folders. */
+/** Note files git status looks at: Markdown / text outside dot-folders, plus saved chats (`.fr5a/chats/`). */
 export function isTrackedNote(path: string): boolean {
-	return /\.(md|markdown|txt)$/i.test(path) && !path.split('/').some((s) => s.startsWith('.'));
+	return /\.(md|markdown|txt)$/i.test(path) && (!isHiddenPath(path) || isAppNotePath(path));
 }
 
 /**
@@ -275,6 +277,10 @@ export const Channels = {
 	metaDelete: 'meta:delete',
 	/** Save an image under the workspace (pasted / dropped into a note). */
 	assetSave: 'asset:save',
+	/** Image files under a workspace folder (the storage migration counts `assets/`). */
+	assetList: 'asset:list',
+	/** Run a storage plan: move app files into `.fr5a/`, rewrite links, keep mtimes. */
+	storageMigrate: 'storage:migrate',
 	// main -> renderer push
 	/** A streamed HTTP body chunk: (requestId, text). */
 	httpChunk: 'http:chunk',

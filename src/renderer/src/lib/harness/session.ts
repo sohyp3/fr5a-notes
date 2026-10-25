@@ -239,3 +239,18 @@ export function turnsToMessages(turns: Turn[]): ChatMessage[] {
 	}
 	return out;
 }
+
+/**
+ * A session file with its `saved:` note re-pointed after that note moved
+ * (the storage migration), or null when it names none of `moved`. Only that
+ * frontmatter line changes, so the rest of the file stays byte for byte.
+ */
+export function withSavedMoved(text: string, moved: ReadonlyMap<string, string>): string | null {
+	const { data } = parseFrontmatter(text);
+	const saved = str(data.saved);
+	const to = saved && moved.get(saved);
+	if (!to) return null;
+	const line = stringifyFrontmatter({ saved: to }).split('\n')[1];
+	const out = text.replace(/^(---\r?\n[\s\S]*?)^saved:[^\n]*$/m, (_, head: string) => head + line);
+	return out === text ? null : out;
+}

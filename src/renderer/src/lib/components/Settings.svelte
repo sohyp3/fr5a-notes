@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { fade, fly } from 'svelte/transition';
 	import {
 		getAppState,
@@ -15,6 +16,7 @@
 	import { ACCENTS } from '../accents';
 	import { SHORTCUTS, VIM_SHORTCUTS as vimShortcuts } from '../shortcuts';
 	import { motionK } from '../motion';
+	import { runStorageMigration, scanStorage, type StorageScan } from '../storage';
 	import {
 		BAR_ICONS,
 		BAR_LABELS,
@@ -86,6 +88,41 @@
 			(id) => (id !== 'image' || !!platform.saveAsset) && (id !== 'highlight' || s.highlights)
 		)
 	]);
+	// Storage: the opt-in move of old images / saved chats into `.fr5a/` (only scanned while General shows).
+	let storageTick = $state(0);
+	let migrating = $state(false);
+	const storageScan = $derived.by(() => {
+		void storageTick;
+		if (section.id !== 'general' || showIndex) return null;
+		return untrack(() => scanStorage(app).catch(() => null));
+	});
+	const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
+	function storageLabel(scan: StorageScan): string {
+		const parts = [
+			scan.assets.length ? plural(scan.assets.length, 'image') : '',
+			scan.chats.length ? plural(scan.chats.length, 'saved chat') : ''
+		].filter(Boolean);
+		return `Move ${parts.join(' and ')} into .fr5a`;
+	}
+	async function migrate(scan: StorageScan): Promise<void> {
+		migrating = true;
+		try {
+			const res = await runStorageMigration(app, scan);
+			const left = res.skipped.length
+				? ` · ${plural(res.skipped.length, 'note')} left as they were (locked)`
+				: '';
+			app.notify(
+				'ok',
+				`Moved ${plural(res.moved, 'file')}, updated ${plural(res.rewritten, 'note')}${left}`
+			);
+		} catch (err) {
+			app.notify('error', `Couldn’t move the files: ${err instanceof Error ? err.message : err}`);
+		} finally {
+			migrating = false;
+			storageTick++;
+		}
+	}
+
 	const BAR_DESC: Partial<Record<BarItem, string>> = {
 		insert: 'Image, table, link and highlight without a button of their own',
 		edit: 'Switch between reading and editing',
@@ -247,6 +284,31 @@
 								{/each}
 							</section>
 						{/if}
+						{#await storageScan then scan}
+							{#if scan && (scan.assets.length || scan.chats.length)}
+								<section class="group" aria-label="Storage">
+									<h3>Storage</h3>
+									<p class="prose">
+										Images and saved AI chats now live in the hidden <code>.fr5a</code> folder,
+										which syncs with your notes. Older ones are still in <code>assets/</code> and
+										<code>{scan.chatsDir}/</code>. Links in your notes are updated and their dates
+										stay as they are.
+									</p>
+									<div class="row wrap">
+										<div class="label">
+											<span class="name">{storageLabel(scan)}</span>
+											{#if scan.locked}<span class="desc"
+													>{plural(scan.locked, 'encrypted note')} can’t be read now: unlock first, or
+													their image links stay as they are.</span
+												>{/if}
+										</div>
+										<button class="btn" disabled={migrating} onclick={() => migrate(scan)}
+											>{migrating ? 'Moving…' : 'Move'}</button
+										>
+									</div>
+								</section>
+							{/if}
+						{/await}
 					{:else if section.id === 'appearance'}
 						<section class="group">
 							<h3>Look</h3>

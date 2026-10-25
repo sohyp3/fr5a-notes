@@ -6,6 +6,8 @@ import { promises as fs } from 'node:fs';
 import Store from 'electron-store';
 import { NoteIndex } from './db';
 import { FileService } from './fileService';
+import { isAppNotePath } from '../shared/paths';
+import type { StoragePlan } from '../shared/storageMigration';
 import { buildTagTree } from './tags';
 import { registerSyncHandlers } from './syncIpc';
 import { createHttp } from './http';
@@ -256,7 +258,10 @@ function registerIpc(): void {
 
 	ipcMain.handle(Channels.notesList, (): NoteMeta[] => index?.all() ?? []);
 
-	ipcMain.handle(Channels.tagsList, () => buildTagTree(index?.tagPairs() ?? []));
+	// Saved chats (`.fr5a/chats/`) are notes, but their tags stay out of the sidebar.
+	ipcMain.handle(Channels.tagsList, () =>
+		buildTagTree((index?.tagPairs() ?? []).filter((p) => !isAppNotePath(p.noteId)))
+	);
 
 	ipcMain.handle(Channels.noteRead, (_e, id: string) => fileService?.read(id) ?? '');
 
@@ -353,6 +358,11 @@ function registerIpc(): void {
 	ipcMain.handle(Channels.assetSave, (_e, rel: string, data: Uint8Array) => {
 		if (!fileService) throw new Error('No workspace open');
 		return fileService.saveAsset(rel, data);
+	});
+	ipcMain.handle(Channels.assetList, (_e, dir: string) => fileService?.listImages(dir) ?? []);
+	ipcMain.handle(Channels.storageMigrate, (_e, plan: StoragePlan) => {
+		if (!fileService) throw new Error('No workspace open');
+		return fileService.migrateStorage(plan);
 	});
 	// Read-only git status of the notes (root + nested repos), for the Changes view.
 	ipcMain.handle(Channels.gitChanges, async () => {

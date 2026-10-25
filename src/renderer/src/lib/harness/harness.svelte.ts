@@ -28,7 +28,7 @@ import {
 	type Session,
 	type Turn
 } from './session';
-import { cleanFolder, cleanName, remapPath } from '../../../../shared/paths';
+import { cleanChatsFolder, cleanName, remapPath } from '../../../../shared/paths';
 import {
 	BUILTIN_SKILLS,
 	SEEDED_MARKER,
@@ -487,7 +487,7 @@ class HarnessState {
 		});
 
 		const existing = asNew ? undefined : app.notes.find((n) => n.id === tab.session.saved);
-		const folder = cleanFolder(ai.config.chatsFolder ?? '');
+		const folder = cleanChatsFolder(ai.config.chatsFolder ?? '');
 		// A chat that read encrypted notes is saved encrypted, as is one going into an encrypted folder.
 		const seal =
 			!!app.vault?.hasKey &&

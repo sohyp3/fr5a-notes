@@ -5,6 +5,8 @@ import { noteSnippet } from '../../../../shared/snippet';
 import { buildTagTree, parseTags } from '../../../../main/tags';
 import { markdownBody } from '../../../../shared/frontmatter';
 import { mindMapVersion } from '../../../../shared/mindMapMetadata';
+import { isAppNotePath } from '../../../../shared/paths';
+import type { StorageRewrite } from '../../../../shared/storageMigration';
 
 /** Reading an encrypted note while the key is locked. */
 export class VaultLockedError extends Error {
@@ -115,7 +117,11 @@ export function wrapNotes(host: PlatformApi, crypt: NoteCrypt) {
 			if (!crypt.unlocked()) return host.listTags();
 			const notes = await overlay(await host.listNotes());
 			if (!notes.some((n) => n.encrypted && n.tags.length)) return host.listTags();
-			return buildTagTree(notes.flatMap((n) => n.tags.map((tag) => ({ tag, noteId: n.id }))));
+			return buildTagTree(
+				notes
+					.filter((n) => !isAppNotePath(n.id))
+					.flatMap((n) => n.tags.map((tag) => ({ tag, noteId: n.id })))
+			);
 		},
 
 		async syncConflicts() {
@@ -150,6 +156,21 @@ export function wrapNotes(host: PlatformApi, crypt: NoteCrypt) {
 		wrapped.gitChanges = async () => {
 			const list = await inner();
 			return list && crypt.unlocked() ? changes(list) : list;
+		};
+	}
+	if (host.migrateStorage) {
+		const inner = host.migrateStorage;
+		// Link rewrites of encrypted notes are encrypted again; while locked they're skipped.
+		wrapped.migrateStorage = async (plan) => {
+			const skipped = [...plan.skipped];
+			const rewrites: StorageRewrite[] = [];
+			for (const r of plan.rewrites) {
+				const raw = await host.readNote(r.id).catch(() => null);
+				if (raw === null || !isEncryptedNote(raw)) rewrites.push(r);
+				else if (!crypt.unlocked()) skipped.push(r.id);
+				else rewrites.push({ id: r.id, text: await crypt.encrypt(r.text) });
+			}
+			return inner({ ...plan, rewrites, skipped });
 		};
 	}
 	if (host.gitStashes) {

@@ -64,11 +64,14 @@ describe('repoChanges', () => {
 		fs.rmSync(path.join(dir, 'gone.md'));
 		write(dir, 'sub/fresh.md', '# Fresh\n');
 		write(dir, '.fr5a/sessions/s.md', 'hidden');
+		write(dir, '.fr5a/chats/talk.md', '# Talk\n');
 		write(dir, 'image.png', 'binary-ish');
 
 		expect(await repoChanges(dir)).toEqual([
 			{ path: 'edit.md', status: 'modified', before: '# Edit\n\nold\n', after: '# Edit\n\nnew\n' },
 			{ path: 'gone.md', status: 'deleted', before: '# Gone\n', after: null },
+			// Saved chats are notes too; other `.fr5a/` files aren't.
+			{ path: '.fr5a/chats/talk.md', status: 'added', before: null, after: '# Talk\n' },
 			{ path: 'sub/fresh.md', status: 'added', before: null, after: '# Fresh\n' }
 		]);
 	});

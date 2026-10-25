@@ -33,6 +33,7 @@
 			return app.notes.find((n) => n.id === app.activeId)?.title ?? (app.draft ? 'New note' : '');
 		if (app.pane === 'list') {
 			if (app.trashOpen) return 'Trash';
+			if (app.chatsOpen) return 'AI chats';
 			if (app.selectedFolder) return app.selectedFolder.split('/').pop() ?? 'Folder';
 			if (app.selectedTag) return `#${app.selectedTag.split('/').pop()}`;
 			return 'All Notes';

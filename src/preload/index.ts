@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { Channels } from '../shared/types';
+import type { StoragePlan, StorageResult } from '../shared/storageMigration';
 import type {
 	ConflictFile,
 	GitChange,
@@ -127,6 +128,9 @@ const api = {
 		`fr5a://workspace/${path.split('/').map(encodeURIComponent).join('/')}`,
 	saveAsset: (path: string, data: Uint8Array): Promise<string> =>
 		ipcRenderer.invoke(Channels.assetSave, path, data),
+	listImages: (dir: string): Promise<string[]> => ipcRenderer.invoke(Channels.assetList, dir),
+	migrateStorage: (plan: StoragePlan): Promise<StorageResult> =>
+		ipcRenderer.invoke(Channels.storageMigrate, plan),
 
 	/** A pull stopped on conflicts; returns an unsubscribe fn. */
 	onSyncConflict: (cb: (files: ConflictFile[]) => void): (() => void) => {

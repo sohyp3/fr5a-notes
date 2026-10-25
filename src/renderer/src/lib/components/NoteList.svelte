@@ -34,6 +34,7 @@
 
 	const crumbs = $derived.by((): Crumb[] => {
 		if (app.trashOpen) return [{ path: '', label: 'Trash' }];
+		if (app.chatsOpen) return [{ path: '', label: 'AI chats' }];
 		if (app.selectedFolder) {
 			const segs = app.selectedFolder.split('/');
 			return [
@@ -143,6 +144,8 @@
 				/>
 			{:else if app.trashOpen}
 				<EmptyState compact src={mascotSleep} title="Trash is empty" />
+			{:else if app.chatsOpen}
+				<EmptyState compact src={mascotSleep} title="No saved chats" />
 			{:else}
 				<EmptyState
 					compact
