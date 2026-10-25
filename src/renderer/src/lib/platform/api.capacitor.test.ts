@@ -12,7 +12,10 @@ const mem = vi.hoisted(() => ({
 	resume: [] as (() => void)[],
 	clock: 1000,
 	/** What Capacitor.getPlatform() answers; iOS tests flip it. */
-	platform: 'android' as string
+	platform: 'android' as string,
+	/** Injected I/O failures (storage migration rollback tests). */
+	failWrite: null as ((path: string, data: string) => boolean) | null,
+	failRename: null as ((from: string, to: string) => boolean) | null
 }));
 
 vi.mock('@capacitor/filesystem', () => {
@@ -63,6 +66,7 @@ vi.mock('@capacitor/filesystem', () => {
 				data: string;
 				recursive?: boolean;
 			}) => {
+				if (mem.failWrite?.(path, data)) return fail('EIO');
 				if (!mem.dirs.has(parent(path))) {
 					if (!recursive) return fail('Parent directory missing');
 					mkdirs(parent(path));
@@ -80,6 +84,7 @@ vi.mock('@capacitor/filesystem', () => {
 				for (const f of [...mem.files.keys()]) if (under(f)) mem.files.delete(f);
 			},
 			rename: async ({ from, to }: { from: string; to: string }) => {
+				if (mem.failRename?.(from, to)) return fail('EXDEV');
 				if (!mem.dirs.has(parent(to))) return fail('Parent directory missing');
 				const f = mem.files.get(from);
 				if (f) {
@@ -166,6 +171,8 @@ function seed(id: string, data: string) {
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 beforeEach(() => {
+	mem.failWrite = null;
+	mem.failRename = null;
 	mem.files.clear();
 	mem.dirs.clear();
 	mem.prefs.clear();
@@ -312,6 +319,48 @@ describe('capacitor platform (android + ios)', () => {
 				skipped: []
 			})
 		).rejects.toThrow();
+	});
+
+	it('puts everything back when a migration rewrite or move fails', async () => {
+		seed('Work/plan.md', '# Plan\n\n![](../assets/cat.png)');
+		seed('b.md', '# B');
+		seed('assets/cat.png', 'png');
+		seed('AI chats/old.md', '# Old\n\n*AI chat*');
+		const api = createCapacitorPlatform();
+		await api.listNotes();
+		const ids = ['Work/plan.md', 'b.md', 'assets/cat.png', 'AI chats/old.md'];
+		const snap = () => ids.map((id) => ({ ...mem.files.get(`notes/${id}`) }));
+		const before = snap();
+		const plan = {
+			moves: [
+				{ from: 'assets/cat.png', to: '.fr5a/assets/cat.png' },
+				{ from: 'AI chats/old.md', to: '.fr5a/chats/old.md' }
+			],
+			rewrites: [
+				{ id: 'Work/plan.md', text: '# Plan\n\n![](../.fr5a/assets/cat.png)' },
+				{ id: 'b.md', text: '# B2' }
+			],
+			skipped: []
+		};
+		const untouched = async () => {
+			expect(snap()).toEqual(before);
+			expect(mem.files.has('notes/.fr5a/assets/cat.png')).toBe(false);
+			expect(mem.files.has('notes/.fr5a/chats/old.md')).toBe(false);
+			expect((await api.listNotes()).map((n) => n.id).sort()).toEqual([
+				'AI chats/old.md',
+				'Work/plan.md',
+				'b.md'
+			]);
+		};
+
+		mem.failWrite = (path, data) => path === 'notes/b.md' && data === '# B2';
+		await expect(api.migrateStorage!(plan)).rejects.toThrow(/update b\.md.*nothing was changed/);
+		await untouched();
+
+		mem.failWrite = null;
+		mem.failRename = (from) => from === 'notes/AI chats/old.md';
+		await expect(api.migrateStorage!(plan)).rejects.toThrow(/move AI chats\/old\.md.*EXDEV/);
+		await untouched();
 	});
 
 	it('reads, writes and re-indexes a note', async () => {

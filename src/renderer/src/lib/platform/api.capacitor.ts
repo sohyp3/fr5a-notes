@@ -757,44 +757,50 @@ export function createCapacitorPlatform(): PlatformApi {
 			}
 			const mtimeOf = async (id: string) =>
 				(await Filesystem.stat({ path: rel(id), directory: DIR })).mtime;
-			// Rewrites first (at the old paths), then the moves; every mtime is set back.
-			let rewritten = 0;
-			const skipped = [...plan.skipped];
+			const write = (id: string, data: string) =>
+				Filesystem.writeFile({ path: rel(id), directory: DIR, data, encoding: Encoding.UTF8 });
+			const renameFile = (from: string, to: string) =>
+				Filesystem.rename({ from: rel(from), to: rel(to), directory: DIR, toDirectory: DIR });
+			// All or nothing: rewrites first (at the old paths), then the moves; a failure
+			// undoes the renames and puts the notes back (text and mtime), then throws.
+			const written: { id: string; text: string; mtime: number }[] = [];
+			const renamed: [string, string][] = [];
+			const fail = async (what: string, err: unknown): Promise<never> => {
+				for (const [from, to] of [...renamed].reverse()) await renameFile(to, from).catch(() => {});
+				for (const w of written) {
+					await write(w.id, w.text).catch(() => {});
+					await setFileMtime(rel(w.id), w.mtime).catch(() => {});
+				}
+				const why = err instanceof Error ? err.message : String(err);
+				throw new Error(`Couldn’t ${what} (${why}); nothing was changed.`);
+			};
 			for (const r of plan.rewrites) {
 				try {
 					const mtime = await mtimeOf(r.id);
-					await Filesystem.writeFile({
-						path: rel(r.id),
-						directory: DIR,
-						data: r.text,
-						encoding: Encoding.UTF8
-					});
+					written.push({ id: r.id, text: await readRaw(r.id), mtime });
+					await write(r.id, r.text);
 					await setFileMtime(rel(r.id), mtime).catch(() => {});
-					await reindexFile(r.id);
-					rewritten++;
-				} catch {
-					skipped.push(r.id);
+				} catch (err) {
+					await fail(`update ${r.id}`, err);
 				}
 			}
-			let moved = 0;
-			const dirs = new Set<string>();
 			for (const m of plan.moves) {
+				if (!(await exists(m.from))) continue; // vanished meanwhile: nothing to move
 				try {
 					const mtime = await mtimeOf(m.from);
 					await ensureDir(dirname(m.to));
-					await Filesystem.rename({
-						from: rel(m.from),
-						to: rel(m.to),
-						directory: DIR,
-						toDirectory: DIR
-					});
+					await renameFile(m.from, m.to);
+					renamed.push([m.from, m.to]);
 					await setFileMtime(rel(m.to), mtime).catch(() => {});
-					if (index.delete(m.from)) await reindexFile(m.to);
-					dirs.add(dirname(m.from));
-					moved++;
-				} catch {
-					/* vanished meanwhile: nothing to move */
+				} catch (err) {
+					await fail(`move ${m.from}`, err);
 				}
+			}
+			for (const w of written) await reindexFile(w.id);
+			const dirs = new Set<string>();
+			for (const [from, to] of renamed) {
+				if (index.delete(from)) await reindexFile(to);
+				dirs.add(dirname(from));
 			}
 			// Emptied source folders (`assets/`, `AI chats/`) go; ones still holding files stay.
 			for (const dir of [...dirs].sort((a, b) => b.length - a.length))
@@ -803,7 +809,7 @@ export function createCapacitorPlatform(): PlatformApi {
 					await Filesystem.rmdir({ path: rel(d), directory: DIR }).catch(() => {});
 				}
 			emitChange();
-			return { moved, rewritten, skipped };
+			return { moved: renamed.length, rewritten: written.length, skipped: [...plan.skipped] };
 		},
 
 		async readMeta(path) {

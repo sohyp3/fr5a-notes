@@ -110,7 +110,7 @@
 		try {
 			const res = await runStorageMigration(app, scan);
 			const left = res.skipped.length
-				? ` · ${plural(res.skipped.length, 'note')} left as they were (locked)`
+				? ` · ${plural(res.skipped.length, 'note')} left as they were (couldn’t be read)`
 				: '';
 			app.notify(
 				'ok',

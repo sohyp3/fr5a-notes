@@ -11,7 +11,9 @@ import {
  * Desktop executor of a storage plan (`shared/storageMigration.ts`): rewrites
  * the notes' links in place, then renames the files into `.fr5a/`. Every file
  * keeps its mtime (the note list is sorted by it). Validates the whole plan
- * before touching anything; a target that already exists stops it too.
+ * before touching anything; a target that already exists stops it too. All
+ * or nothing: a failed write or rename puts back what was already done
+ * (renames undone, notes restored with their text and times) and throws.
  */
 export async function applyStorageMigration(
 	root: string,
@@ -33,42 +35,65 @@ export async function applyStorageMigration(
 		if (err) throw new Error(err);
 	}
 
-	const written: string[] = [];
-	const skipped = [...plan.skipped];
+	const written: { id: string; text: string; atime: Date; mtime: Date }[] = [];
+	const renamed: [string, string][] = [];
+	/** Undo renames (newest first), then put the notes back as they were. */
+	const rollBack = async () => {
+		for (const [from, to] of [...renamed].reverse())
+			await fs.rename(abs(to), abs(from)).catch(() => {});
+		for (const w of written) {
+			const file = abs(w.id);
+			await fs.writeFile(file, w.text, 'utf8').catch(() => {});
+			await fs.utimes(file, w.atime, w.mtime).catch(() => {});
+		}
+	};
+	const fail = async (what: string, err: unknown): Promise<never> => {
+		await rollBack();
+		const why = err instanceof Error ? err.message : String(err);
+		throw new Error(`Couldn’t ${what} (${why}); nothing was changed.`);
+	};
+
 	for (const r of plan.rewrites) {
 		const file = abs(r.id);
 		try {
 			const { atime, mtime } = await fs.stat(file);
+			const text = await fs.readFile(file, 'utf8');
+			written.push({ id: r.id, text, atime, mtime });
 			await fs.writeFile(file, r.text, 'utf8');
 			await fs.utimes(file, atime, mtime);
-			written.push(r.id);
-		} catch {
-			skipped.push(r.id);
+		} catch (err) {
+			await fail(`update ${r.id}`, err);
 		}
 	}
-	const renamed: [string, string][] = [];
 	for (const m of plan.moves) {
 		const from = abs(m.from);
 		const to = abs(m.to);
+		if (!(await exists(from))) continue; // vanished meanwhile: nothing to move
 		try {
 			const { atime, mtime } = await fs.stat(from);
 			await fs.mkdir(path.dirname(to), { recursive: true });
 			await fs.rename(from, to);
-			await fs.utimes(to, atime, mtime).catch(() => {});
 			renamed.push([m.from, m.to]);
-		} catch {
-			/* vanished meanwhile: nothing to move */
+			await fs.utimes(to, atime, mtime).catch(() => {});
+		} catch (err) {
+			await fail(`move ${m.from}`, err);
 		}
 	}
 	// Emptied source folders (`assets/`, `AI chats/`) go; ones still holding files stay.
-	const dirs = new Set(plan.moves.map((m) => path.dirname(abs(m.from))));
+	const dirs = new Set(renamed.map(([from]) => path.dirname(abs(from))));
 	for (const dir of [...dirs].sort((a, b) => b.length - a.length)) {
 		for (let d = dir; d !== base && d.startsWith(base + path.sep); d = path.dirname(d)) {
 			const removed = await fs.rmdir(d).then(...ok);
 			if (!removed) break;
 		}
 	}
-	return { moved: renamed.length, rewritten: written.length, skipped, written, renamed };
+	return {
+		moved: renamed.length,
+		rewritten: written.length,
+		skipped: [...plan.skipped],
+		written: written.map((w) => w.id),
+		renamed
+	};
 }
 
 /** `then` handlers: resolved → true, rejected → false. */

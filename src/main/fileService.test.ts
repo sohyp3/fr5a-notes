@@ -1,7 +1,8 @@
 import { mkdtemp, mkdir, readFile, rm, stat, utimes, writeFile, access } from 'node:fs/promises';
+import { promises as fsp } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FileService } from './fileService';
 import type { NoteIndex } from './db';
 import type { NoteMeta } from '../shared/types';
@@ -246,5 +247,62 @@ describe('FileService app files under .fr5a/', () => {
 			})
 		).rejects.toThrow('Already there');
 		expect(await exists(path.join(root, 'b.png'))).toBe(true);
+	});
+
+	it('puts everything back when a rewrite or a move fails', async () => {
+		await mkdir(path.join(root, 'assets'));
+		await mkdir(path.join(root, 'AI chats'));
+		await writeFile(path.join(root, 'assets/cat.png'), 'png');
+		await writeFile(path.join(root, 'AI chats/old.md'), '# Old\n\n*AI chat*\n');
+		await writeFile(path.join(root, 'b.md'), '# B\n');
+		const old = new Date('2024-01-02T03:04:05Z');
+		for (const f of ['Work/plan.md', 'b.md', 'assets/cat.png', 'AI chats/old.md'])
+			await utimes(path.join(root, f), old, old);
+		const plan = {
+			moves: [
+				{ from: 'assets/cat.png', to: '.fr5a/assets/cat.png' },
+				{ from: 'AI chats/old.md', to: '.fr5a/chats/old.md' }
+			],
+			rewrites: [
+				{ id: 'Work/plan.md', text: '# Plan\n\n![](../.fr5a/assets/cat.png)\n' },
+				{ id: 'b.md', text: '# B2\n' }
+			],
+			skipped: []
+		};
+		const untouched = async () => {
+			expect(await readFile(path.join(root, 'Work/plan.md'), 'utf8')).toBe(
+				'# Plan\n\n![](../assets/cat.png)\n'
+			);
+			expect(await readFile(path.join(root, 'b.md'), 'utf8')).toBe('# B\n');
+			for (const f of ['Work/plan.md', 'b.md', 'assets/cat.png', 'AI chats/old.md'])
+				expect((await stat(path.join(root, f))).mtimeMs).toBe(old.getTime());
+			expect(await exists(path.join(root, '.fr5a/assets/cat.png'))).toBe(false);
+			expect(await exists(path.join(root, '.fr5a/chats/old.md'))).toBe(false);
+		};
+
+		// The second note can't be written: the first is restored, nothing moves.
+		const write = fsp.writeFile;
+		const w = vi
+			.spyOn(fsp, 'writeFile')
+			.mockImplementation(((file, ...rest) =>
+				String(file).endsWith('b.md') && rest[0] === '# B2\n'
+					? Promise.reject(new Error('EIO'))
+					: write(file, ...rest)) as typeof fsp.writeFile);
+		await expect(svc.migrateStorage(plan)).rejects.toThrow(/update b\.md.*nothing was changed/);
+		w.mockRestore();
+		await untouched();
+
+		// The second rename fails: the first is undone and both notes go back.
+		const rename = fsp.rename;
+		const r = vi
+			.spyOn(fsp, 'rename')
+			.mockImplementation((from, to) =>
+				String(to).endsWith('old.md') && String(from).includes('AI chats')
+					? Promise.reject(new Error('EXDEV'))
+					: rename(from, to)
+			);
+		await expect(svc.migrateStorage(plan)).rejects.toThrow(/move AI chats\/old\.md.*EXDEV/);
+		r.mockRestore();
+		await untouched();
 	});
 });
