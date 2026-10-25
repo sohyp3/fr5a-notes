@@ -480,12 +480,17 @@
 					{:else if section.id === 'linkedNotes'}
 						<section class="group">
 							<h3>Note links &amp; graph</h3>
+							<p class="prose">
+								A link to a note is plain Markdown, <code>[text](folder/note.md)</code>. Insert → Link
+								types it and suggests notes as you fill in the path. A tap follows a link in view
+								mode, Mod+click while editing.
+							</p>
 							<div class="row">
 								<div class="label">
 									<span class="name">Note links &amp; graph</span>
 									<span class="desc"
-										>Suggest notes inside <code>[text](</code>, follow links (a tap in view mode,
-										Mod+click while editing), and the automatic graph of links and tags</span
+										>Note suggestions inside <code>[text](</code>, following links, and the
+										automatic graph of links and tags</span
 									>
 								</div>
 								{@render toggle(s.linkedNotes, 'Note links & graph', () =>

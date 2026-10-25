@@ -517,7 +517,7 @@
 			<EmptyState
 				src={mascotNew}
 				title="Nothing connects yet"
-				body="Tag notes with #topic, or link one from another with Insert → Link to note. Notes that share a tag or a link gather here."
+				body="Tag notes with #topic, or link one from another with Insert → Link. Notes that share a tag or a link gather here."
 			>
 				{#snippet action()}
 					<button class="cta" onclick={() => app.setView('editor')}>Back to your notes</button>

@@ -10,8 +10,10 @@ import ArrowRight from '@lucide/svelte/icons/arrow-right';
 import ArrowUpFromLine from '@lucide/svelte/icons/arrow-up-from-line';
 import Bold from '@lucide/svelte/icons/bold';
 import Check from '@lucide/svelte/icons/check';
+import ChevronDown from '@lucide/svelte/icons/chevron-down';
 import ChevronLeft from '@lucide/svelte/icons/chevron-left';
 import ChevronRight from '@lucide/svelte/icons/chevron-right';
+import ChevronUp from '@lucide/svelte/icons/chevron-up';
 import ChevronsDownUp from '@lucide/svelte/icons/chevrons-down-up';
 import Circle from '@lucide/svelte/icons/circle';
 import CircleDot from '@lucide/svelte/icons/circle-dot';
@@ -167,7 +169,10 @@ export const ICONS = {
 	// arrows
 	chevron: ChevronRight,
 	back: ChevronLeft,
-	next: ChevronRight,
+	/** Steps up / down a list (find: previous / next match), or a dropdown's caret. */
+	up: ChevronUp,
+	dropdown: ChevronDown,
+	/** Jump to the newest (the AI transcript's Latest). */
 	down: ArrowDown,
 	// privacy / encryption
 	shield: Shield,
