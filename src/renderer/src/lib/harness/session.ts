@@ -242,15 +242,27 @@ export function turnsToMessages(turns: Turn[]): ChatMessage[] {
 
 /**
  * A session file with its `saved:` note re-pointed after that note moved
- * (the storage migration), or null when it names none of `moved`. Only that
- * frontmatter line changes, so the rest of the file stays byte for byte.
+ * (the storage migration), or null when it names none of `moved`. `rehash`
+ * (by new path: [hash before, hash after]) carries `savedHash` across the
+ * migration's own link rewrite, so a re-save doesn't take it for the user's
+ * edits. Only those frontmatter lines change; the rest stays byte for byte.
  */
-export function withSavedMoved(text: string, moved: ReadonlyMap<string, string>): string | null {
+export function withSavedMoved(
+	text: string,
+	moved: ReadonlyMap<string, string>,
+	rehash?: ReadonlyMap<string, readonly [string, string]>
+): string | null {
 	const { data } = parseFrontmatter(text);
 	const saved = str(data.saved);
 	const to = saved && moved.get(saved);
 	if (!to) return null;
-	const line = stringifyFrontmatter({ saved: to }).split('\n')[1];
-	const out = text.replace(/^(---\r?\n[\s\S]*?)^saved:[^\n]*$/m, (_, head: string) => head + line);
+	const set = (src: string, key: string, value: string) => {
+		const line = stringifyFrontmatter({ [key]: value }).split('\n')[1];
+		const re = new RegExp(`^(---\\r?\\n[\\s\\S]*?)^${key}:[^\\n]*$`, 'm');
+		return src.replace(re, (_, head: string) => head + line);
+	};
+	let out = set(text, 'saved', to);
+	const hashes = rehash?.get(to);
+	if (hashes && str(data.savedHash) === hashes[0]) out = set(out, 'savedHash', hashes[1]);
 	return out === text ? null : out;
 }

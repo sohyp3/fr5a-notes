@@ -14,6 +14,7 @@ import {
 	parentOf,
 	relativeLink
 } from './paths';
+import { isEncryptedNote } from './encrypted';
 
 /**
  * The one-time move of app-written files into `.fr5a/` (Settings → General →
@@ -86,9 +87,11 @@ export function storageMoveError(m: StorageMove): string | null {
 	return `Not a storage move: ${m.from} → ${m.to}`;
 }
 
-/** Why a planned rewrite isn't allowed (only notes outside dot-folders), or null. */
+/** Why a planned rewrite isn't allowed (only notes outside dot-folders, and saved chats), or null. */
 export function storageRewriteError(r: StorageRewrite): string | null {
-	return noteExt(r.id) && !isHiddenPath(r.id) ? null : `Not a note: ${r.id}`;
+	return noteExt(r.id) && (!isHiddenPath(r.id) || isAppNotePath(r.id))
+		? null
+		: `Not a note: ${r.id}`;
 }
 
 const SCHEME = /^[a-z][a-z0-9+.-]*:/i;
@@ -178,21 +181,22 @@ export function planStorageMigration(
 		moves.push({ from, to: dest });
 		moved.set(from, dest);
 	};
-	for (const p of input.assets)
-		if (p.startsWith(`${assetsDir}/`) && isImagePath(p) && !isHiddenPath(p))
-			add(p, targetOf(p, assetsDir, APP_ASSETS_DIR));
+	const notes = input.notes.filter((n) => !isHiddenPath(n.id) || isAppNotePath(n.id));
+	// Ciphertext can't be rewritten either (encrypted, read without the vault).
+	const unreadable = (text: string | null): text is null => text === null || isEncryptedNote(text);
+	const skipped = notes.filter((n) => unreadable(n.text)).map((n) => n.id);
+	// A note that can't be read may link to any image: they all stay until it can.
+	if (!skipped.length)
+		for (const p of input.assets)
+			if (p.startsWith(`${assetsDir}/`) && isImagePath(p) && !isHiddenPath(p))
+				add(p, targetOf(p, assetsDir, APP_ASSETS_DIR));
 	for (const p of input.chats)
 		if (p.startsWith(`${chatsDir}/`) && noteExt(p) && !isHiddenPath(p))
 			add(p, targetOf(p, chatsDir, APP_CHATS_DIR));
 
 	const rewrites: StorageRewrite[] = [];
-	const skipped: string[] = [];
-	for (const n of input.notes) {
-		if (isHiddenPath(n.id) && !isAppNotePath(n.id)) continue;
-		if (n.text === null) {
-			skipped.push(n.id);
-			continue;
-		}
+	for (const n of notes) {
+		if (unreadable(n.text)) continue;
 		const to = moved.get(n.id) ?? n.id;
 		const text = rewriteLinks(n.text, parentOf(n.id), parentOf(to), moved);
 		if (text !== null) rewrites.push({ id: n.id, text });

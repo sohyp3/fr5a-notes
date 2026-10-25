@@ -98,11 +98,12 @@
 	});
 	const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 	function storageLabel(scan: StorageScan): string {
+		// Images wait while encrypted notes can't be read (their links couldn't follow).
 		const parts = [
-			scan.assets.length ? plural(scan.assets.length, 'image') : '',
+			scan.assets.length && !scan.locked ? plural(scan.assets.length, 'image') : '',
 			scan.chats.length ? plural(scan.chats.length, 'saved chat') : ''
 		].filter(Boolean);
-		return `Move ${parts.join(' and ')} into .fr5a`;
+		return parts.length ? `Move ${parts.join(' and ')} into .fr5a` : 'Images wait for an unlock';
 	}
 	async function migrate(scan: StorageScan): Promise<void> {
 		migrating = true;
@@ -297,13 +298,15 @@
 									<div class="row wrap">
 										<div class="label">
 											<span class="name">{storageLabel(scan)}</span>
-											{#if scan.locked}<span class="desc"
-													>{plural(scan.locked, 'encrypted note')} can’t be read now: unlock first, or
-													their image links stay as they are.</span
+											{#if scan.locked && scan.assets.length}<span class="desc"
+													>{plural(scan.locked, 'encrypted note')} can’t be read now: unlock them to move
+													the {plural(scan.assets.length, 'image')} too.</span
 												>{/if}
 										</div>
-										<button class="btn" disabled={migrating} onclick={() => migrate(scan)}
-											>{migrating ? 'Moving…' : 'Move'}</button
+										<button
+											class="btn"
+											disabled={migrating || (!!scan.locked && !scan.chats.length)}
+											onclick={() => migrate(scan)}>{migrating ? 'Moving…' : 'Move'}</button
 										>
 									</div>
 								</section>

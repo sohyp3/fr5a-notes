@@ -160,17 +160,17 @@ export function wrapNotes(host: PlatformApi, crypt: NoteCrypt) {
 	}
 	if (host.migrateStorage) {
 		const inner = host.migrateStorage;
-		// Link rewrites of encrypted notes are encrypted again; while locked they're skipped.
+		// Link rewrites of encrypted notes are encrypted again. Locked meanwhile: nothing
+		// runs (the files would move while a note's links stay behind).
 		wrapped.migrateStorage = async (plan) => {
-			const skipped = [...plan.skipped];
 			const rewrites: StorageRewrite[] = [];
 			for (const r of plan.rewrites) {
 				const raw = await host.readNote(r.id).catch(() => null);
 				if (raw === null || !isEncryptedNote(raw)) rewrites.push(r);
-				else if (!crypt.unlocked()) skipped.push(r.id);
+				else if (!crypt.unlocked()) throw new VaultLockedError();
 				else rewrites.push({ id: r.id, text: await crypt.encrypt(r.text) });
 			}
-			return inner({ ...plan, rewrites, skipped });
+			return inner({ ...plan, rewrites });
 		};
 	}
 	if (host.gitStashes) {

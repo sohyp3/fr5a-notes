@@ -1030,7 +1030,8 @@ class AppState {
 	async openNoteLink(target: string): Promise<void> {
 		if (!this.settings.linkedNotes) return;
 		const from = this.activeId ?? joinPath(this.activeDir, '_');
-		const note = resolveNoteHref(this.listedNotes, target, from);
+		// Saved chats are linkable too (the storage move re-points links to them).
+		const note = resolveNoteHref([...this.listedNotes, ...this.chatNotes], target, from);
 		if (note) await this.openNote(note.id);
 		else this.notify('error', `No note at “${target.trim()}”`);
 	}

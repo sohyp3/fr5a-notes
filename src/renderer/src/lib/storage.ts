@@ -80,13 +80,35 @@ export async function runStorageMigration(
 		const ai = getAiSettings();
 		if (oldChatsDir(ai.config.chatsFolder ?? '') === scan.chatsDir)
 			ai.update({ chatsFolder: APP_CHATS_DIR });
-		await remapSessions(chatMoves).catch((err) => console.warn('[storage] sessions', err));
+		const { hashText } = await import('./harness/session');
+		// A chat whose links were rewritten keeps counting as unedited (`savedHash`).
+		const before = new Map(notes.map((n) => [n.id, n.text]));
+		const rehash = new Map<string, readonly [string, string]>();
+		for (const r of plan.rewrites) {
+			const to = chatMoves.get(r.id);
+			const old = before.get(r.id);
+			if (to && old != null) rehash.set(to, [hashText(old), hashText(r.text)]);
+		}
+		if (app.harnessLoaded) {
+			const { getHarness } = await import('./harness/harness.svelte');
+			for (const t of getHarness().tabs) {
+				const h = t.session.saved && rehash.get(t.session.saved);
+				if (h && t.session.savedHash === h[0]) {
+					t.session.savedHash = h[1];
+					t.scheduleSave();
+				}
+			}
+		}
+		await remapSessions(chatMoves, rehash).catch((err) => console.warn('[storage] sessions', err));
 	}
 	return res;
 }
 
 /** Working AI sessions that name a moved chat as their saved note follow it. */
-async function remapSessions(moved: ReadonlyMap<string, string>): Promise<void> {
+async function remapSessions(
+	moved: ReadonlyMap<string, string>,
+	rehash: ReadonlyMap<string, readonly [string, string]>
+): Promise<void> {
 	const { DEVICE_DIR, SESSIONS_DIR, withSavedMoved } = await import('./harness/session');
 	for (const dir of [`${SESSIONS_DIR}/${DEVICE_DIR}`, SESSIONS_DIR]) {
 		const files = (await platform.listMeta(dir).catch(() => [] as string[])).filter((f) =>
@@ -94,7 +116,7 @@ async function remapSessions(moved: ReadonlyMap<string, string>): Promise<void> 
 		);
 		for (const f of files) {
 			const text = await platform.readMeta(`${dir}/${f}`);
-			const next = text === null ? null : withSavedMoved(text, moved);
+			const next = text === null ? null : withSavedMoved(text, moved, rehash);
 			if (next !== null) await platform.writeMeta(`${dir}/${f}`, next);
 		}
 	}

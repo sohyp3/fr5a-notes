@@ -1671,7 +1671,8 @@ test('desktop: saved chats list under AI chats; Storage moves old files into .fr
 		'.fr5a/chats/talk.md': '# Talk\n\n*AI chat · 2026-01-02*\n\n> **You:** hi',
 		'AI chats/old.md': '# Old chat\n\n*AI chat · 2025-12-01*\n\nhello',
 		'AI chats/mine.md': '# Mine\n\nnot a chat',
-		'pics.md': '# Pics\n\n![A cat](assets/cat.png)\nend'
+		'pics.md': '# Pics\n\n![A cat](assets/cat.png)\nend',
+		'links.md': '# Links\n\n[the old chat](AI%20chats/old.md)'
 	});
 	await page.evaluate(async (k) => {
 		const api = (window as unknown as Record<string, FakeApi>)[k];
@@ -1707,8 +1708,18 @@ test('desktop: saved chats list under AI chats; Storage moves old files into .fr
 	expect(ids).not.toContain('AI chats/old.md');
 	const assets = await page.evaluate(() => (window as unknown as { __assets: object }).__assets);
 	expect(Object.keys(assets)).toEqual(['.fr5a/assets/cat.png']);
+	expect(await readFake(page, 'links.md')).toBe('# Links\n\n[the old chat](.fr5a/chats/old.md)');
+	await page.getByRole('button', { name: /Links & maps/ }).click();
+	await page.getByRole('switch', { name: 'Enable links and maps' }).click();
 	await page.getByRole('button', { name: 'Close settings' }).click();
 	await expect(chats).toHaveText(/AI chats\s*2/);
+	// A link to a saved chat still opens it.
+	await sidebar(page)
+		.getByRole('button', { name: /^All Notes/ })
+		.click();
+	await list(page).getByText('Links', { exact: true }).click();
+	await page.locator('.md-note-link').click({ modifiers: ['Control'] });
+	await expect(page.locator('.ProseMirror')).toContainText('hello');
 	// The rewritten link still shows the picture.
 	await sidebar(page)
 		.getByRole('button', { name: /^All Notes/ })

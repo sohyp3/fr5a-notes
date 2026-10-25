@@ -22,7 +22,7 @@ describe('storage migration planner', () => {
 					text: '# Talk\n\n*AI chat · 2026-01-02*\n\n[plan](../Work/plan.md)'
 				},
 				{ id: 'links.md', text: '[the chat](AI%20chats/talk.md)' },
-				{ id: 'locked.md', text: null }
+				{ id: '.fr5a/chats/new.md', text: '# New\n\n![](../../assets/cat.png)' }
 			]
 		});
 		expect(plan.moves).toEqual([
@@ -35,11 +35,32 @@ describe('storage migration planner', () => {
 			'Work/plan.md': '# Plan\n\n![](../.fr5a/assets/sub/dog.jpg "Dog")\nplain',
 			'abs.md': '![x](/.fr5a/assets/cat.png?v=1)',
 			'AI chats/talk.md': '# Talk\n\n*AI chat · 2026-01-02*\n\n[plan](../../Work/plan.md)',
-			'links.md': '[the chat](.fr5a/chats/talk.md)'
+			'links.md': '[the chat](.fr5a/chats/talk.md)',
+			'.fr5a/chats/new.md': '# New\n\n![](../assets/cat.png)'
 		});
-		expect(plan.skipped).toEqual(['locked.md']);
+		expect(plan.skipped).toEqual([]);
 		for (const m of plan.moves) expect(storageMoveError(m)).toBeNull();
 		for (const r of plan.rewrites) expect(storageRewriteError(r)).toBeNull();
+	});
+
+	it('keeps images in place while a note can’t be read; chats still move', () => {
+		const armored =
+			'<!-- pinned: true -->\n-----BEGIN PGP MESSAGE-----\n\nwcBMA\n-----END PGP MESSAGE-----\n';
+		for (const locked of [null, armored]) {
+			const plan = planStorageMigration({
+				assets: ['assets/cat.png'],
+				chats: ['AI chats/talk.md'],
+				notes: [
+					{ id: 'hello.md', text: '![](assets/cat.png)\n[c](AI%20chats/talk.md)' },
+					{ id: 'secret.md', text: locked }
+				]
+			});
+			expect(plan.moves).toEqual([{ from: 'AI chats/talk.md', to: '.fr5a/chats/talk.md' }]);
+			expect(plan.rewrites).toEqual([
+				{ id: 'hello.md', text: '![](assets/cat.png)\n[c](.fr5a/chats/talk.md)' }
+			]);
+			expect(plan.skipped).toEqual(['secret.md']);
+		}
 	});
 
 	it('never lands on a taken file', () => {
@@ -67,6 +88,7 @@ describe('storage migration planner', () => {
 		expect(storageMoveError({ from: 'a.md', to: '.fr5a/assets/a.md' })).not.toBeNull();
 		expect(storageRewriteError({ id: '.fr5a/sessions/a.md', text: '' })).not.toBeNull();
 		expect(storageRewriteError({ id: 'a.png', text: '' })).not.toBeNull();
+		expect(storageRewriteError({ id: '.fr5a/chats/a.md', text: '' })).toBeNull();
 	});
 
 	it('tells a saved chat by its byline', () => {
