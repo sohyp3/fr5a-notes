@@ -335,3 +335,78 @@ test('mind maps off: the map code is never requested', async ({ page }) => {
 	const map = loaded.filter((u) => /xyflow|dagre|MapEditor|MapCanvas|lib\/maps\//.test(u));
 	expect(map).toEqual([]);
 });
+
+test('desktop maps: a change on disk asks Reload / Keep mine; Tidy; graph-only Mod+G', async ({
+	browser
+}, info) => {
+	test.skip(info.project.name !== 'phone 390x844', 'one desktop run is enough');
+	const { ctx, page } = await desktopPage(browser);
+	await buildMap(page, false);
+	const map = page.getByRole('region', { name: 'Mind map Atlas' });
+	/** Another device (a pull) adds a node to the file. */
+	const outside = (text: string) =>
+		page.evaluate(
+			([rel, text]) => {
+				const w = window as unknown as Win;
+				const doc = JSON.parse(w.__meta[rel]);
+				doc.nodes.push({ id: text, type: 'text', text, x: -400, y: -300, width: 180, height: 44 });
+				w.__meta[rel] = JSON.stringify(doc);
+			},
+			[MAP, text]
+		);
+	const texts = async () => (await savedMap(page))!.nodes.map((n) => n.text).filter(Boolean);
+	const dialog = page.getByRole('alertdialog');
+
+	// Reload: the disk's version shows and stays; the edit made here is dropped.
+	await outside('Outside');
+	await addIdea(page, 'Mine', false);
+	await expect(dialog.getByText('This map changed on disk')).toBeVisible();
+	await dialog.getByRole('button', { name: 'Reload' }).click();
+	await expect(map.locator('.svelte-flow__node', { hasText: 'Outside' })).toBeVisible();
+	await expect(map.locator('.svelte-flow__node', { hasText: 'Mine' })).toHaveCount(0);
+	expect(await texts()).toEqual(['First', 'Second', 'Outside']);
+
+	// Keep mine: this canvas is written over the disk's.
+	await outside('Elsewhere');
+	await addIdea(page, 'Kept', false);
+	await expect(dialog.getByText('This map changed on disk')).toBeVisible();
+	await dialog.getByRole('button', { name: 'Keep mine' }).click();
+	await expect.poll(texts).toEqual(['First', 'Second', 'Outside', 'Kept']);
+	await expect(dialog).toHaveCount(0);
+
+	// Tidy lays the connected pair out left to right and saves it.
+	const before = (await savedMap(page))!;
+	await map.getByRole('button', { name: 'Tidy' }).click();
+	// (A long wait: the dev server compiles dagre on its first import.)
+	await expect
+		.poll(
+			async () => {
+				const after = (await savedMap(page))!.nodes;
+				const at = (t: string) => after.find((n) => n.text === t)!;
+				return (
+					at('First').x < at('Second').x && JSON.stringify(after) !== JSON.stringify(before.nodes)
+				);
+			},
+			{ timeout: 15000 }
+		)
+		.toBe(true);
+
+	// Mind maps off with this map remembered: Mod+G opens the graph, not a blank view.
+	await map.getByRole('button', { name: 'Close mind map' }).click();
+	await page.getByRole('button', { name: 'Settings', exact: true }).click();
+	await page.getByRole('button', { name: /Links & maps/ }).click();
+	await page.getByRole('switch', { name: 'Note links & graph', exact: true }).click();
+	await page.getByRole('switch', { name: 'Mind maps', exact: true }).click();
+	await expect(page.getByRole('switch', { name: 'Mind maps', exact: true })).toHaveAttribute(
+		'aria-checked',
+		'false'
+	);
+	await page.keyboard.press('Escape');
+	await page.keyboard.press('Control+g');
+	await expect(page.getByRole('region', { name: 'All notes map' })).toBeVisible();
+	await page.reload();
+	await expect(page.locator('.body[data-layout="desktop"]')).toBeVisible();
+	await page.keyboard.press('Control+g');
+	await expect(page.getByRole('region', { name: 'All notes map' })).toBeVisible();
+	await ctx.close();
+});
