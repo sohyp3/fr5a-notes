@@ -894,17 +894,19 @@ test('AI harness: a long question card keeps its buttons on a short pane', async
 	await input.press('Enter');
 	const panel = harness.getByRole('group', { name: 'Question from the AI' });
 	await expect(panel.getByRole('heading', { name: /^Question 1:/ })).toBeVisible();
-	const inside = async () => {
-		const pane = (await harness.boundingBox())!;
-		for (const el of [
-			panel.getByRole('tab').first(),
-			panel.getByRole('button', { name: 'Stop' })
-		]) {
-			const b = (await el.boundingBox())!;
-			expect(b.y).toBeGreaterThanOrEqual(pane.y);
-			expect(b.y + b.height).toBeLessThanOrEqual(pane.y + pane.height + 1);
-		}
-	};
+	// Measured once the card (and, on a phone, the pane) has finished moving in.
+	const inside = () =>
+		expect(async () => {
+			const pane = (await harness.boundingBox())!;
+			for (const el of [
+				panel.getByRole('tab').first(),
+				panel.getByRole('button', { name: 'Stop' })
+			]) {
+				const b = (await el.boundingBox())!;
+				expect(b.y).toBeGreaterThanOrEqual(pane.y);
+				expect(b.y + b.height).toBeLessThanOrEqual(pane.y + pane.height + 1);
+			}
+		}).toPass({ timeout: 3000 });
 	await inside();
 	// Context details open and the window shrinks (the keyboard comes up).
 	await harness.locator('.ctx-sum').tap();
