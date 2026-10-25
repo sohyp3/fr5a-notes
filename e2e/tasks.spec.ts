@@ -20,6 +20,12 @@ const editorText = (page: Page) =>
 		[...document.querySelectorAll('.ProseMirror p')].map((p) => p.textContent).join('\n')
 	);
 
+/** Two animation frames: pending `selectionchange` events have reached ProseMirror. */
+const settle = (page: Page) =>
+	page.evaluate(
+		() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
+	);
+
 async function openHello(page: Page): Promise<void> {
 	await page.getByRole('button', { name: /^All Notes/ }).click();
 	await page.getByText('Hello', { exact: true }).first().click();
@@ -67,6 +73,10 @@ test('desktop: a checkbox toggles its to-do; Enter continues unchecked, twice en
 	await expect.poll(() => editorText(page)).toContain('\n- [ ] after');
 	await page.keyboard.press('End');
 	for (let i = 0; i < 'after'.length; i++) await page.keyboard.press('ArrowLeft');
+	// Chrome reports caret moves in a later `selectionchange` task, and a key that
+	// lands before it acts on the editor's previous caret (here: Backspace deletes
+	// the space). A person never types faster than a frame; let one pass.
+	await settle(page);
 	await page.keyboard.press('Backspace');
 	await expect.poll(() => editorText(page)).toContain('\n- after');
 	await ctx.close();

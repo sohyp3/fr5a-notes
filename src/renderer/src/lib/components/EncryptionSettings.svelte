@@ -208,9 +208,9 @@
 					<div class="label">
 						<span class="name">AI can read encrypted notes</span>
 						<span class="desc"
-							>While they're unlocked. A chat that reads one is kept on this device, out of sync,
-							until you sync it (⋯ → Sync this chat); saved to notes, it's encrypted. Hide a note
-							from cloud AI to keep it to providers on your own hardware.</span
+							>While they're unlocked. Chats stay on this device; one that read an encrypted note is
+							encrypted when you save it to notes. Hide a note from cloud AI to keep it to providers
+							on your own hardware.</span
 						>
 					</div>
 					<button
