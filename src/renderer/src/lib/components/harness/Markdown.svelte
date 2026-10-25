@@ -1,11 +1,14 @@
 <script lang="ts">
-	import { renderReply } from '../../harness/render';
+	import { renderReplyBlocks, type RenderedReply } from '../../harness/render';
 
 	let { text }: { text: string } = $props();
 
 	// render.ts escapes every character of the source and emits only its own
-	// tags, so the reply's own HTML can never reach the DOM.
-	const html = $derived(renderReply(text));
+	// tags, so the reply's own HTML can never reach the DOM. Block by block:
+	// while a reply streams only its last block changes, so each delta parses
+	// and lays out the tail instead of the whole reply.
+	const memo: { last?: RenderedReply } = {};
+	const blocks = $derived((memo.last = renderReplyBlocks(text, memo.last)).html);
 
 	/** Copy buttons on code blocks (event delegation over the rendered HTML). */
 	async function onclick(e: MouseEvent): Promise<void> {
@@ -26,7 +29,7 @@
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 <div class="md" dir="auto" {onclick}>
 	<!-- eslint-disable-next-line svelte/no-at-html-tags -- escaped + tag-whitelisted by render.ts -->
-	{@html html}
+	{#each blocks as html, i (i)}{@html html}{/each}
 </div>
 
 <style>

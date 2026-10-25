@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isEncryptedNote, splitEncrypted, splitHeader } from './encrypted';
+import { isEncryptedNote, splitEncrypted, splitHeader, joinHeader } from './encrypted';
 
 const ARMOR = '-----BEGIN PGP MESSAGE-----\n\nwV4D\n-----END PGP MESSAGE-----\n';
 
@@ -10,6 +10,15 @@ describe('splitHeader', () => {
 			head: '<!-- dir: rtl -->\n<!-- pinned: true -->\n',
 			body: '# Title\n<!-- locked: true -->\nbody'
 		});
+	});
+
+	it('keeps map YAML encrypted while leaving lock metadata available to the host', () => {
+		const plain = '---\nmindmap:\n  version: 1\n---\n<!-- locked: true -->\n# Map\n';
+		const { head, body } = splitHeader(plain);
+		expect(head).toBe('<!-- locked: true -->\n');
+		expect(body.startsWith('---\n')).toBe(true);
+		expect(body).not.toContain('locked: true');
+		expect(joinHeader(head, body)).toBe(plain);
 	});
 
 	it('has an empty head for a note without metadata', () => {

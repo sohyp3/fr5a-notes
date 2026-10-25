@@ -15,6 +15,8 @@ import {
 } from '../shared/paths';
 import { noteSnippet } from '../shared/snippet';
 import { isEncryptedNote } from '../shared/encrypted';
+import { markdownBody } from '../shared/frontmatter';
+import { mindMapVersion } from '../shared/mindMapMetadata';
 
 const MD_EXT = new Set(['.md', '.markdown', '.mdown', '.txt']);
 
@@ -70,12 +72,13 @@ export class FileService {
 				pinned,
 				locked,
 				aiLocal,
-				encrypted: true
+				encrypted: true,
+				mindMapVersion: null
 			};
 		}
 		// Strip hidden metadata comments (dir / pinned / locked) so they never
 		// surface as the title or in the snippet.
-		const body = raw.replace(
+		const body = markdownBody(raw).replace(
 			/^\s*<!--\s*(?:dir:\s*(?:rtl|ltr)|pinned:\s*(?:true|false)|locked:\s*(?:true|false)|ai:\s*local)\s*-->\s*$/gim,
 			''
 		);
@@ -104,7 +107,8 @@ export class FileService {
 			pinned,
 			locked,
 			aiLocal,
-			encrypted: false
+			encrypted: false,
+			mindMapVersion: mindMapVersion(raw)
 		};
 	}
 

@@ -25,7 +25,8 @@ const note = (id: string, title: string): NoteMeta => ({
 	pinned: false,
 	locked: false,
 	aiLocal: false,
-	encrypted: false
+	encrypted: false,
+	mindMapVersion: null
 });
 
 function deps(over: Partial<ToolDeps> = {}): ToolDeps {

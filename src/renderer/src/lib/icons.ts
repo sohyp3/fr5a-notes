@@ -152,6 +152,7 @@ export const ICONS = {
 	// arrows
 	chevron: ChevronRight,
 	back: ChevronLeft,
+	next: ChevronRight,
 	down: ArrowDown,
 	// privacy / encryption
 	shield: Shield,

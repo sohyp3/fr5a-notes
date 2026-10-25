@@ -19,7 +19,8 @@ const note = (id: string, title: string, tags: string[] = []): NoteMeta => ({
 	pinned: false,
 	locked: false,
 	aiLocal: false,
-	encrypted: false
+	encrypted: false,
+	mindMapVersion: null
 });
 
 const notes = [

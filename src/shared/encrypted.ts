@@ -1,3 +1,5 @@
+import { splitFrontmatter } from './frontmatter';
+
 /**
  * Encrypted notes: the file keeps its leading metadata comments (dir /
  * pinned / locked / ai) in the clear, so both indexers and the delete-lock
@@ -31,8 +33,23 @@ function headLength(text: string): number {
 
 /** Plaintext → the metadata lines that stay in the clear, and the body to encrypt. */
 export function splitHeader(text: string): { head: string; body: string } {
+	const frontmatter = splitFrontmatter(text);
+	if (frontmatter) {
+		const n = headLength(frontmatter.body);
+		return {
+			head: frontmatter.body.slice(0, n),
+			body: text.slice(0, text.length - frontmatter.body.length) + frontmatter.body.slice(n)
+		};
+	}
 	const n = headLength(text);
 	return { head: text.slice(0, n), body: text.slice(n) };
+}
+
+/** Restore clear metadata after YAML, so an unlocked map stays a valid note. */
+export function joinHeader(head: string, body: string): string {
+	const frontmatter = splitFrontmatter(body);
+	if (!frontmatter) return head + body;
+	return body.slice(0, body.length - frontmatter.body.length) + head + frontmatter.body;
 }
 
 /**

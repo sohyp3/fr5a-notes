@@ -1,5 +1,12 @@
+<script lang="ts" module>
+	// One formatter for every card: `toLocaleDateString` builds a new one per
+	// call, and the whole list re-renders after each save.
+	const SHORT_DATE = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
+</script>
+
 <script lang="ts">
 	import { Spring } from 'svelte/motion';
+	import { on } from 'svelte/events';
 	import { getAppState } from '../stores/app.svelte';
 	import { haptic, reducedMotion } from '../portal';
 	import { endDrag, startDrag } from '../dnd';
@@ -168,10 +175,15 @@
 	let wheelRaw = 0;
 	let wheelTimer: ReturnType<typeof setTimeout> | null = null;
 
+	// Passive: a non-passive wheel listener on every card makes the list's
+	// scroll wait for the main thread on each tick, so it stutters whenever
+	// anything else runs (an AI reply streaming). Nothing here scrolls sideways
+	// (`.swipe` clips the card), so there is no default to prevent.
+	const wheel = (node: HTMLElement) => on(node, 'wheel', onWheel, { passive: true, capture: true });
+
 	function onWheel(e: WheelEvent): void {
-		// Only hijack clearly-horizontal gestures; leave vertical scroll alone.
+		// Only take clearly-horizontal gestures; leave vertical scroll alone.
 		if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
-		e.preventDefault();
 		if (!wheelTimer) wheelRaw = offset.current;
 		wheelRaw -= e.deltaX;
 		setNow(band(wheelRaw));
@@ -317,7 +329,7 @@
 		if (h < 24) return `${h}h`;
 		const d = Math.floor(h / 24);
 		if (d < 7) return `${d}d`;
-		return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+		return SHORT_DATE.format(ms);
 	}
 
 	const progress = $derived(Math.min(1, Math.abs(offset.current) / ACTION_W));
@@ -334,7 +346,7 @@
 	role="listitem"
 	bind:this={el}
 	bind:clientWidth={cardWidth}
-	onwheelcapture={onWheel}
+	{@attach wheel}
 >
 	{#if side === 'right'}
 		<!-- Revealed by swiping right: pin / unpin, or restore from trash. -->
@@ -386,6 +398,12 @@
 	>
 		<div class="row">
 			<span class="title">
+				{#if note.mindMapVersion !== null && note.mindMapVersion !== undefined}<span
+						class="shield map"
+						role="img"
+						title="Mind map"
+						aria-label="Mind map"><Icon name="graph" size={11} stroke={2} /></span
+					>{/if}
 				{#if note.pinned && !trash}<span
 						class="shield pinned"
 						role="img"

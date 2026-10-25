@@ -164,11 +164,11 @@
 			<button
 				class={['settings-btn', { selected: app.view === 'graph' }]}
 				aria-current={app.view === 'graph' ? 'true' : undefined}
-				title="Linked notes (Mod+G)"
+				title="Mind maps (Mod+G)"
 				onclick={() => app.openGraph()}
 			>
 				<Icon name="graph" size={16} />
-				<span>Linked notes</span>
+				<span>Mind maps</span>
 			</button>
 		{/if}
 		<button

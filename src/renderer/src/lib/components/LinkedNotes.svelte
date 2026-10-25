@@ -450,12 +450,12 @@
 
 <section
 	class={['linked-notes', { phone, stacked }]}
-	aria-label="Linked notes"
+	aria-label="All notes map"
 	onclickcapture={swallowClick}
 >
 	<header class="head">
 		<div class="titles">
-			<h1>Linked notes</h1>
+			<h1>All notes</h1>
 			<p class="sub">{summary}</p>
 		</div>
 		<label class="search">
@@ -499,7 +499,7 @@
 		</button>
 		<button
 			class="icon-btn"
-			aria-label="Close linked notes"
+			aria-label="Close all notes map"
 			title="Close"
 			onclick={() => app.setView('editor')}
 		>

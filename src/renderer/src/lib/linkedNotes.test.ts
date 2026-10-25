@@ -19,7 +19,8 @@ const note = (id: string, title = id.replace(/\.md$/, ''), tags: string[] = []):
 	pinned: false,
 	locked: false,
 	aiLocal: false,
-	encrypted: false
+	encrypted: false,
+	mindMapVersion: null
 });
 
 describe('linked notes', () => {
@@ -69,6 +70,15 @@ describe('linked notes', () => {
 		expect(resolveNoteHref([note('a/b/my (draft).md')], link.target, 'a/x/src.md')?.id).toBe(
 			'a/b/my (draft).md'
 		);
+	});
+
+	it('resolves Arabic, spaces, parentheses and escaped reserved path characters after moves', () => {
+		const moved = note('Archive/بحث (نسخة) #1.md');
+		const href = 'Old/%D8%A8%D8%AD%D8%AB%20%28%D9%86%D8%B3%D8%AE%D8%A9%29%20%231.md';
+		expect(resolveNoteHref([moved], href, 'Maps/Atlas.md')?.id).toBe(moved.id);
+		expect(parseNoteLinks('[Draft](draft(1).md)')).toEqual([
+			{ target: 'draft(1).md', label: 'Draft' }
+		]);
 	});
 
 	it('joins notes to their tags and nested tags to their parent', () => {

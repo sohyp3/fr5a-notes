@@ -187,9 +187,20 @@ function renderList(items: ListItem[]): string {
 
 /** Markdown → escaped, tag-whitelisted HTML. */
 export function renderMarkdown(src: string): string {
-	const lines = src.replace(/\r\n?/g, '\n').split('\n');
-	const out: string[] = [];
-	let i = 0;
+	const html: string[] = [];
+	parseBlocks(src.replace(/\r\n?/g, '\n').split('\n'), 0, html, []);
+	return html.join('');
+}
+
+/**
+ * Renders the top-level blocks from line `i` on: each block's HTML goes to
+ * `out` and the line index just past it to `ends`.
+ */
+function parseBlocks(lines: string[], i: number, out: string[], ends: number[]): void {
+	const push = (html: string): void => {
+		out.push(html);
+		ends.push(i);
+	};
 	while (i < lines.length) {
 		const line = lines[i];
 		if (!line.trim()) {
@@ -198,8 +209,8 @@ export function renderMarkdown(src: string): string {
 		}
 		const oneLineFence = ONE_LINE_FENCE.exec(line);
 		if (oneLineFence) {
-			out.push(codeBlock('', oneLineFence[2]));
 			i++;
+			push(codeBlock('', oneLineFence[2]));
 			continue;
 		}
 
@@ -212,28 +223,28 @@ export function renderMarkdown(src: string): string {
 			while (i < lines.length && !closing.test(lines[i])) body.push(lines[i++]);
 			i++; // closing fence (or EOF while streaming)
 			while (body.length && !body[body.length - 1].trim()) body.pop();
-			out.push(codeBlock(fence[2], body.join('\n')));
+			push(codeBlock(fence[2], body.join('\n')));
 			continue;
 		}
 
 		const h = HEADING.exec(line);
 		if (h) {
 			const level = h[1].length;
-			out.push(`<h${level}>${renderInline(h[2])}</h${level}>`);
 			i++;
+			push(`<h${level}>${renderInline(h[2])}</h${level}>`);
 			continue;
 		}
 
 		if (RULE.test(line)) {
-			out.push('<hr>');
 			i++;
+			push('<hr>');
 			continue;
 		}
 
 		if (QUOTE.test(line)) {
 			const body: string[] = [];
 			while (i < lines.length && QUOTE.test(lines[i])) body.push(lines[i++].replace(QUOTE, ''));
-			out.push(`<blockquote>${renderMarkdown(body.join('\n'))}</blockquote>`);
+			push(`<blockquote>${renderMarkdown(body.join('\n'))}</blockquote>`);
 			continue;
 		}
 
@@ -243,7 +254,7 @@ export function renderMarkdown(src: string): string {
 			i += 2;
 			const rows: string[] = [];
 			while (i < lines.length && lines[i].includes('|') && lines[i].trim()) rows.push(lines[i++]);
-			out.push(table(head, sep, rows));
+			push(table(head, sep, rows));
 			continue;
 		}
 
@@ -269,7 +280,7 @@ export function renderMarkdown(src: string): string {
 			// Normalise indents so the shallowest item is depth 0.
 			const min = Math.min(...items.map((it) => it.indent));
 			for (const it of items) it.indent -= min;
-			out.push(renderList(items));
+			push(renderList(items));
 			continue;
 		}
 
@@ -279,13 +290,44 @@ export function renderMarkdown(src: string): string {
 			para.push(lines[i++].trim());
 		}
 		if (!para.length) para.push(lines[i++].trim());
-		out.push(`<p>${para.map(renderInline).join('<br>')}</p>`);
+		push(`<p>${para.map(renderInline).join('<br>')}</p>`);
 	}
-	return out.join('');
 }
 
 /** AI reply → HTML: a bare JSON reply becomes a highlighted block, else Markdown. */
 export function renderReply(text: string): string {
 	const json = asJson(text);
 	return json ? codeBlock('json', json) : renderMarkdown(text);
+}
+
+/** A reply rendered block by block (see `renderReplyBlocks`). */
+export interface RenderedReply {
+	text: string;
+	/** Line count of `text`. */
+	lines: number;
+	/** Each top-level block's HTML; joined, they are `renderReply(text)`. */
+	html: string[];
+	/** The line index just past each block. */
+	ends: number[];
+}
+
+/**
+ * `renderReply`, split into its top-level blocks. Given the render of a text
+ * this one extends (a reply streaming in), it keeps the blocks the appended
+ * text can't change and renders only from there, so a delta costs the tail
+ * of the reply, not all of it, and the DOM above the tail stays as it is.
+ */
+export function renderReplyBlocks(text: string, prev?: RenderedReply): RenderedReply {
+	const lines = text.replace(/\r\n?/g, '\n').split('\n');
+	const json = asJson(text);
+	if (json) return { text, lines: lines.length, html: [codeBlock('json', json)], ends: [Infinity] };
+	let keep = 0;
+	// A block reads at most one line past its end, and only the last line of
+	// the earlier text can still change.
+	if (prev && text.startsWith(prev.text))
+		while (keep < prev.ends.length && prev.ends[keep] + 2 < prev.lines) keep++;
+	const html = prev ? prev.html.slice(0, keep) : [];
+	const ends = prev ? prev.ends.slice(0, keep) : [];
+	parseBlocks(lines, keep ? ends[keep - 1] : 0, html, ends);
+	return { text, lines: lines.length, html, ends };
 }

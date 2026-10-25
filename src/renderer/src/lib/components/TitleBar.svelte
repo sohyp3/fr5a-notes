@@ -23,7 +23,11 @@
 	const screenTitle = $derived.by(() => {
 		if (app.view === 'settings') return 'Settings';
 		if (app.view === 'changes') return 'Changes';
-		if (app.view === 'graph') return 'Linked notes';
+		if (app.view === 'graph') {
+			if (app.activeMindMap === 'all') return 'All notes';
+			if (app.activeMindMap) return app.noteMeta(app.activeMindMap)?.title ?? 'Mind map';
+			return 'Mind maps';
+		}
 		if (app.pane === 'harness') return 'AI';
 		if (app.pane === 'editor')
 			return app.notes.find((n) => n.id === app.activeId)?.title ?? (app.draft ? 'New note' : '');

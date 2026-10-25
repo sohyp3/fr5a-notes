@@ -40,6 +40,8 @@ import {
 import type { PlatformApi } from './types';
 import { noteSnippet } from '../../../../shared/snippet';
 import { isEncryptedNote } from '../../../../shared/encrypted';
+import { markdownBody } from '../../../../shared/frontmatter';
+import { mindMapVersion } from '../../../../shared/mindMapMetadata';
 
 /**
  * Mobile host (Capacitor, Android and iOS). Notes live in `notes/` under
@@ -130,10 +132,11 @@ export function buildMeta(id: string, absPath: string, raw: string, mtime: numbe
 			pinned,
 			locked,
 			aiLocal,
-			encrypted: true
+			encrypted: true,
+			mindMapVersion: null
 		};
 	}
-	const body = raw.replace(
+	const body = markdownBody(raw).replace(
 		/^\s*<!--\s*(?:dir:\s*(?:rtl|ltr)|pinned:\s*(?:true|false)|locked:\s*(?:true|false)|ai:\s*local)\s*-->\s*$/gim,
 		''
 	);
@@ -157,7 +160,8 @@ export function buildMeta(id: string, absPath: string, raw: string, mtime: numbe
 		pinned,
 		locked,
 		aiLocal,
-		encrypted: false
+		encrypted: false,
+		mindMapVersion: mindMapVersion(raw)
 	};
 }
 

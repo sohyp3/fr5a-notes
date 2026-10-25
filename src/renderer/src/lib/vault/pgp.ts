@@ -1,5 +1,5 @@
 import type { PrivateKey, PublicKey } from 'openpgp';
-import { splitEncrypted, splitHeader } from '../../../../shared/encrypted';
+import { splitEncrypted, splitHeader, joinHeader } from '../../../../shared/encrypted';
 
 /**
  * OpenPGP for encrypted notes. The library (~250 KB) is a lazy chunk that loads
@@ -98,5 +98,5 @@ export async function decryptNote(raw: string, privateKey: PrivateKey): Promise<
 		decryptionKeys: privateKey,
 		format: 'binary'
 	});
-	return parts.head + new TextDecoder().decode(data);
+	return joinHeader(parts.head, new TextDecoder().decode(data));
 }

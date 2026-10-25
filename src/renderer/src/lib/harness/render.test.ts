@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { asJson, highlightJson, renderInline, renderMarkdown, renderReply } from './render';
+import {
+	asJson,
+	highlightJson,
+	renderInline,
+	renderMarkdown,
+	renderReply,
+	renderReplyBlocks,
+	type RenderedReply
+} from './render';
 
 describe('renderInline', () => {
 	it('renders emphasis, code and safe links', () => {
@@ -81,5 +89,63 @@ describe('JSON', () => {
 			'{<span class="j-key">&quot;k&quot;</span>: <span class="j-str">&quot;&lt;v&gt;&quot;</span>, ' +
 				'<span class="j-key">&quot;n&quot;</span>: <span class="j-lit">null</span>}'
 		);
+	});
+});
+
+/** Small seeded PRNG, so a failure replays. */
+function rng(seed: number): () => number {
+	return () => {
+		seed = (seed + 0x6d2b79f5) | 0;
+		let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+		t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	};
+}
+
+describe('renderReplyBlocks', () => {
+	const reply = [
+		'# Title',
+		'Intro **bold** line',
+		'second a|b line',
+		'| a | b |',
+		'|---|---|',
+		'| 1 | 2 |',
+		'',
+		'- one',
+		'',
+		'- two',
+		'  more of two',
+		'1. first',
+		'---',
+		'> quoted',
+		'> still',
+		'',
+		'```ts',
+		'const x = 1;',
+		'',
+		'```',
+		'``` inline ```',
+		'tail *em*',
+		'{"not": "json"}'
+	].join('\n');
+
+	it('matches renderReply at every point of a stream', () => {
+		for (const seed of [1, 2, 3, 4, 5]) {
+			const rand = rng(seed);
+			let prev: RenderedReply | undefined;
+			for (let at = 0; at < reply.length;) {
+				at = Math.min(reply.length, at + 1 + Math.floor(rand() * 12));
+				const text = reply.slice(0, at);
+				prev = renderReplyBlocks(text, prev);
+				expect(prev.html.join(''), `seed ${seed} at ${at}`).toBe(renderReply(text));
+			}
+		}
+	});
+
+	it('keeps settled blocks and starts over on a non-append', () => {
+		const a = renderReplyBlocks('# A\n\npara\n\nmore\n\nx');
+		const b = renderReplyBlocks('# A\n\npara\n\nmore\n\nxy', a);
+		expect(b.html[0]).toBe(a.html[0]);
+		expect(renderReplyBlocks('{"a":1}', b).html.join('')).toBe(renderReply('{"a":1}'));
 	});
 });

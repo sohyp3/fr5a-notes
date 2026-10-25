@@ -2,6 +2,8 @@
 	import { onMount } from 'svelte';
 	import { platform } from '../platform';
 	import { syncErrorMessage } from '../sync';
+	import EmptyState from './EmptyState.svelte';
+	import mascotSynced from '$lib/assets/fr5a-synced.png';
 
 	// Hosts that own the working copy (Android): connect it to an HTTPS remote.
 	let remote = $state<string | null>(null);
@@ -81,7 +83,11 @@
 			</button>
 		</div>
 		{#if message}
-			<p class={['msg', { error: message.kind === 'error' }]}>{message.text}</p>
+			{#if message.kind === 'ok'}
+				<EmptyState small src={mascotSynced} title={message.text} />
+			{:else}
+				<p class="msg error">{message.text}</p>
+			{/if}
 		{/if}
 	</div>
 </section>

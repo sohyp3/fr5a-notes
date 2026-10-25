@@ -7,6 +7,7 @@ import type {
 	TagNode,
 	SidebarState
 } from '../../../../shared/types';
+import type { MindMapConfig } from '../../../../shared/types';
 import { uiStack, editorStack } from '../fonts';
 import { accentById, applyPalette, DEFAULT_ACCENT } from '../accents';
 import { setPinned, setLocked, setAiLocal, titleFromContent } from '../editor/markdown';
@@ -303,6 +304,10 @@ class AppState {
 
 	/** Which top-level view is showing in the main window. */
 	view = $state<View>('editor');
+	/** null opens the chooser; 'all' is the automatic workspace graph. */
+	activeMindMap = $state<string | 'all' | null>(null);
+	/** Lets the active graph surface dismiss transient UI before navigation. */
+	graphDismiss: (() => boolean) | null = null;
 	/** Zen mode hides the sidebar + note list and centres the editor. */
 	zen = $state(false);
 	/**
@@ -449,6 +454,12 @@ class AppState {
 		// Folder privacy (hidden from cloud AI) shows in the sidebar and list.
 		if (this.settings.ai) void getAiSettings().load();
 		await this.refresh();
+		const lastMap = await platform.getState<string>('lastMindMap');
+		if (
+			lastMap === 'all' ||
+			this.notes.some((note) => note.id === lastMap && note.mindMapVersion !== null)
+		)
+			this.activeMindMap = lastMap;
 
 		if (this.settings.tabs) {
 			const tabs = (await platform.getState<string[]>('tabs')) ?? [];
@@ -634,9 +645,9 @@ class AppState {
 	}
 
 	/** Open a note: in its tab when it has one, else in a new tab after the current one. */
-	async openNote(id: string): Promise<void> {
+	async openNote(id: string, reload = false): Promise<void> {
 		this.swipeOpen = null;
-		if (id === this.activeId) {
+		if (id === this.activeId && !reload) {
 			this.view = 'editor';
 			this.pane = 'editor';
 			return;
@@ -921,10 +932,72 @@ class AppState {
 		this.drawerOpen = false;
 	}
 
-	/** Open the linked-note map. Its component is imported only for this view. */
+	/** Open the last-used mind map; a missing/locked map falls back to the chooser. */
 	openGraph(): void {
 		if (!this.settings.linkedNotes) return;
+		if (
+			this.activeMindMap &&
+			this.activeMindMap !== 'all' &&
+			!this.notes.some(
+				(note) =>
+					note.id === this.activeMindMap &&
+					!note.locked &&
+					(!note.encrypted || this.vault?.unlocked)
+			)
+		)
+			this.activeMindMap = null;
 		this.setView('graph');
+	}
+
+	openMindMap(id: string | 'all' | null): void {
+		if (!this.settings.linkedNotes) return;
+		this.activeMindMap = id;
+		this.setView('graph');
+		void platform.setState('lastMindMap', id);
+	}
+
+	async createMindMap(fromCurrent = false): Promise<void> {
+		if (!this.settings.linkedNotes) return;
+		const { updateMindMap } = await import('../../../../shared/mindMap');
+		await this.flush();
+		const current = fromCurrent && this.activeId ? this.noteMeta(this.activeId) : null;
+		const folder = current ? parentOf(current.id) : (this.selectedFolder ?? '');
+		const title = current ? `${current.title} Map` : 'Mind map';
+		const root: MindMapConfig['nodes'][number] = current
+			? { id: 'root', label: current.title, note: baseOf(current.id), position: { x: 0, y: 0 } }
+			: { id: 'root', label: 'Central idea', position: { x: 0, y: 0 } };
+		const config: MindMapConfig = { version: 1, root: 'root', nodes: [root], edges: [] };
+		const content = updateMindMap(
+			`# ${title}\n\nStart shaping this map visually or edit its YAML.\n`,
+			config
+		);
+		const meta = await platform.createNote(title, folder, content);
+		await this.refresh();
+		this.openMindMap(meta.id);
+	}
+
+	/** Completed canvas transactions use the same platform write path as the editor. */
+	async writeMindMap(id: string, content: string, expectedSource?: string): Promise<void> {
+		await this.flush();
+		const meta = this.noteMeta(id);
+		if (
+			!this.settings.linkedNotes ||
+			!meta ||
+			meta.locked ||
+			(meta.encrypted && !this.vault?.unlocked)
+		)
+			throw new Error('This map is unavailable or read-only. Reopen it after unlocking.');
+		if (expectedSource !== undefined && (await platform.readNote(id)) !== expectedSource)
+			throw new Error(
+				'The source changed outside the canvas. Reload the map before editing again.'
+			);
+		await platform.writeNote(id, content);
+		if (this.activeId === id) {
+			this.activeContent = content;
+			this.baseline = { id, text: content.replace(/\r\n?/g, '\n') };
+			this.editorReloadToken++;
+		}
+		await this.refresh();
 	}
 
 	/**
@@ -1019,8 +1092,13 @@ class AppState {
 			this.swipeOpen = null;
 			return true;
 		}
+		if (this.view === 'graph' && this.graphDismiss?.()) return true;
 		if (this.view === 'settings' && this.layout === 'phone' && this.settingsDrill) {
 			this.settingsDrill = false;
+			return true;
+		}
+		if (this.view === 'graph' && this.activeMindMap !== null) {
+			this.openMindMap(null);
 			return true;
 		}
 		if (this.view !== 'editor') {
@@ -1637,6 +1715,13 @@ class AppState {
 
 	/** Re-point everything that names a moved note / folder (open note, filters, expansion…). */
 	private pathMoved(from: string, to: string): void {
+		if (this.activeMindMap && this.activeMindMap !== 'all') {
+			const map = remapPath(this.activeMindMap, from, to);
+			if (map !== null) {
+				this.activeMindMap = map;
+				void platform.setState('lastMindMap', map);
+			}
+		}
 		const active = this.activeId && remapPath(this.activeId, from, to);
 		if (active) {
 			// The editor is keyed on the session, not the id: no remount, caret stays.

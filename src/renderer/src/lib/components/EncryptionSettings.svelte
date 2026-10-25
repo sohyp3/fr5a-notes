@@ -2,6 +2,8 @@
 	import { getAppState } from '../stores/app.svelte';
 	import { platform } from '../platform';
 	import Icon from './Icon.svelte';
+	import EmptyState from './EmptyState.svelte';
+	import mascotLocked from '$lib/assets/fr5a-locked.png';
 
 	const app = getAppState();
 	const v = $derived(app.vault);
@@ -143,6 +145,9 @@
 
 {#if v}
 	{#if v.hasKey}
+		{#if !v.unlocked}
+			<EmptyState small src={mascotLocked} title="Your notes are protected" />
+		{/if}
 		<section class="group">
 			<h3>Your key</h3>
 			<div class="row">

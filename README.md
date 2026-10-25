@@ -22,6 +22,10 @@ packaged with **Bun**.
   that folder and its children, while "All Notes" shows the whole workspace.
 - **Nested tags.** `#work/project1` is parsed into a collapsible tree in the
   sidebar, with per-branch note counts. Unicode/Arabic tags work too.
+- **Mind maps** (optional). Build a hierarchy of concepts and linked notes,
+  add cross-links, and selectively expand links, backlinks, or tags. Maps live
+  in YAML frontmatter in ordinary `.md` notes and sync through Git. Enable in
+  Settings → Mind maps, then open with `Mod+G`. [Mind map guide](docs/mind-maps.md).
 - **Pinning.** A `<!-- pinned: true -->` marker keeps a note at the top of the
   list; pinned notes reorder with a smooth `animate:flip`. Pin from the editor,
   or **swipe a note card right to pin / left to delete** (horizontal trackpad

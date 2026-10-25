@@ -14,6 +14,8 @@
 	import { portal } from '../../portal';
 	import { motionK } from '../../motion';
 	import Icon from '../Icon.svelte';
+	import EmptyState from '../EmptyState.svelte';
+	import mascotCoins from '$lib/assets/fr5a-coins.png';
 
 	let { onclose }: { onclose: () => void } = $props();
 
@@ -106,9 +108,12 @@
 			{:else if !report}
 				<p class="muted">Adding up your chats…</p>
 			{:else if !report.all.runs}
-				<p class="muted">
-					No usage yet. Each reply shows its tokens and cost once the provider reports them.
-				</p>
+				<EmptyState
+					compact
+					src={mascotCoins}
+					title="No usage yet"
+					body="Each reply shows its tokens and cost once the provider reports them."
+				/>
 			{:else}
 				<div class="cards">
 					{@render card('Today', report.today)}

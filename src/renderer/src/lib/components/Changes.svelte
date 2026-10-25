@@ -7,6 +7,9 @@
 	import { docToText } from '../editor/markdown';
 	import DiffView from './DiffView.svelte';
 	import Icon from './Icon.svelte';
+	import EmptyState from './EmptyState.svelte';
+	import mascotClean from '$lib/assets/fr5a-clean.png';
+	import mascotHistory from '$lib/assets/fr5a-history.png';
 	import type { GitChange, GitStash } from '../../../../shared/types';
 	import { isEncryptedNote } from '../../../../shared/encrypted';
 
@@ -266,6 +269,7 @@
 	{#if app.changes === null}
 		<div class="cbody single">
 			<div class="explain">
+				<EmptyState compact src={mascotHistory} title="Start your note history" />
 				<p>
 					This notes folder isn't under git, so there is no "last sync" to compare with. Set up sync
 					in
@@ -286,9 +290,11 @@
 		</div>
 	{:else if !rows.length && !app.stashes.length}
 		<div class="cbody single">
-			<p class="explain muted">
-				No note differs from the last commit. Edits show up here until the next push or pull.
-			</p>
+			<EmptyState
+				src={mascotClean}
+				title="All caught up"
+				body="No note differs from the last commit. Edits show up here until the next push or pull."
+			/>
 		</div>
 	{:else}
 		<div class="cbody">

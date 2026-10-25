@@ -35,6 +35,8 @@
 	import ActionMenu, { type MenuItem } from '../ActionMenu.svelte';
 	import EmptyState from '../EmptyState.svelte';
 	import mascotSearch from '$lib/assets/fr5a-search.png';
+	import mascotChat from '$lib/assets/fr5a-chat.png';
+	import mascotOffline from '$lib/assets/fr5a-offline.png';
 
 	const app = getAppState();
 	const ai = getAiSettings();
@@ -577,10 +579,12 @@
 							{/if}
 						</div>
 					{:else}
-						<p class="muted pad">
-							No sessions yet. Working chats stay only on this device; use ⋯ → Save to notes to sync
-							one with your notes.
-						</p>
+						<EmptyState
+							small
+							src={mascotChat}
+							title="No sessions yet"
+							body="Working chats stay only on this device; use ⋯ → Save to notes to sync one with your notes."
+						/>
 					{/each}
 				{/if}
 			</div>
@@ -825,8 +829,10 @@
 						{:else}
 							<EmptyState
 								small
-								src={mascotSearch}
-								title="Ask about {ctx?.ids.length ? 'this note' : 'your notes'}"
+								src={online.current ? mascotSearch : mascotOffline}
+								title={online.current
+									? `Ask about ${ctx?.ids.length ? 'this note' : 'your notes'}`
+									: 'You’re offline'}
 							/>
 							<p class="muted">
 								<kbd>/</kbd> skills · <kbd>@</kbd> note · <kbd>@/</kbd> folder · <kbd>@#</kbd> tag

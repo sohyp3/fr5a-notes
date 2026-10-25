@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { fade } from 'svelte/transition';
-	import { tick, untrack } from 'svelte';
+	import { onDestroy, tick, untrack } from 'svelte';
 	import { Editor } from '@tiptap/core';
 	import { TextSelection } from '@tiptap/pm/state';
 	import Document from '@tiptap/extension-document';
@@ -64,6 +64,18 @@
 	let vimMode = $state<VimMode>('normal');
 	let scroller = $state<HTMLDivElement | null>(null);
 	let scrolled = $state(false);
+	// While the note scrolls, lines slide under a still pointer, and each one's
+	// hover reveal (a font-size transition: a re-layout every frame) would run
+	// in turn. `data-scrolling` holds it off until the scroll settles.
+	let scrolling = $state(false);
+	let scrollIdle: ReturnType<typeof setTimeout> | undefined;
+	onDestroy(() => clearTimeout(scrollIdle));
+	function onScroll(e: Event): void {
+		scrolled = (e.currentTarget as HTMLElement).scrollTop > 4;
+		scrolling = true;
+		clearTimeout(scrollIdle);
+		scrollIdle = setTimeout(() => (scrolling = false), 150);
+	}
 	let findOpen = $state(false);
 	let findFromVim = $state(false);
 	let findQuery = $state('');
@@ -1066,7 +1078,8 @@
 				<div
 					class="scroll"
 					bind:this={scroller}
-					onscroll={() => (scrolled = (scroller?.scrollTop ?? 0) > 4)}
+					data-scrolling={scrolling || undefined}
+					onscroll={onScroll}
 					ondblclick={onDoubleClick}
 				>
 					<div class="mount" style:direction={dir} {@attach mount} {@attach followEditable}></div>

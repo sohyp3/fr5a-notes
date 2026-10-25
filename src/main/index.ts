@@ -33,6 +33,8 @@ interface StoreSchema {
 	workspace?: string;
 	/** Note id (workspace-relative) re-opened on launch. */
 	lastOpenFile?: string;
+	/** Last selected curated map, or the automatic all-notes view. */
+	lastMindMap?: string;
 	/** Note ids open in tabs (when the renderer's tabs setting is on). */
 	tabs?: string[];
 	/** Sidebar section/expansion state (renderer-owned shape). */
@@ -55,6 +57,7 @@ const store = new Store<StoreSchema>({ name: 'fr5a' });
 /** Renderer-writable keys — anything else on the wire is rejected. */
 const RENDERER_KEYS = new Set<StateKey>([
 	'lastOpenFile',
+	'lastMindMap',
 	'tabs',
 	'sidebar',
 	'settings',

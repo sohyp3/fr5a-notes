@@ -22,7 +22,8 @@ export class NoteIndex {
 				pinned  INTEGER NOT NULL DEFAULT 0,
 				locked  INTEGER NOT NULL DEFAULT 0,
 				aiLocal INTEGER NOT NULL DEFAULT 0,
-				encrypted INTEGER NOT NULL DEFAULT 0
+				encrypted INTEGER NOT NULL DEFAULT 0,
+				mindMapVersion INTEGER DEFAULT NULL
 			);
 			CREATE TABLE IF NOT EXISTS tags (
 				note_id TEXT NOT NULL,
@@ -38,6 +39,8 @@ export class NoteIndex {
 				this.db.exec(`ALTER TABLE notes ADD COLUMN ${col} INTEGER NOT NULL DEFAULT 0`);
 			}
 		}
+		if (!cols.some((c) => c.name === 'mindMapVersion'))
+			this.db.exec('ALTER TABLE notes ADD COLUMN mindMapVersion INTEGER DEFAULT NULL');
 	}
 
 	/** Insert or replace a note and its tags atomically. */
@@ -45,8 +48,8 @@ export class NoteIndex {
 		const tx = this.db.transaction((m: NoteMeta) => {
 			this.db
 				.prepare(
-					`INSERT INTO notes (id, absPath, title, snippet, mtime, pinned, locked, aiLocal, encrypted)
-					 VALUES (@id, @absPath, @title, @snippet, @mtime, @pinned, @locked, @aiLocal, @encrypted)
+					`INSERT INTO notes (id, absPath, title, snippet, mtime, pinned, locked, aiLocal, encrypted, mindMapVersion)
+					 VALUES (@id, @absPath, @title, @snippet, @mtime, @pinned, @locked, @aiLocal, @encrypted, @mindMapVersion)
 					 ON CONFLICT(id) DO UPDATE SET
 					   absPath = excluded.absPath,
 					   title   = excluded.title,
@@ -55,7 +58,8 @@ export class NoteIndex {
 					   pinned  = excluded.pinned,
 					   locked  = excluded.locked,
 					   aiLocal = excluded.aiLocal,
-					   encrypted = excluded.encrypted`
+					   encrypted = excluded.encrypted,
+					   mindMapVersion = excluded.mindMapVersion`
 				)
 				.run({
 					id: m.id,
@@ -66,7 +70,8 @@ export class NoteIndex {
 					pinned: m.pinned ? 1 : 0,
 					locked: m.locked ? 1 : 0,
 					aiLocal: m.aiLocal ? 1 : 0,
-					encrypted: m.encrypted ? 1 : 0
+					encrypted: m.encrypted ? 1 : 0,
+					mindMapVersion: m.mindMapVersion
 				});
 			this.db.prepare('DELETE FROM tags WHERE note_id = ?').run(m.id);
 			const insTag = this.db.prepare('INSERT OR IGNORE INTO tags (note_id, tag) VALUES (?, ?)');
@@ -100,7 +105,7 @@ export class NoteIndex {
 		// Pinned notes first, then most-recently-modified.
 		const rows = this.db
 			.prepare(
-				'SELECT id, absPath, title, snippet, mtime, pinned, locked, aiLocal, encrypted FROM notes ORDER BY pinned DESC, mtime DESC'
+				'SELECT id, absPath, title, snippet, mtime, pinned, locked, aiLocal, encrypted, mindMapVersion FROM notes ORDER BY pinned DESC, mtime DESC'
 			)
 			.all() as (Omit<NoteMeta, 'tags' | 'pinned' | 'locked' | 'aiLocal' | 'encrypted'> & {
 			pinned: number;

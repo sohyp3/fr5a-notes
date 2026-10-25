@@ -205,6 +205,16 @@ describe('pure helpers', () => {
 			encrypted: true
 		});
 	});
+
+	it('buildMeta detects a mind map and excludes its frontmatter from ordinary metadata', () => {
+		const raw =
+			'---\nmindmap:\n  version: 1\n  root: r\n  nodes:\n    - id: r\n      label: Config title\n      expand: { tags: [private/yaml] }\n---\n# Visible map\n\nBody #public\n';
+		expect(buildMeta('map.md', '', raw, 0)).toMatchObject({
+			title: 'Visible map',
+			tags: ['public'],
+			mindMapVersion: 1
+		});
+	});
 });
 
 describe('capacitor platform (android + ios)', () => {

@@ -1,5 +1,6 @@
 import type { Editor } from '@tiptap/core';
 import type { JSONContent } from '@tiptap/core';
+import { markdownBody, splitFrontmatter, editMarkdownBody } from '../../../../shared/frontmatter';
 
 /**
  * Bridge between raw Markdown text (what lives on disk) and the ProseMirror
@@ -37,7 +38,7 @@ export function docToText(editor: Editor): string {
  */
 export function titleFromContent(text: string): string | null {
 	let fallback: string | null = null;
-	for (const raw of text.split('\n')) {
+	for (const raw of markdownBody(text).split('\n')) {
 		const line = raw.trim();
 		if (!line || /^<!--.*-->$/.test(line)) continue;
 		const h1 = line.match(/^#\s+(.+)$/);
@@ -59,7 +60,7 @@ export const DIR_COMMENT_RE = /^<!--\s*dir:\s*(rtl|ltr)\s*-->$/i;
 /** Read the direction stored in the note's metadata comment, if any. */
 export function detectDir(text: string): Direction | null {
 	// Only the first few lines may carry metadata.
-	const lines = text.split('\n', 4);
+	const lines = markdownBody(text).split('\n', 4);
 	for (const line of lines) {
 		const m = line.trim().match(DIR_COMMENT_RE);
 		if (m) return m[1].toLowerCase() as Direction;
@@ -72,6 +73,7 @@ export function detectDir(text: string): Direction | null {
  * `<!-- dir: … -->` line if present, otherwise prepends one.
  */
 export function setDir(text: string, dir: Direction): string {
+	if (splitFrontmatter(text)) return editMarkdownBody(text, (body) => setDir(body, dir));
 	const comment = `<!-- dir: ${dir} -->`;
 	const lines = text.split('\n');
 	const idx = lines.findIndex((l) => DIR_COMMENT_RE.test(l.trim()));
@@ -88,7 +90,7 @@ export function setDir(text: string, dir: Direction): string {
 export const PIN_COMMENT_RE = /^<!--\s*pinned:\s*(true|false)\s*-->$/i;
 
 export function detectPinned(text: string): boolean {
-	const lines = text.split('\n', 4);
+	const lines = markdownBody(text).split('\n', 4);
 	for (const line of lines) {
 		const m = line.trim().match(PIN_COMMENT_RE);
 		if (m) return m[1].toLowerCase() === 'true';
@@ -101,6 +103,7 @@ export function detectPinned(text: string): boolean {
  * comment; when unpinning, drop the comment line entirely so files stay tidy.
  */
 export function setPinned(text: string, pinned: boolean): string {
+	if (splitFrontmatter(text)) return editMarkdownBody(text, (body) => setPinned(body, pinned));
 	const lines = text.split('\n');
 	const idx = lines.findIndex((l) => PIN_COMMENT_RE.test(l.trim()));
 	if (!pinned) {
@@ -124,7 +127,7 @@ export function setPinned(text: string, pinned: boolean): string {
 export const LOCK_COMMENT_RE = /^<!--\s*locked:\s*(true|false)\s*-->$/i;
 
 export function detectLocked(text: string): boolean {
-	const lines = text.split('\n', 4);
+	const lines = markdownBody(text).split('\n', 4);
 	for (const line of lines) {
 		const m = line.trim().match(LOCK_COMMENT_RE);
 		if (m) return m[1].toLowerCase() === 'true';
@@ -138,6 +141,7 @@ export function detectLocked(text: string): boolean {
  * line so files stay tidy.
  */
 export function setLocked(text: string, locked: boolean): string {
+	if (splitFrontmatter(text)) return editMarkdownBody(text, (body) => setLocked(body, locked));
 	const lines = text.split('\n');
 	const idx = lines.findIndex((l) => LOCK_COMMENT_RE.test(l.trim()));
 	if (!locked) {
@@ -171,6 +175,7 @@ export const AI_LOCAL_COMMENT_RE = /^<!--\s*ai:\s*local\s*-->$/i;
  * leading dir / pinned / locked metadata, like the lock.
  */
 export function setAiLocal(text: string, on: boolean): string {
+	if (splitFrontmatter(text)) return editMarkdownBody(text, (body) => setAiLocal(body, on));
 	const lines = text.split('\n');
 	const idx = lines.findIndex((l) => AI_LOCAL_COMMENT_RE.test(l.trim()));
 	if (!on) {

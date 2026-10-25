@@ -68,6 +68,27 @@ describe('FileService move / rename', () => {
 		expect(notes.get('c.md')?.encrypted).toBe(false);
 	});
 
+	it('indexes mind maps without treating YAML labels or tags as note content', async () => {
+		await svc.write(
+			'atlas-map.md',
+			'---\nmindmap:\n  version: 1\n  root: root\n  nodes:\n    - id: root\n      label: YAML title\n      expand:\n        tags: [secret/config]\n---\n# Atlas map\n\nVisible body #work\n'
+		);
+		expect(notes.get('atlas-map.md')).toMatchObject({
+			title: 'Atlas map',
+			tags: ['work'],
+			mindMapVersion: 1
+		});
+		expect(notes.get('atlas-map.md')?.snippet).toContain('Visible body');
+	});
+
+	it('keeps malformed declared maps discoverable in the index', async () => {
+		await svc.write(
+			'broken-map.md',
+			'---\nmindmap:\n  version: broken\n  nodes: [\n---\n# Broken map\n'
+		);
+		expect(notes.get('broken-map.md')?.mindMapVersion).toBe(-1);
+	});
+
 	it('creates note filenames with underscores instead of spaces', async () => {
 		const first = await svc.create('Project meeting notes');
 		const second = await svc.create('Project meeting notes');

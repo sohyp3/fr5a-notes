@@ -35,9 +35,9 @@
 		{ id: 'editor', label: 'Editor', icon: 'edit', desc: 'Ghost syntax, highlights, tabs, Vim' },
 		{
 			id: 'linkedNotes',
-			label: 'Linked notes',
+			label: 'Links & maps',
 			icon: 'graph',
-			desc: 'Links between notes and a map of notes and tags'
+			desc: 'Note-link suggestions, link following, and mind maps'
 		},
 		{ id: 'toolbar', label: 'Toolbar', icon: 'toolbar', desc: 'Buttons in the bar or in its menu' },
 		{
@@ -416,33 +416,32 @@
 						<section class="group">
 							<div class="row">
 								<div class="label">
-									<span class="name">Enable linked notes</span>
+									<span class="name">Enable links and maps</span>
 									<span class="desc"
-										>Link notes to each other and see them on a map with their tags (Mod+G)</span
+										>Suggest and follow note links in the editor, and open mind maps with Mod+G</span
 									>
 								</div>
-								{@render toggle(s.linkedNotes, 'Enable linked notes', () =>
+								{@render toggle(s.linkedNotes, 'Enable links and maps', () =>
 									app.updateSettings({ linkedNotes: !s.linkedNotes })
 								)}
 							</div>
 						</section>
 						{#if s.linkedNotes}
 							<section class="group">
-								<h3>Note links</h3>
+								<h3>Maps are notes</h3>
 								<p class="prose">
-									Tags connect notes to a topic; a link connects one note to another. A link is
-									plain Markdown, <code>[text](folder/note.md)</code>: Insert → Link, or type
-									<code>[text](</code>, and pick the note. In view mode, tap a link to follow it;
-									while editing, hold Mod and click.
+									A curated map is an ordinary Markdown note with YAML frontmatter, so it stays
+									local, readable, and Git-friendly. Tags appear only when you opt a branch into
+									them. <strong>All notes</strong> keeps the automatic workspace view.
 								</p>
 								<div class="row">
 									<div class="label">
-										<span class="name">Connection map</span>
+										<span class="name">Mind maps</span>
 										<span class="desc"
-											>Notes gathered around their tags, with the links between them</span
+											>Curated branches first, with the automatic all-notes map still available</span
 										>
 									</div>
-									<button class="btn" onclick={() => app.openGraph()}>Open map</button>
+									<button class="btn" onclick={() => app.openGraph()}>Open mind maps</button>
 								</div>
 							</section>
 						{/if}

@@ -335,7 +335,11 @@ button.scrim {
 	opacity: 0;
 	letter-spacing: -1px;
 }
-:root:not([data-ghost='off']):not([data-hover='none']) .ProseMirror p:hover .md-syntax {
+:root:not([data-ghost='off']):not([data-hover='none'])
+	.scroll:not([data-scrolling])
+	.ProseMirror
+	p:hover
+	.md-syntax {
 	font-size: inherit;
 	opacity: 0.3;
 	letter-spacing: normal;
@@ -344,6 +348,12 @@ button.scrim {
 	font-size: inherit;
 	opacity: 1;
 	letter-spacing: normal;
+}
+
+/* Scrolling: the hovered line folds its symbols at once, not over 130ms of
+   re-layout (and the lines passing under the pointer don't reveal theirs). */
+[data-scrolling] .md-syntax {
+	transition: none;
 }
 
 /* Ghost OFF: symbols are always visible. */
@@ -908,13 +918,21 @@ html.md-image-dragging * {
 	border-start-end-radius: 0.32em;
 	border-end-end-radius: 0.32em;
 }
-:root:not([data-ghost='off']):not([data-hover='none']) .ProseMirror p:hover .md-mark-vs {
+:root:not([data-ghost='off']):not([data-hover='none'])
+	.scroll:not([data-scrolling])
+	.ProseMirror
+	p:hover
+	.md-mark-vs {
 	padding-inline-start: 0;
 	margin-inline-start: 0;
 	border-start-start-radius: 0;
 	border-end-start-radius: 0;
 }
-:root:not([data-ghost='off']):not([data-hover='none']) .ProseMirror p:hover .md-mark-ve {
+:root:not([data-ghost='off']):not([data-hover='none'])
+	.scroll:not([data-scrolling])
+	.ProseMirror
+	p:hover
+	.md-mark-ve {
 	padding-inline-end: 0;
 	margin-inline-end: 0;
 	border-start-end-radius: 0;

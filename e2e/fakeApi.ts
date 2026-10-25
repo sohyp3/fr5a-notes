@@ -1,8 +1,10 @@
+import { mindMapVersion } from '../src/shared/mindMapMetadata';
+
 /**
  * In-memory stand-in for the Electron preload bridge (`window.api`), installed
  * before the app boots. Runs in the page, so it must be self-contained.
  */
-export function installFakeApi(): void {
+function fakeApi(detectMindMapVersion: typeof mindMapVersion): void {
 	const files: Record<string, string> = {
 		'Work/plan.md': '# Plan\n\nfirst line',
 		'hello.md': '# Hello\n\nworld'
@@ -16,20 +18,22 @@ export function installFakeApi(): void {
 	const meta = (id: string) => {
 		const raw = files[id] ?? trash[id];
 		const encrypted = raw.includes('-----BEGIN PGP MESSAGE-----');
+		const body = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
 		const title = encrypted
 			? id.replace(/^.*\//, '').replace(/\.md$/, '')
-			: raw.split('\n')[0].replace(/^#+\s*/, '');
+			: body.split('\n')[0].replace(/^#+\s*/, '');
 		return {
 			id,
 			absPath: `/notes/${id}`,
 			title,
-			snippet: encrypted ? '' : raw.split('\n').slice(1).join(' ').trim(),
+			snippet: encrypted ? '' : body.split('\n').slice(1).join(' ').trim(),
 			mtime: 1,
 			tags: [],
 			pinned: false,
 			locked: false,
 			aiLocal: /^<!-- ai: local -->$/m.test(raw),
-			encrypted
+			encrypted,
+			mindMapVersion: detectMindMapVersion(raw)
 		};
 	};
 	const folders = new Set(['Work']);
@@ -442,3 +446,6 @@ export function installFakeApi(): void {
 		onNotesChanged: noop
 	};
 }
+
+// Playwright serializes init scripts: include the production detector in the page.
+export const installFakeApi = `(${fakeApi.toString()})(${mindMapVersion.toString()});`;

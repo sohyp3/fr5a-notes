@@ -44,11 +44,11 @@
 			? import('./lib/components/harness/HarnessPane.svelte')
 			: null
 	);
-	// Linked notes is a true optional chunk: disabled means no import, no graph
+	// Mind maps are a true optional chunk: disabled means no import, no graph
 	// state, no note-body reads, and no graph-specific event handlers.
 	const graphModule = $derived(
 		app.settings.linkedNotes && app.view === 'graph'
-			? import('./lib/components/LinkedNotes.svelte')
+			? import('./lib/components/MindMaps.svelte')
 			: null
 	);
 

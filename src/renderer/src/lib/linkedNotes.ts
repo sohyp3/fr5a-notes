@@ -1,6 +1,7 @@
 import type { NoteMeta } from '../../../shared/types';
 import { baseOf, noteStem, parentOf } from '../../../shared/paths';
 import { codeLines } from './editor/blocks';
+import { markdownBody } from '../../../shared/frontmatter';
 
 /**
  * A link from one note to another: `[text](path/to/note.md)`, relative to the
@@ -42,7 +43,8 @@ export interface NoteGraph {
 
 const NOTE_PATH = /\.(?:md|markdown|mdown|txt)$/i;
 // Not an image (`![…](…)`); the destination may be `<…>` and carry a "title".
-const MD_LINK_RE = /(?<!!)\[([^\]\n]+)\]\(\s*(<[^>\n]+>|[^)\s]+)(?:\s+"[^"\n]*")?\s*\)/g;
+const MD_LINK_RE =
+	/(?<!!)\[([^\]\n]+)\]\(\s*(<[^>\n]+>|(?:[^()\s]|\([^()\n]*\))+)(?:\s+"[^"\n]*")?\s*\)/g;
 
 /** A Markdown link destination that points at a note: no scheme, a note extension. */
 export function isNoteHref(href: string): boolean {
@@ -57,7 +59,7 @@ export function isNoteHref(href: string): boolean {
  */
 export function parseNoteLinks(markdown: string): NoteLink[] {
 	const links: NoteLink[] = [];
-	const lines = markdown.split('\n');
+	const lines = markdownBody(markdown).split('\n');
 	const code = codeLines(lines);
 	for (let i = 0; i < lines.length; i++) {
 		if (code[i]) continue;
@@ -78,7 +80,7 @@ function hrefPath(href: string): string {
 		.replace(/[?#].*$/, '')
 		.replace(/\\/g, '/');
 	try {
-		return decodeURI(path);
+		return decodeURIComponent(path);
 	} catch {
 		return path; // a stray % — take it as written
 	}

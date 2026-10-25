@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { PlatformApi } from '../platform/types';
 import type { GitChange, NoteMeta } from '../../../../shared/types';
-import { isEncryptedNote, splitEncrypted, splitHeader } from '../../../../shared/encrypted';
+import {
+	isEncryptedNote,
+	splitEncrypted,
+	splitHeader,
+	joinHeader
+} from '../../../../shared/encrypted';
 import { VaultLockedError, wrapNotes, type NoteCrypt } from './wrap';
 
 // A stand-in cipher: base64 inside real armor lines, plus a counter so every
@@ -16,7 +21,7 @@ const enc = (plain: string) => {
 const dec = (raw: string) => {
 	const p = splitEncrypted(raw)!;
 	const b64 = p.armor.slice(BEGIN.length, -END.length).split(':')[1];
-	return p.head + Buffer.from(b64, 'base64').toString();
+	return joinHeader(p.head, Buffer.from(b64, 'base64').toString());
 };
 
 function setup(files: Record<string, string>) {
@@ -33,7 +38,8 @@ function setup(files: Record<string, string>) {
 		pinned: false,
 		locked: false,
 		aiLocal: false,
-		encrypted: isEncryptedNote(files[id])
+		encrypted: isEncryptedNote(files[id]),
+		mindMapVersion: null
 	});
 	const committed: Record<string, string> = { ...files };
 	const host = {
@@ -133,6 +139,27 @@ describe('wrapNotes', () => {
 		t.clear();
 		t.lock();
 		expect((await t.api.listNotes()).find((n) => n.id === 's.md')?.title).toBe('s');
+	});
+
+	it('discovers encrypted mind maps only while the vault is unlocked', async () => {
+		const plain =
+			'---\nmindmap:\n  version: 1\n  root: r\n  nodes:\n    - { id: r, label: Root }\n---\n# Private map\n';
+		const t = setup({ 'private-map.md': enc(plain) });
+		expect((await t.api.listNotes())[0]).toMatchObject({
+			title: 'Private map',
+			mindMapVersion: 1
+		});
+		t.lock();
+		expect((await t.api.listNotes())[0].mindMapVersion).toBeNull();
+	});
+
+	it('keeps malformed encrypted maps discoverable while unlocked', async () => {
+		const t = setup({
+			'broken-map.md': enc('---\nmindmap:\n  version: broken\n  nodes: [\n---\n# Broken map\n')
+		});
+		expect((await t.api.listNotes())[0].mindMapVersion).toBe(-1);
+		t.lock();
+		expect((await t.api.listNotes())[0].mindMapVersion).toBeNull();
 	});
 
 	it('decrypts git diffs only while unlocked', async () => {
