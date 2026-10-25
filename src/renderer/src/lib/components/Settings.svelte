@@ -15,7 +15,7 @@
 	import { UI_FONTS, EN_FONTS, AR_FONTS } from '../fonts';
 	import { ACCENTS } from '../accents';
 	import { SHORTCUTS, VIM_SHORTCUTS as vimShortcuts, shortcutOn } from '../shortcuts';
-	import { motionK } from '../motion';
+	import { ms } from '../motion';
 	import { runStorageMigration, scanStorage, type StorageScan } from '../storage';
 	import {
 		BAR_ICONS,
@@ -192,7 +192,7 @@
 			<nav
 				class={['nav', { index: showIndex }]}
 				aria-label="Settings sections"
-				in:fly={{ x: phone ? -24 : 0, opacity: 0, duration: phone ? 180 * motionK() : 0 }}
+				in:fly={{ x: phone ? -24 : 0, opacity: 0, duration: phone ? ms.pane : 0 }}
 			>
 				{#each SECTIONS as sec (sec.id)}
 					<button
@@ -222,7 +222,7 @@
 			{#key app.settingsSection}
 				<div
 					class="pane-body"
-					in:fly={{ x: phone ? 24 : 0, y: phone ? 0 : 6, duration: 180 * motionK() }}
+					in:fly={{ x: phone ? 24 : 0, y: phone ? 0 : 6, duration: phone ? ms.pane : ms.pop }}
 					out:fade={{ duration: 0 }}
 				>
 					{#if !phone}<h2 class="section-title">{section.label}</h2>{/if}
@@ -994,7 +994,7 @@
 		background: var(--bg-active);
 	}
 	.btn:active {
-		transform: scale(0.97);
+		transform: scale(var(--press));
 	}
 	select {
 		flex: 0 0 auto;

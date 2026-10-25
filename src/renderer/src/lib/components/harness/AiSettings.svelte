@@ -1578,7 +1578,7 @@
 		background: var(--bg-active);
 	}
 	.btn:active:not(:disabled) {
-		transform: scale(0.97);
+		transform: scale(var(--press));
 	}
 	.btn.primary {
 		background: var(--accent);
@@ -1599,7 +1599,7 @@
 	}
 	.spin {
 		display: grid;
-		animation: spin 800ms linear infinite;
+		animation: spin var(--dur-spin) linear infinite;
 	}
 	.msg {
 		margin: 0;

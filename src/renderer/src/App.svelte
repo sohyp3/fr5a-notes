@@ -733,7 +733,7 @@
 
 	{#if app.conflictOpen}
 		<!-- Same resolver the desktop opens as a second window; closes on sync done. -->
-		<div class="conflict-overlay" transition:fade={{ duration: 160 * motionK() }}>
+		<div class="conflict-overlay" transition:fade={{ duration: ms.pop }}>
 			<ConflictWindow />
 		</div>
 	{/if}

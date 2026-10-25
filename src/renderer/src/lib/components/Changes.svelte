@@ -544,7 +544,7 @@
 		color: var(--text);
 	}
 	.icon-btn.spin :global(.icon) {
-		animation: spin 800ms linear infinite;
+		animation: spin var(--dur-spin) linear infinite;
 	}
 	.cbody {
 		flex: 1;

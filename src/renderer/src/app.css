@@ -28,6 +28,8 @@
 	--dur-exit: 200ms; /* panes / sheets leaving */
 	--press: 0.97; /* :active scale of text buttons */
 	--press-icon: 0.94; /* :active scale of icon buttons */
+	--press-wide: 0.985; /* :active scale of wide rows / cards (a 0.97 row jumps) */
+	--dur-spin: 800ms; /* one turn of every loading spinner */
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -39,6 +41,7 @@
 		--dur-exit: 0ms;
 		--press: 1;
 		--press-icon: 1;
+		--press-wide: 1;
 	}
 	*,
 	*::before,
@@ -58,6 +61,7 @@
 	--dur-exit: 0ms;
 	--press: 1;
 	--press-icon: 1;
+	--press-wide: 1;
 }
 :root[data-motion='off'] *,
 :root[data-motion='off'] *::before,
@@ -318,15 +322,15 @@ button.scrim {
 	font-family: var(--font-mono);
 	color: var(--md-syntax);
 	transition:
-		opacity 130ms ease,
-		font-size 130ms ease,
-		letter-spacing 130ms ease;
+		opacity var(--dur-fast) ease,
+		font-size var(--dur-fast) ease,
+		letter-spacing var(--dur-fast) ease;
 }
 
 /* Touch: the caret reveals them as you type — fade only, so the line isn't
    laid out again on every frame (the tablet's budget). */
 :root[data-touch] .md-syntax {
-	transition: opacity 130ms ease;
+	transition: opacity var(--dur-fast) ease;
 }
 
 /* Ghost ON (default): symbols are collapsed until hover / caret. */
@@ -350,7 +354,7 @@ button.scrim {
 	letter-spacing: normal;
 }
 
-/* Scrolling: the hovered line folds its symbols at once, not over 130ms of
+/* Scrolling: the hovered line folds its symbols at once, not over --dur-fast of
    re-layout (and the lines passing under the pointer don't reveal theirs). */
 [data-scrolling] .md-syntax {
 	transition: none;
@@ -445,7 +449,7 @@ button.scrim {
 	text-decoration: underline;
 	text-decoration-color: transparent;
 	text-underline-offset: 0.18em;
-	transition: text-decoration-color 120ms ease-out;
+	transition: text-decoration-color var(--dur-fast) var(--ease-out);
 }
 .md-link[href]:hover,
 .md-link[href]:focus-visible,

@@ -4,7 +4,7 @@
 	import { asJson, highlightJson } from '../../harness/render';
 	import DiffView from '../DiffView.svelte';
 	import Icon from '../Icon.svelte';
-	import { motionK } from '../../motion';
+	import { ms } from '../../motion';
 
 	let { entry, running }: { entry: Extract<Entry, { kind: 'tool' }>; running: boolean } = $props();
 
@@ -95,7 +95,7 @@
 		<span class={['chev', { open }]}><Icon name="chevron" size={13} /></span>
 	</button>
 	{#if open}
-		<div class="details" transition:slide={{ duration: 160 * motionK() }}>
+		<div class="details" transition:slide={{ duration: ms.pop }}>
 			{#if entry.write}
 				<DiffView lines={entry.write.diff} />
 			{/if}
@@ -171,7 +171,7 @@
 		border-radius: 50%;
 		border: 2px solid var(--accent-soft);
 		border-top-color: var(--accent);
-		animation: spin 700ms linear infinite;
+		animation: spin var(--dur-spin) linear infinite;
 	}
 	.name {
 		flex: 0 0 auto;

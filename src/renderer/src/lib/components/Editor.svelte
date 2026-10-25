@@ -43,7 +43,7 @@
 	import NoteTabs from './NoteTabs.svelte';
 	import Icon from './Icon.svelte';
 	import { isMobile, platform } from '../platform';
-	import { motionK } from '../motion';
+	import { ms } from '../motion';
 	import type { IconName } from '../icons';
 	import {
 		BAR_LABELS,
@@ -950,7 +950,7 @@
 		<NoteTabs />
 	{/if}
 	{#if !app.workspace}
-		<div class="placeholder-screen" in:fade={{ duration: 150 * motionK() }}>
+		<div class="placeholder-screen" in:fade={{ duration: ms.pop }}>
 			<EmptyState
 				src={logo}
 				alt="fr5a"
@@ -963,7 +963,7 @@
 			</EmptyState>
 		</div>
 	{:else if !app.activeId && !app.draft}
-		<div class="placeholder-screen" in:fade={{ duration: 150 * motionK() }}>
+		<div class="placeholder-screen" in:fade={{ duration: ms.pop }}>
 			<EmptyState
 				src={mascotNew}
 				title="Nothing open"
@@ -1559,6 +1559,6 @@
 		filter: brightness(1.05);
 	}
 	.cta:active {
-		transform: scale(0.97);
+		transform: scale(var(--press));
 	}
 </style>

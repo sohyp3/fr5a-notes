@@ -122,7 +122,7 @@
 		height: 30px;
 		border-radius: 8px;
 		color: var(--text-muted);
-		transition: background 120ms ease;
+		transition: background var(--dur-fast) ease;
 	}
 	.close:hover {
 		background: var(--bg-hover);

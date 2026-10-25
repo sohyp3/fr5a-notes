@@ -134,7 +134,7 @@
 		background: var(--bg-active);
 	}
 	.btn:active {
-		transform: scale(0.97);
+		transform: scale(var(--press));
 	}
 	.btn.primary {
 		background: var(--accent);

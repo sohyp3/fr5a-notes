@@ -12,7 +12,7 @@
 		type UsageReport
 	} from '../../harness/usage';
 	import { portal } from '../../portal';
-	import { motionK } from '../../motion';
+	import { ms } from '../../motion';
 	import Icon from '../Icon.svelte';
 	import EmptyState from '../EmptyState.svelte';
 	import mascotCoins from '$lib/assets/fr5a-coins.png';
@@ -85,15 +85,15 @@
 			if (scrimPressed) onclose();
 			scrimPressed = false;
 		}}
-		transition:fade={{ duration: 140 * motionK() }}
+		transition:fade={{ duration: ms.pop }}
 	></button>
 	<div
 		class="panel"
 		role="dialog"
 		aria-modal="true"
 		aria-labelledby="usage-title"
-		in:fly={{ y: phone ? 60 : 8, duration: 200 * motionK(), opacity: phone ? 1 : 0 }}
-		out:fade={{ duration: 120 * motionK() }}
+		in:fly={{ y: phone ? 60 : 8, duration: ms.pane, opacity: phone ? 1 : 0 }}
+		out:fade={{ duration: ms.out }}
 	>
 		<header>
 			<h2 id="usage-title">Usage</h2>
