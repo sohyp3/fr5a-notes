@@ -2477,6 +2477,8 @@ test('desktop tabs: typing through Ctrl+Tab stays in the tab it was typed in', a
 	const { ctx, page, tabs } = await tabsPage(browser, ['Alpha', 'Beta']);
 	await tabs.first().click();
 	await expect(page.locator('.ProseMirror')).toContainText('one');
+	// The mount's own focus (a frame later) settles first, or it eats a keystroke.
+	await page.waitForTimeout(200);
 	await page.keyboard.press('Control+End');
 	await page.keyboard.type(' aaa');
 	await hold(page, { read: 'beta.md' });
@@ -2486,6 +2488,7 @@ test('desktop tabs: typing through Ctrl+Tab stays in the tab it was typed in', a
 	await page.keyboard.type(' bbb');
 	await releaseAll(page);
 	await expect(page.locator('.ProseMirror')).toContainText('two');
+	await page.waitForTimeout(200);
 	await page.keyboard.press('Control+End');
 	await page.keyboard.type(' ccc');
 	await page.waitForTimeout(700);
@@ -2508,6 +2511,23 @@ test('desktop tabs: pinning while typing loses no keystroke', async ({ browser }
 	const text = await fileText(page, 'alpha.md');
 	expect(text).toContain('<!-- pinned: true -->');
 	expect(text).toContain('one abc def');
+	await ctx.close();
+});
+
+test("desktop tabs: trashing another note keeps the open note's unsaved edit", async ({
+	browser
+}) => {
+	const { ctx, page } = await tabsPage(browser, ['Alpha']);
+	await page.keyboard.press('Control+End');
+	await page.keyboard.type(' abc');
+	await list(page).getByText('Beta', { exact: true }).click({ button: 'right' });
+	await page.getByRole('menuitem', { name: 'Move to Trash' }).click();
+	// (The fake host only records the trashed id.)
+	await expect
+		.poll(() => page.evaluate(() => (window as unknown as { __trashed?: string[] }).__trashed))
+		.toEqual(['beta.md']);
+	await page.waitForTimeout(700);
+	expect(await fileText(page, 'alpha.md')).toBe('# Alpha\n\none abc');
 	await ctx.close();
 });
 
