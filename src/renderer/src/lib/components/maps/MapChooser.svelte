@@ -27,6 +27,8 @@
 	function nameError(value: string, except?: string): string | null {
 		const name = cleanMapName(value);
 		if (!name) return 'Give the map a name.';
+		// `activeMindMap = 'all'` is the automatic graph.
+		if (name === 'all') return 'That name is taken by the graph. Try another.';
 		const taken = (maps ?? []).some(
 			(m) => m.toLowerCase() === name.toLowerCase() && m.toLowerCase() !== except?.toLowerCase()
 		);

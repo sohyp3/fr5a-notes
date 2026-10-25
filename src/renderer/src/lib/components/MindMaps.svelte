@@ -47,20 +47,24 @@
 		z-index: 4;
 		left: 18px;
 		bottom: 18px;
-		min-height: 40px;
+		min-height: 36px;
 		padding: 0 13px;
 		display: flex;
 		align-items: center;
 		gap: 6px;
 		border: 1px solid var(--rule);
-		border-radius: 10px;
+		border-radius: 9px;
 		background: var(--bg-editor);
 		color: var(--text-muted);
 		box-shadow: var(--shadow-pane);
 		touch-action: manipulation;
 		-webkit-tap-highlight-color: transparent;
+		transition: transform var(--dur-fast) ease;
+	}
+	.chooser-back:active {
+		transform: scale(var(--press));
 	}
 	:global([data-touch]) .chooser-back {
-		min-height: 48px;
+		min-height: 50px;
 	}
 </style>
