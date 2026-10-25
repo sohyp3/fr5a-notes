@@ -2,10 +2,10 @@
 	import { cleanMapName } from '../../maps/canvas';
 	import {
 		createMap,
-		deleteMap,
 		duplicateMap,
 		freeName,
 		listMaps,
+		removeMap,
 		renameMap
 	} from '../../maps/files';
 	import { getAppState } from '../../stores/app.svelte';
@@ -62,13 +62,24 @@
 		if (value === null) return;
 		const to = cleanMapName(value);
 		if (to === from) return;
-		await renameMap(from, to);
+		try {
+			await renameMap(from, to);
+		} catch (err) {
+			app.notify('error', `Couldn’t rename the map: ${err instanceof Error ? err.message : err}`);
+		}
 		if (app.activeMindMap === from) app.openMindMap(null);
 		await reload();
 	}
 
 	async function duplicate(from: string): Promise<void> {
-		await duplicateMap(from, freeName(`${from} copy`, maps ?? []));
+		try {
+			await duplicateMap(from, freeName(`${from} copy`, maps ?? []));
+		} catch (err) {
+			app.notify(
+				'error',
+				`Couldn’t duplicate the map: ${err instanceof Error ? err.message : err}`
+			);
+		}
 		await reload();
 	}
 
@@ -80,7 +91,11 @@
 			danger: true
 		});
 		if (!ok) return;
-		await deleteMap(name);
+		try {
+			await removeMap(name);
+		} catch (err) {
+			app.notify('error', `Couldn’t delete the map: ${err instanceof Error ? err.message : err}`);
+		}
 		await reload();
 	}
 

@@ -32,9 +32,3 @@ export function dropFor(e: DragEvent, target: string): DragItem | null {
 	if (kind === 'folder' && (target === path || target.startsWith(`${path}/`))) return null;
 	return current;
 }
-
-/** The note being dragged, if any (a drop onto a mind map adds it). */
-export function draggedNote(e: DragEvent): string | null {
-	const types = e.dataTransfer?.types ?? [];
-	return current?.kind === 'note' && types.includes(TYPES.note) ? current.path : null;
-}

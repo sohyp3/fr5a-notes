@@ -940,10 +940,9 @@ class AppState {
 
 	/** What `activeMindMap` may show with the features that are on (null = the chooser). */
 	private mapTarget(id: string | 'all' | null): string | 'all' | null {
+		// Graph only: no chooser and no maps, Mod+G opens the graph itself.
+		if (!this.settings.mindMaps) return 'all';
 		if (id === 'all') return this.settings.linkedNotes ? 'all' : null;
-		if (id !== null && !this.settings.mindMaps) return null;
-		// Graph only: no chooser, Mod+G opens the graph itself.
-		if (id === null && !this.settings.mindMaps) return 'all';
 		return id;
 	}
 

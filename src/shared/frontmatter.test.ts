@@ -35,6 +35,12 @@ describe('lightweight frontmatter boundaries', () => {
 		});
 	});
 
+	it('takes Obsidian-style properties with any later key', () => {
+		const yaml =
+			'title: "Q3: plan"\naliases:\n  - Plan\nCreated (UTC): 2024-01-01T10:00\n$schema: x\nempty:\ntags: [a, b]\n';
+		expect(splitFrontmatter(`---\n${yaml}---\n# Body`)?.yaml).toBe(yaml);
+	});
+
 	it('takes nested maps and top-level list items under a key', () => {
 		const yaml = 'owner:\n  name: me\ntags:\n- one\n- two\n';
 		expect(splitFrontmatter(`---\n${yaml}---\nBody`)?.yaml).toBe(yaml);

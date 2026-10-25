@@ -20,6 +20,20 @@ export async function listMaps(): Promise<string[]> {
 }
 
 export const readMap = (name: string): Promise<string | null> => platform.readMeta(mapPath(name));
+
+/** Saves of a map that was just closed may still be on their way to disk. */
+const saving = new Map<string, Promise<void>>();
+
+/** The map editor's pending save (it never rejects): opening, renaming, deleting wait for it. */
+export function trackSave(name: string, save: Promise<void>): void {
+	saving.set(name, save);
+	void save.finally(() => {
+		if (saving.get(name) === save) saving.delete(name);
+	});
+}
+
+/** Resolves once every save of `name` started so far is on disk. */
+export const saved = (name: string): Promise<void> => saving.get(name) ?? Promise.resolve();
 export const writeMap = (name: string, text: string): Promise<void> =>
 	platform.writeMeta(mapPath(name), text);
 export const deleteMap = (name: string): Promise<void> => platform.deleteMeta(mapPath(name));
@@ -36,13 +50,30 @@ export async function createMap(name: string): Promise<void> {
 }
 
 export async function renameMap(from: string, to: string): Promise<void> {
-	const text = await readMap(from);
-	await writeMap(to, text ?? serializeCanvas(emptyCanvas()));
+	await saved(from);
+	const text = (await readMap(from)) ?? serializeCanvas(emptyCanvas());
+	if (from.toLowerCase() === to.toLowerCase()) {
+		// Only the case changes: on a case-insensitive disk `to` *is* `from`, so
+		// deleting `from` after writing `to` would delete the map. Step aside first.
+		const aside = `${from}.renaming`;
+		await writeMap(aside, text);
+		await deleteMap(from);
+		await writeMap(to, text);
+		await deleteMap(aside);
+		return;
+	}
+	await writeMap(to, text);
 	await deleteMap(from);
 }
 
 export async function duplicateMap(from: string, to: string): Promise<void> {
+	await saved(from);
 	await writeMap(to, (await readMap(from)) ?? serializeCanvas(emptyCanvas()));
+}
+
+export async function removeMap(name: string): Promise<void> {
+	await saved(name);
+	await deleteMap(name);
 }
 
 /**

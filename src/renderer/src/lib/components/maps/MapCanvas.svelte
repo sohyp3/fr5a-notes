@@ -17,7 +17,6 @@
 	import type { Attachment } from 'svelte/attachments';
 	import type { TagNode as TagTreeNode } from '../../../../../shared/types';
 	import { parentOf } from '../../../../../shared/paths';
-	import { draggedNote } from '../../dnd';
 	import { resolveNoteHref } from '../../linkedNotes';
 	import {
 		cleanTag,
@@ -45,7 +44,7 @@
 		type ParsedCanvas
 	} from '../../maps/canvas';
 	import { setMapApi } from '../../maps/context';
-	import { readMap, writeMap } from '../../maps/files';
+	import { readMap, saved, trackSave, writeMap } from '../../maps/files';
 	import { easeInOut, ms } from '../../motion';
 	import { haptic } from '../../portal';
 	import { getAppState } from '../../stores/app.svelte';
@@ -157,6 +156,8 @@
 	}
 
 	async function load(): Promise<void> {
+		// Reopened right after closing: let that last save land first.
+		await saved(name);
 		const text = await readMap(name).catch(() => null);
 		if (text === null) {
 			app.notify('error', `There’s no map called “${name}” any more`);
@@ -192,6 +193,7 @@
 			.catch((err) =>
 				app.notify('error', `Couldn’t save the map: ${err instanceof Error ? err.message : err}`)
 			);
+		trackSave(name, chain);
 		return chain;
 	}
 
@@ -327,8 +329,8 @@
 		editingId = node.id;
 	}
 
-	function addNoteAt(id: string, at?: { x: number; y: number }): void {
-		const p = at ?? centre(NOTE_W, NOTE_H);
+	function addNoteAt(id: string): void {
+		const p = centre(NOTE_W, NOTE_H);
 		const node: CanvasNode = {
 			id: newId(),
 			type: 'file',
@@ -439,10 +441,13 @@
 
 	const rawOf = (id: string): CanvasNode | undefined => doc.nodes.find((n) => n.id === id);
 
+	// Note nodes look their note up on every index refresh: by id, not a scan per node.
+	const notesById = $derived(new Map(app.notes.map((n) => [n.id, n])));
+
 	function noteFor(file: string | undefined) {
 		if (!file) return undefined;
-		const exact = app.noteMeta(file);
-		if (exact && !app.trashNotes.includes(exact)) return exact;
+		const exact = notesById.get(file);
+		if (exact) return exact;
 		// Moved outside the app (a pull): the note with that file name.
 		const href = `/${file.split('/').map(encodeURIComponent).join('/')}`;
 		return resolveNoteHref(app.listedNotes, href, '') ?? undefined;
@@ -640,7 +645,7 @@
 		const raw = rawOf(nodeId);
 		if (!raw) return null;
 		return untaggedTag(doc, raw, (id) => {
-			const m = app.noteMeta(id);
+			const m = notesById.get(id);
 			// A locked encrypted note shows no tags: that's not "untagged".
 			return !m || (m.encrypted && !app.vault?.unlocked) ? undefined : m.tags;
 		});
@@ -727,6 +732,8 @@
 	function keys(e: KeyboardEvent): void {
 		if (status !== 'ready' || app.promptRequest || app.confirmRequest || picker || menu) return;
 		const t = e.target as HTMLElement | null;
+		// Only keys meant for the map: focus on it, or on nothing (not the AI pane beside it).
+		if (t && t !== document.body && !host?.contains(t)) return;
 		if (t?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
 		const mod = e.metaKey || e.ctrlKey;
 		const stop = () => {
@@ -852,22 +859,6 @@
 		const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
 		return { x: r.left, y: app.touch ? r.top : r.bottom + 6 };
 	};
-
-	// --- note cards dropped from the list (mouse) ---------------------------------------
-
-	function dragOver(e: DragEvent): void {
-		if (!draggedNote(e)) return;
-		e.preventDefault();
-		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-	}
-
-	function drop(e: DragEvent): void {
-		const id = draggedNote(e);
-		if (!id) return;
-		e.preventDefault();
-		const p = flow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-		addNoteAt(id, { x: Math.round(p.x - NOTE_W / 2), y: Math.round(p.y - NOTE_H / 2) });
-	}
 </script>
 
 <svelte:window onkeydowncapture={keys} />
@@ -877,13 +868,7 @@
 	}}
 />
 
-<section
-	class={['map', { touch: app.touch }]}
-	aria-label={`Mind map ${name}`}
-	bind:this={host}
-	ondragover={dragOver}
-	ondrop={drop}
->
+<section class={['map', { touch: app.touch }]} aria-label={`Mind map ${name}`} bind:this={host}>
 	{#if status === 'loading'}
 		<p class="state">Opening…</p>
 	{:else if status === 'error'}

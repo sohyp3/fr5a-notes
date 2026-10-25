@@ -11,6 +11,13 @@ const KEY_LINE =
 	/^(?:\{[ \t]*)?(?:[\p{L}\p{N}_][\p{L}\p{N}_. -]*[ \t]*:(?:[ \t]|$)|(?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')[ \t]*:)/u;
 
 /**
+ * A later `key:` line: any plain key (`Created (UTC):`, `$schema:`), since the
+ * first line already showed this is metadata. Prose lines without a `key: `
+ * still fail.
+ */
+const LATER_KEY = /^[^\s#\-?:,[\]{}|>][^:]*:(?:[ \t]|$)/u;
+
+/**
  * Whether the text between two rules reads as YAML metadata: it opens with a
  * mapping key, and every other line is a key, a comment, an indented line
  * (nested values, block scalars) or a `- item` of the key above. A Markdown
@@ -22,7 +29,11 @@ function isMetadata(yaml: string): boolean {
 	// A flow map (`{ … }` on one or more lines) is taken as a whole.
 	if (/^\{/.test(lines[0])) return true;
 	return lines.every(
-		(line) => KEY_LINE.test(line) || /^[ \t]/.test(line) || /^-(?:[ \t]|$)/.test(line)
+		(line) =>
+			KEY_LINE.test(line) ||
+			LATER_KEY.test(line) ||
+			/^[ \t]/.test(line) ||
+			/^-(?:[ \t]|$)/.test(line)
 	);
 }
 
