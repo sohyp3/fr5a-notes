@@ -2477,8 +2477,6 @@ test('desktop tabs: typing through Ctrl+Tab stays in the tab it was typed in', a
 	const { ctx, page, tabs } = await tabsPage(browser, ['Alpha', 'Beta']);
 	await tabs.first().click();
 	await expect(page.locator('.ProseMirror')).toContainText('one');
-	// The mount's own focus (a frame later) settles first, or it eats a keystroke.
-	await page.waitForTimeout(200);
 	await page.keyboard.press('Control+End');
 	await page.keyboard.type(' aaa');
 	await hold(page, { read: 'beta.md' });
@@ -2488,7 +2486,6 @@ test('desktop tabs: typing through Ctrl+Tab stays in the tab it was typed in', a
 	await page.keyboard.type(' bbb');
 	await releaseAll(page);
 	await expect(page.locator('.ProseMirror')).toContainText('two');
-	await page.waitForTimeout(200);
 	await page.keyboard.press('Control+End');
 	await page.keyboard.type(' ccc');
 	await page.waitForTimeout(700);
@@ -2511,6 +2508,18 @@ test('desktop tabs: pinning while typing loses no keystroke', async ({ browser }
 	const text = await fileText(page, 'alpha.md');
 	expect(text).toContain('<!-- pinned: true -->');
 	expect(text).toContain('one abc def');
+	await ctx.close();
+});
+
+test('desktop: closing the window writes the edit still waiting for the auto-save', async ({
+	browser
+}) => {
+	const { ctx, page } = await tabsPage(browser, ['Alpha']);
+	await page.keyboard.press('Control+End');
+	await page.keyboard.type(' bye');
+	// What main asks for when the window closes; it answers well inside the 500ms debounce.
+	await page.evaluate(() => (window as unknown as { __leave: () => Promise<void> }).__leave());
+	expect(await fileText(page, 'alpha.md')).toBe('# Alpha\n\none bye');
 	await ctx.close();
 });
 

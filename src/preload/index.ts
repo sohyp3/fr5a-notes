@@ -63,6 +63,13 @@ const api = {
 	minimize: (): Promise<void> => ipcRenderer.invoke(Channels.windowMinimize),
 	maximize: (): Promise<void> => ipcRenderer.invoke(Channels.windowMaximize),
 	close: (): Promise<void> => ipcRenderer.invoke(Channels.windowClose),
+	/** Before the window closes or the app quits: `cb` writes queued edits (main waits for it). */
+	onLeave: (cb: () => Promise<void>): (() => void) => {
+		leave = cb;
+		return () => {
+			if (leave === cb) leave = null;
+		};
+	},
 
 	// Git sync. All git work happens in main; errors come back as `{ ok: false, error }`.
 	syncPull: (): Promise<SyncResponse> => ipcRenderer.invoke(Channels.syncPull),
@@ -150,5 +157,13 @@ const api = {
 };
 
 export type Api = typeof api;
+
+// Always answered, so a window whose page never subscribed still closes at once.
+let leave: (() => Promise<void>) | null = null;
+ipcRenderer.on(Channels.windowFlush, () => {
+	void Promise.resolve(leave?.())
+		.catch(() => {})
+		.finally(() => ipcRenderer.send(Channels.windowFlushed));
+});
 
 contextBridge.exposeInMainWorld('api', api);

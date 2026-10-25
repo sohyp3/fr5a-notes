@@ -150,6 +150,12 @@ export interface PlatformApi {
 	 */
 	onBackButton?(cb: () => boolean): () => void;
 
+	/**
+	 * The app is about to close (desktop: the window, held until `cb` settles)
+	 * or go to the background (mobile `pause`): `cb` writes queued edits.
+	 */
+	onLeave?(cb: () => Promise<void>): () => void;
+
 	/** Event subscriptions; each returns an unsubscribe fn. */
 	onSyncConflict(cb: (files: ConflictFile[]) => void): () => void;
 	onSyncDone(cb: () => void): () => void;

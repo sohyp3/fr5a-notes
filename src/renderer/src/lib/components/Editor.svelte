@@ -213,12 +213,6 @@
 			// Focused by hand: TipTap's autofocus scrolls the caret into view, which
 			// opened every note scrolled to its end.
 			autofocus: false,
-			onCreate: ({ editor }) => {
-				if (!canEdit || (app.touch && !app.draft)) return;
-				// The caret waits at the end as before, but the note opens at its top
-				// (the first keystroke scrolls there). A draft: the title, on screen.
-				editor.commands.focus('end', { scrollIntoView: !!app.draft });
-			},
 			onUpdate: ({ editor }) => {
 				if (loading) return;
 				// Filed under this instance's session: once another note has opened, it saves nothing.
@@ -232,14 +226,28 @@
 	 * only the `{#key}` above recreates it, never a change to what it read.
 	 */
 	function mount(node: HTMLElement): () => void {
-		const ed = untrack(() => {
+		const { ed, focus, draft } = untrack(() => {
 			const content = app.activeContent;
 			dir = detectDir(content) ?? 'ltr';
 			vimMode = 'normal';
-			return buildEditor(node, content, app.editorSession);
+			const ed = buildEditor(node, content, app.editorSession);
+			// Touch: never pop the keyboard on open, except for a new note's title.
+			return { ed, focus: ed.isEditable && (!app.touch || app.draft), draft: app.draft };
 		});
 		editor = ed;
 		app.editor = ed;
+		// Focused once the node is in the page (after this effect flush), not on
+		// TipTap's create (a timeout, then a frame): keys typed in between went to
+		// whatever had focus (the tab, the list) and were lost. The caret waits at
+		// the end, but the note opens at its top (the first keystroke scrolls
+		// there). A draft: the title, on screen.
+		if (focus)
+			queueMicrotask(() => {
+				if (ed.isDestroyed) return;
+				ed.commands.setTextSelection(ed.state.doc.content.size);
+				ed.view.focus();
+				if (draft) ed.commands.scrollIntoView();
+			});
 		if (findQuery) findStatus = setNoteSearch(ed.view, findQuery);
 		return () => {
 			// Writes this instance's last edit, which knows its own note. (Don't

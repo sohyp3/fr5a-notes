@@ -876,6 +876,11 @@ export function createCapacitorPlatform(): PlatformApi {
 			return () => void handle.then((h) => h.remove());
 		},
 
+		onLeave(cb) {
+			const handle = App.addListener('pause', () => void cb());
+			return () => void handle.then((h) => h.remove());
+		},
+
 		onSyncConflict(cb) {
 			conflictListeners.add(cb);
 			return () => conflictListeners.delete(cb);

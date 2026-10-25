@@ -505,6 +505,8 @@ class AppState {
 		document.addEventListener('visibilitychange', () => {
 			if (document.hidden) void this.flush();
 		});
+		// Closing the window / quitting (desktop), or the app's pause (mobile).
+		platform.onLeave?.(() => this.flush());
 		// Git sync: reload from disk after a clean sync; surface conflicts.
 		platform.onSyncDone(() => {
 			this.conflictOpen = false;
