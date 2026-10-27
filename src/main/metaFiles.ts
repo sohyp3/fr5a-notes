@@ -1,14 +1,16 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { APP_DIR } from '../shared/paths';
 
 /**
  * Files under the workspace's hidden `.fr5a/` folder: harness sessions and
- * skills. The note scan and watcher skip dot-folders, so these never show up
- * as notes, but git sync still carries them. Paths are relative to `.fr5a/`
+ * skills, maps, images and saved chats. Only saved chats enter the note index;
+ * Git sync carries the other app files except ignored device-only sessions.
+ * Paths are relative to `.fr5a/`
  * and can't escape it.
  */
 
-export const META_DIR = '.fr5a';
+export const META_DIR = APP_DIR;
 
 export function metaPath(root: string, rel: string): string {
 	const base = path.join(root, META_DIR);
@@ -20,8 +22,13 @@ export function metaPath(root: string, rel: string): string {
 export async function readMeta(root: string, rel: string): Promise<string | null> {
 	try {
 		return await fs.readFile(metaPath(root, rel), 'utf8');
-	} catch {
-		return null;
+	} catch (err) {
+		if (
+			(err as NodeJS.ErrnoException).code === 'ENOENT' ||
+			(err as NodeJS.ErrnoException).code === 'ENOTDIR'
+		)
+			return null;
+		throw err;
 	}
 }
 

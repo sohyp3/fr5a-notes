@@ -21,7 +21,7 @@
 	import ConflictWindow from './lib/components/ConflictWindow.svelte';
 	import Resizer from './lib/components/Resizer.svelte';
 	import { isMobile } from './lib/platform';
-	import { layoutFor } from './lib/layout';
+	import { EDITOR_MIN, fitDesktopPanes, layoutFor } from './lib/layout';
 	import { easeDrawer, easeOut, motionK, ms, scrimIn, scrimOut } from './lib/motion';
 	import {
 		EDGE_BACK_PX,
@@ -35,9 +35,6 @@
 	} from './lib/gesture';
 
 	const app = getAppState();
-	/** Narrowest the editor may get while panes are dragged wider. */
-	const EDITOR_MIN = 320;
-
 	// The harness pane's code is loaded on first open, then stays mounted.
 	const harnessModule = $derived(
 		app.harnessLoaded && app.settings.ai
@@ -87,23 +84,21 @@
 		let list = showList ? app.widths.list : 0;
 		let ai = app.harnessOpen ? app.widths.harness : 0;
 		if (!desktop) return { side, list, ai: app.widths.harness };
-		const room = winW - EDITOR_MIN - 40;
-		if (!app.harnessOpen && side + list > room) {
-			// Narrow window: the sidebar, then the list, give up width down to their
-			// minimums before anything steps aside.
-			let over = side + list - room;
-			const cut = (w: number, min: number): number => {
-				const c = w ? Math.min(over, Math.max(0, w - min)) : 0;
-				over -= c;
-				return w - c;
-			};
-			side = cut(side, PANE_WIDTHS.sidebar.min);
-			list = cut(list, PANE_WIDTHS.list.min);
+		const fitted = fitDesktopPanes(
+			winW,
+			{ side, list, ai },
+			{ side: PANE_WIDTHS.sidebar.min, list: PANE_WIDTHS.list.min, ai: PANE_WIDTHS.harness.min },
+			!!app.selectedTag && showList && app.view === 'editor'
+		);
+		return { ...fitted, ai: app.harnessOpen ? fitted.ai : app.widths.harness };
+	});
+	// No invisible "open" AI pane: closing it also makes Mod+J's next press
+	// reopen it normally once the window has room.
+	$effect(() => {
+		if (desktop && app.harnessOpen && app.selectedTag && fit.ai === 0) {
+			app.closeHarness();
+			app.notify('error', 'Widen the window to show AI alongside tagged notes.');
 		}
-		if (side + list + ai > room) side = 0;
-		if (app.harnessOpen && list + ai > room) ai = Math.max(PANE_WIDTHS.harness.min, room - list);
-		if (list + ai > room) list = 0;
-		return { side, list, ai: app.harnessOpen ? ai : app.widths.harness };
 	});
 	const overlay = $derived(app.view !== 'editor');
 	// Tablets: the AI sheet sits above the content, so it steps aside while a
@@ -118,8 +113,25 @@
 	const listShown = $derived(phone ? app.pane === 'list' : fit.list > 0);
 	const editorShown = $derived(phone ? app.pane === 'editor' : true);
 	const harnessShown = $derived(
-		phone ? app.pane === 'harness' : tablet ? sheetShown : app.harnessOpen
+		phone ? app.pane === 'harness' : tablet ? sheetShown : app.harnessOpen && fit.ai > 0
 	);
+	function toggleNavigation(): void {
+		if (sidebarShown) {
+			app.toggleSidebar();
+			return;
+		}
+		if (app.zen) app.toggleZen();
+		if (!app.sidebarOpen) app.toggleSidebar();
+		// At narrow widths the list owns the single available sidebar slot.
+		// Hide it to reveal navigation; the selected tag remains intact.
+		const withNav = fitDesktopPanes(
+			winW,
+			{ side: app.widths.sidebar, list: showList ? app.widths.list : 0, ai: fit.ai },
+			{ side: PANE_WIDTHS.sidebar.min, list: PANE_WIDTHS.list.min, ai: PANE_WIDTHS.harness.min },
+			!!app.selectedTag && showList
+		);
+		if (withNav.side === 0 && withNav.list > 0) app.toggleList();
+	}
 
 	// Phones: panes sit side by side in this order and slide; the one on
 	// screen is "current", earlier ones wait to the left, later to the right.
@@ -560,7 +572,7 @@
 <svelte:window onkeydown={onKeydown} onmouseupcapture={onMouseUp} />
 
 <div class={['app', { zen: app.zen, resizing: app.resizing }]}>
-	<TitleBar />
+	<TitleBar sidebarVisible={sidebarShown} onSidebarToggle={toggleNavigation} />
 	<!-- The body renders only once init() has restored the workspace, settings
 	     and last-open note, then fades in — no flash from empty to full. -->
 	{#if app.booted}
@@ -673,7 +685,7 @@
 					out:fade={scrimOut}
 				></button>
 			{/if}
-			{#if desktop && app.harnessOpen}
+			{#if desktop && app.harnessOpen && fit.ai > 0}
 				<Resizer
 					value={app.widths.harness}
 					min={PANE_WIDTHS.harness.min}

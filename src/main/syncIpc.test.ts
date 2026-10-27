@@ -101,6 +101,20 @@ async function conflictOnB() {
 }
 
 describe('sync IPC handlers', () => {
+	it('signals a clean pull after hidden maps, assets and chats reach the receiving workspace', async () => {
+		for (const dir of ['.fr5a/maps', '.fr5a/assets', '.fr5a/chats'])
+			fs.mkdirSync(path.join(a, dir), { recursive: true });
+		write(a, '.fr5a/maps/Ideas.canvas', '{"nodes":[],"edges":[]}');
+		write(a, '.fr5a/assets/photo.png', 'image');
+		write(a, '.fr5a/chats/Talk.md', '# Talk');
+		await setup(a).invoke(Channels.syncPush);
+		const ipc = setup(b);
+		expect(await ipc.invoke(Channels.syncPull)).toEqual({ ok: true, result: { status: 'ok' } });
+		expect(ipc.events.map((e) => e.channel)).toEqual([Channels.syncDone]);
+		expect(read(b, '.fr5a/maps/Ideas.canvas')).toContain('nodes');
+		expect(read(b, '.fr5a/assets/photo.png')).toBe('image');
+		expect(read(b, '.fr5a/chats/Talk.md')).toBe('# Talk');
+	});
 	it('push commits and pushes, then emits sync:done', async () => {
 		write(a, 'new.md', '# New\n');
 		const ipc = setup(a);

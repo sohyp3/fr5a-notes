@@ -4,6 +4,10 @@
 	export interface MenuItem {
 		label: string;
 		icon?: IconName;
+		/** A color sample instead of an icon (the label remains accessible). */
+		swatch?: string;
+		/** For a mutually exclusive choice, including an uncolored choice. */
+		selected?: boolean;
 		/** Small text after the label (shortcut, state). */
 		hint?: string;
 		danger?: boolean;
@@ -104,7 +108,7 @@
 		if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
 		e.preventDefault();
 		const buttons = [
-			...(el?.querySelectorAll<HTMLButtonElement>('[role=menuitem]:not(:disabled)') ?? [])
+			...(el?.querySelectorAll<HTMLButtonElement>('[role^=menuitem]:not(:disabled)') ?? [])
 		];
 		const i = buttons.indexOf(document.activeElement as HTMLButtonElement);
 		const next = e.key === 'ArrowDown' ? i + 1 : i - 1;
@@ -130,7 +134,7 @@
 		const prev = document.activeElement as HTMLElement | null;
 		void tick().then(() =>
 			node
-				.querySelector<HTMLButtonElement>('[role=menuitem]:not(:disabled)')
+				.querySelector<HTMLButtonElement>('[role^=menuitem]:not(:disabled)')
 				?.focus({ preventScroll: true })
 		);
 		return () => {
@@ -156,12 +160,16 @@
 		{#if item.divider}<div class="sep" role="separator"></div>{/if}
 		<button
 			class={['item', { danger: item.danger }]}
-			role="menuitem"
+			role={item.selected !== undefined ? 'menuitemradio' : 'menuitem'}
+			aria-checked={item.selected !== undefined ? item.selected : undefined}
 			disabled={item.disabled}
 			onclick={() => run(item)}
 		>
-			{#if item.icon}<Icon name={item.icon} size={sheet ? 18 : 15} stroke={1.7} />{/if}
+			{#if item.swatch}<span class="swatch" style:background-color={item.swatch} aria-hidden="true"
+				></span>
+			{:else if item.icon}<Icon name={item.icon} size={sheet ? 18 : 15} stroke={1.7} />{/if}
 			<span class="lbl">{item.label}</span>
+			{#if item.selected}<Icon name="on" size={15} stroke={2} />{/if}
 			{#if item.hint}<span class="hint">{item.hint}</span>{/if}
 		</button>
 	{/each}
@@ -248,6 +256,13 @@
 	}
 	.item :global(.icon) {
 		color: var(--text-muted);
+	}
+	.swatch {
+		flex: none;
+		width: 16px;
+		height: 16px;
+		border-radius: 5px;
+		box-shadow: 0 0 0 1px var(--rule);
 	}
 	.item:hover:not(:disabled) {
 		background: var(--bg-hover);

@@ -12,6 +12,17 @@ type Api = {
 	deleteMeta(rel: string): Promise<void>;
 };
 type Win = { api: Api; __meta: Record<string, string>; __writes: { id: string }[] };
+type SyncHarness = {
+	done(): void;
+	holdWrite: boolean;
+	writeStarted: boolean;
+	releaseWrite(): void;
+	failRead: boolean;
+	holdRead: boolean;
+	readStarted: boolean;
+	releaseRead(): void;
+	pushSnapshot: Record<string, string>;
+};
 
 const MAP = 'maps/Atlas.canvas';
 
@@ -84,6 +95,7 @@ const savedMap = (page: Page) =>
 			id: string;
 			type: string;
 			text?: string;
+			color?: string;
 			file?: string;
 			x: number;
 			y: number;
@@ -118,6 +130,194 @@ async function addIdea(page: Page, text: string, touch: boolean): Promise<void> 
 	await field.press('Enter');
 	await expect(map.locator('.svelte-flow__node', { hasText: text })).toBeVisible();
 }
+
+async function newAtlas(page: Page): Promise<void> {
+	await openMaps(page);
+	await page.getByRole('button', { name: 'New map' }).click();
+	await page.getByRole('dialog').getByRole('textbox').fill('Atlas');
+	await page.getByRole('dialog').getByRole('button', { name: 'Create' }).click();
+	await expect(page.getByRole('region', { name: 'Mind map Atlas' })).toBeVisible();
+}
+
+async function checkBackWhileSaving(p: Page, touch: boolean): Promise<void> {
+	await newAtlas(p);
+	await p.evaluate(
+		() => ((window as unknown as { __syncHarness: SyncHarness }).__syncHarness.holdWrite = true)
+	);
+	await addIdea(p, 'Quick', touch);
+	await expect
+		.poll(() =>
+			p.evaluate(
+				() => (window as unknown as { __syncHarness: SyncHarness }).__syncHarness.writeStarted
+			)
+		)
+		.toBe(true);
+	await p.getByRole('button', { name: 'Back to maps' }).click();
+	if (touch && (await p.getByRole('region', { name: 'Mind map Atlas' }).isVisible()))
+		await p.getByRole('button', { name: 'Back to maps' }).click();
+	await expect(p.getByRole('heading', { name: 'Mind maps' })).toBeVisible();
+	await p.evaluate(() =>
+		(window as unknown as { __syncHarness: SyncHarness }).__syncHarness.releaseWrite()
+	);
+	await expect
+		.poll(async () => (await savedMap(p))?.nodes.some((n) => n.text === 'Quick'))
+		.toBe(true);
+	expect(await p.evaluate(() => Object.keys((window as unknown as Win).__meta))).not.toContain(
+		'maps/null.canvas'
+	);
+	await expect(p.getByRole('dialog', { name: 'This map changed on disk' })).toHaveCount(0);
+	await expect(p.getByRole('alertdialog', { name: 'This map changed on disk' })).toHaveCount(0);
+}
+
+test('Back while saving keeps the original map on phone and desktop', async ({ browser, page }, info) => {
+	await checkBackWhileSaving(page, true);
+	if (info.project.name === 'phone 390x844') {
+		const d = await desktopPage(browser);
+		await checkBackWhileSaving(d.page, false);
+		await d.ctx.close();
+	}
+});
+
+test('Push waits for a closed map save', async ({ browser }, info) => {
+	test.skip(info.project.name !== 'phone 390x844', 'desktop push controls');
+	const { ctx, page } = await desktopPage(browser);
+	await newAtlas(page);
+	await page.evaluate(
+		() => ((window as unknown as { __syncHarness: SyncHarness }).__syncHarness.holdWrite = true)
+	);
+	await addIdea(page, 'Latest', false);
+	await expect
+		.poll(() =>
+			page.evaluate(
+				() => (window as unknown as { __syncHarness: SyncHarness }).__syncHarness.writeStarted
+			)
+		)
+		.toBe(true);
+	await page
+		.getByRole('region', { name: 'Mind map Atlas' })
+		.getByRole('button', { name: 'Close mind maps' })
+		.click();
+	await page.getByRole('button', { name: 'Push', exact: true }).click();
+	await expect(page.getByRole('status').filter({ hasText: 'pushing…' })).toBeVisible();
+	expect(
+		await page.evaluate(
+			(rel) =>
+				(window as unknown as { __syncHarness: SyncHarness }).__syncHarness.pushSnapshot[rel],
+			MAP
+		)
+	).toBeUndefined();
+	await page.evaluate(() =>
+		(window as unknown as { __syncHarness: SyncHarness }).__syncHarness.releaseWrite()
+	);
+	await expect
+		.poll(() =>
+			page.evaluate(
+				(rel) =>
+					(window as unknown as { __syncHarness: SyncHarness }).__syncHarness.pushSnapshot[rel] ??
+					'',
+				MAP
+			)
+		)
+		.toContain('Latest');
+	await ctx.close();
+});
+
+test('sync refreshes open map, respects dirty edits, and explains removal', async ({
+	browser
+}, info) => {
+	test.skip(info.project.name !== 'phone 390x844', 'desktop sync controls');
+	const { ctx, page } = await desktopPage(browser);
+	await newAtlas(page);
+	const map = page.getByRole('region', { name: 'Mind map Atlas' });
+	await page.evaluate((rel) => {
+		const w = window as unknown as Win;
+		w.__meta[rel] = JSON.stringify({
+			nodes: [{ id: 'remote', type: 'text', text: 'Remote', x: 20, y: 20, width: 180, height: 44 }],
+			edges: []
+		});
+		(window as unknown as { __syncHarness: SyncHarness }).__syncHarness.done();
+	}, MAP);
+	await expect(map.getByText('Remote')).toBeVisible();
+	await page.evaluate((rel) => {
+		const w = window as unknown as Win;
+		w.__meta[rel] = JSON.stringify({ nodes: [], edges: [] });
+		(window as unknown as { __syncHarness: SyncHarness }).__syncHarness.done();
+	}, MAP);
+	await expect(map.getByText('Remote')).toHaveCount(0);
+	await page.evaluate(
+		() => ((window as unknown as { __syncHarness: SyncHarness }).__syncHarness.failRead = true)
+	);
+	await page.evaluate(() =>
+		(window as unknown as { __syncHarness: SyncHarness }).__syncHarness.done()
+	);
+	await expect(map).toBeVisible();
+	await expect(page.getByText(/Couldn’t refresh the map: EIO/)).toBeVisible();
+	await page.evaluate(
+		() => ((window as unknown as { __syncHarness: SyncHarness }).__syncHarness.failRead = false)
+	);
+	await page.evaluate((rel) => {
+		delete (window as unknown as Win).__meta[rel];
+		(window as unknown as { __syncHarness: SyncHarness }).__syncHarness.done();
+	}, MAP);
+	await expect(page.getByRole('heading', { name: 'Mind maps' })).toBeVisible();
+	await expect(page.getByText(/removed or renamed by sync/)).toBeVisible();
+	await ctx.close();
+});
+
+test('an in-flight refresh cannot navigate after leaving the map', async ({ browser }, info) => {
+	test.skip(info.project.name !== 'phone 390x844', 'desktop sync controls');
+	const { ctx, page } = await desktopPage(browser);
+	await newAtlas(page);
+	await page.evaluate(() => {
+		const h = (window as unknown as { __syncHarness: SyncHarness }).__syncHarness;
+		h.holdRead = true;
+		h.done();
+	});
+	await expect
+		.poll(() =>
+			page.evaluate(
+				() => (window as unknown as { __syncHarness: SyncHarness }).__syncHarness.readStarted
+			)
+		)
+		.toBe(true);
+	await page
+		.getByRole('region', { name: 'Mind map Atlas' })
+		.getByRole('button', { name: 'Back to maps' })
+		.click();
+	await page.getByRole('button', { name: 'Close mind maps' }).click();
+	await page.evaluate(() => {
+		const h = (window as unknown as { __syncHarness: SyncHarness }).__syncHarness;
+		h.holdRead = false;
+		h.releaseRead();
+	});
+	await expect(page.getByRole('heading', { name: 'Nothing open' })).toBeVisible();
+	await expect(page.getByRole('dialog')).toHaveCount(0);
+	await ctx.close();
+});
+
+test('dirty open map asks before replacing local edits from sync', async ({ browser }, info) => {
+	test.skip(info.project.name !== 'phone 390x844', 'desktop sync controls');
+	const { ctx, page } = await desktopPage(browser);
+	await newAtlas(page);
+	const map = page.getByRole('region', { name: 'Mind map Atlas' });
+	await map.getByRole('button', { name: 'Add an idea' }).click();
+	await map.getByRole('textbox', { name: 'Idea text' }).fill('Local');
+	await page.evaluate((rel) => {
+		(window as unknown as Win).__meta[rel] = JSON.stringify({
+			nodes: [{ id: 'remote', type: 'text', text: 'Remote', x: 20, y: 20, width: 180, height: 44 }],
+			edges: []
+		});
+		(window as unknown as { __syncHarness: SyncHarness }).__syncHarness.done();
+	}, MAP);
+	const dialog = page.getByRole('alertdialog', { name: 'This map changed on disk' });
+	await expect(dialog).toBeVisible();
+	await expect(map.getByText('Local')).toBeVisible();
+	await dialog.getByRole('button', { name: 'Reload' }).click();
+	await expect(
+		page.getByRole('region', { name: 'Mind map Atlas' }).getByText('Remote')
+	).toBeVisible();
+	await ctx.close();
+});
 
 type Pt = { x: number; y: number };
 
@@ -218,6 +418,65 @@ async function reopen(page: Page): Promise<void> {
 
 test.beforeEach(async ({ page }) => {
 	await install(page);
+});
+
+test('desktop map color swatches, keyboard selection, and reopen without remount', async ({
+	browser
+}, info) => {
+	test.skip(info.project.name !== 'phone 390x844', 'one desktop run is enough');
+	const { ctx, page } = await desktopPage(browser);
+	await openMaps(page);
+	await page.getByRole('button', { name: 'New map' }).click();
+	await page.getByRole('dialog').getByRole('textbox').fill('Atlas');
+	await page.getByRole('dialog').getByRole('button', { name: 'Create' }).click();
+	await addIdea(page, 'Colored idea', false);
+	const map = page.getByRole('region', { name: 'Mind map Atlas' });
+	const node = map.locator('.svelte-flow__node', { hasText: 'Colored idea' });
+	await node.click();
+	await map.getByRole('button', { name: 'Color', exact: true }).click();
+	const menu = page.getByRole('menu', { name: 'Map actions' });
+	const none = menu.getByRole('menuitemradio', { name: 'No color' });
+	const red = menu.getByRole('menuitemradio', { name: 'Red' });
+	await expect(none).toHaveAttribute('aria-checked', 'true');
+	await expect(red.locator('.swatch')).toHaveCSS('background-color', 'rgb(238, 93, 80)');
+	await none.press('ArrowDown');
+	await expect(red).toBeFocused();
+	await red.press('Enter');
+	await expect.poll(async () => (await savedMap(page))?.nodes[0]?.color).toBe('1');
+	await page.getByRole('button', { name: 'Toggle theme' }).click();
+	await map.getByRole('button', { name: 'Color', exact: true }).click();
+	await expect(red).toHaveAttribute('aria-checked', 'true');
+	await expect(red.locator('.swatch')).toHaveCSS('background-color', 'rgb(255, 106, 92)');
+	await none.click();
+	await expect.poll(async () => (await savedMap(page))?.nodes[0]?.color).toBeUndefined();
+	// If Mod+G remounted the canvas, this DOM marker and the undo stack would vanish.
+	await node.evaluate((el) => el.setAttribute('data-e2e-canvas', 'same'));
+	await page.keyboard.press('Control+g');
+	await expect(node).toHaveAttribute('data-e2e-canvas', 'same');
+	await expect(map.getByRole('button', { name: 'Undo' })).toBeEnabled();
+	await ctx.close();
+});
+
+test('renaming the last map keeps Mod+G pointed at its new name', async ({ browser }, info) => {
+	test.skip(info.project.name !== 'phone 390x844', 'one desktop run is enough');
+	const { ctx, page } = await desktopPage(browser);
+	await openMaps(page);
+	await page.getByRole('button', { name: 'New map' }).click();
+	await page.getByRole('dialog').getByRole('textbox').fill('Atlas');
+	await page.getByRole('dialog').getByRole('button', { name: 'Create' }).click();
+	await page
+		.getByRole('region', { name: 'Mind map Atlas' })
+		.getByRole('button', { name: 'Back to maps' })
+		.click();
+	await page.getByRole('button', { name: 'Actions for Atlas' }).click();
+	await page.getByRole('menuitem', { name: 'Rename…' }).click();
+	await page.getByRole('dialog').getByRole('textbox').fill('Renamed');
+	await page.getByRole('dialog').getByRole('button', { name: 'Rename' }).click();
+	await expect(page.getByRole('button', { name: 'Actions for Renamed' })).toBeVisible();
+	await page.getByRole('button', { name: 'Close mind maps' }).click();
+	await page.keyboard.press('Control+g');
+	await expect(page.getByRole('region', { name: 'Mind map Renamed' })).toBeVisible();
+	await ctx.close();
 });
 
 test('maps: islands, connect, live drag, persist, tag nodes (touch layouts)', async ({ page }) => {
@@ -323,7 +582,7 @@ test('desktop maps: build, persist, tag nodes, undo, rename follows', async ({ b
 	await expect(map.locator('.map-node.note')).toHaveCount(1);
 
 	// Renaming a note in the app re-points the map at it.
-	await map.getByRole('button', { name: 'Close mind map' }).click();
+	await map.getByRole('button', { name: 'Close mind maps' }).click();
 	await page.getByRole('button', { name: /^All Notes/ }).click();
 	await page.locator('.card', { hasText: 'Spec' }).first().click({ button: 'right' });
 	await page.getByRole('menuitem', { name: 'Rename…' }).click();
@@ -408,7 +667,7 @@ test('desktop maps: a change on disk asks Reload / Keep mine; Tidy; graph-only M
 		.toBe(true);
 
 	// Mind maps off with this map remembered: Mod+G opens the graph, not a blank view.
-	await map.getByRole('button', { name: 'Close mind map' }).click();
+	await map.getByRole('button', { name: 'Close mind maps' }).click();
 	await page.getByRole('button', { name: 'Settings', exact: true }).click();
 	await page.getByRole('button', { name: /Links & maps/ }).click();
 	await page.getByRole('switch', { name: 'Note links & graph', exact: true }).click();

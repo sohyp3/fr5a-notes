@@ -15,12 +15,18 @@ const mem = vi.hoisted(() => ({
 	platform: 'android' as string,
 	/** Injected I/O failures (storage migration rollback tests). */
 	failWrite: null as ((path: string, data: string) => boolean) | null,
+	failRead: null as ((path: string) => boolean) | null,
 	failRename: null as ((from: string, to: string) => boolean) | null
 }));
 
 vi.mock('@capacitor/filesystem', () => {
 	const parent = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
-	const fail = (msg: string) => Promise.reject(new Error(msg));
+	const fail = (msg: string) =>
+		Promise.reject(
+			Object.assign(new Error(msg), {
+				code: msg === 'File does not exist' ? 'OS-PLUG-FILE-0008' : 'EIO'
+			})
+		);
 	const mkdirs = (p: string) => {
 		for (let d = p; d; d = parent(d)) mem.dirs.add(d);
 	};
@@ -54,6 +60,7 @@ vi.mock('@capacitor/filesystem', () => {
 				};
 			},
 			readFile: async ({ path }: { path: string }) => {
+				if (mem.failRead?.(path)) return fail('EIO');
 				const f = mem.files.get(path);
 				return f ? { data: f.data } : fail('File does not exist');
 			},
@@ -172,6 +179,7 @@ const flush = () => new Promise((r) => setTimeout(r, 0));
 
 beforeEach(() => {
 	mem.failWrite = null;
+	mem.failRead = null;
 	mem.failRename = null;
 	mem.files.clear();
 	mem.dirs.clear();
@@ -229,6 +237,19 @@ describe('pure helpers', () => {
 });
 
 describe('capacitor platform (android + ios)', () => {
+	it('keeps maps out of the note index and distinguishes missing meta files from I/O errors', async () => {
+		const api = createCapacitorPlatform();
+		expect(await api.readMeta('maps/Atlas.canvas')).toBeNull();
+		await api.writeMeta('maps/Atlas.canvas', '{"nodes":[],"edges":[]}');
+		expect(await api.listMeta('maps')).toEqual(['Atlas.canvas']);
+		expect(await api.readMeta('maps/Atlas.canvas')).toContain('nodes');
+		expect((await api.listNotes()).some((n) => n.id.includes('Atlas'))).toBe(false);
+		mem.failRead = (path) => path.endsWith('Atlas.canvas');
+		await expect(api.readMeta('maps/Atlas.canvas')).rejects.toThrow('EIO');
+		mem.failRead = null;
+		await api.deleteMeta('maps/Atlas.canvas');
+		expect(await api.readMeta('maps/Atlas.canvas')).toBeNull();
+	});
 	it('creates the app-private workspace and has no window controls', async () => {
 		const api = createCapacitorPlatform();
 		expect(await api.getWorkspace()).toBe('/data/app/files/notes');

@@ -146,6 +146,8 @@
 				<EmptyState compact src={mascotSleep} title="Trash is empty" />
 			{:else if app.chatsOpen}
 				<EmptyState compact src={mascotSleep} title="No saved chats" />
+			{:else if app.selectedTag}
+				<EmptyState compact src={mascotSleep} title="No notes with this tag" />
 			{:else}
 				<EmptyState
 					compact

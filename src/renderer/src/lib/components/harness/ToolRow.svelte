@@ -14,6 +14,8 @@
 		search_notes: 'Searched notes',
 		ask_user: 'Asked you',
 		write_note: 'Change',
+		edit_note: 'Edit note',
+		delete_note: 'Move to Trash',
 		web_search: 'Web search',
 		fetch_url: 'Read page'
 	};
@@ -53,7 +55,7 @@
 		if (r === '(cancelled)') return 'cancelled';
 		if (entry.write && !entry.write.applied) return /rejected/i.test(r) ? 'rejected' : 'failed';
 		if (
-			/^(Error:|Not written|Unknown tool|Invalid JSON|No note with id|Search failed|HTTP \d|Withheld)/.test(
+			/^(Error:|Not written|Not applied|Not edited|Cannot change|Unknown tool|Invalid JSON|No note with id|Search failed|HTTP \d|Withheld)/.test(
 				r
 			)
 		)

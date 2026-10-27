@@ -162,10 +162,13 @@ describe('FileService app files under .fr5a/', () => {
 		root = await mkdtemp(path.join(tmpdir(), 'fr5a-fs-'));
 		await mkdir(path.join(root, '.fr5a/chats'), { recursive: true });
 		await mkdir(path.join(root, '.fr5a/sessions/device'), { recursive: true });
+		await mkdir(path.join(root, '.fr5a/maps'), { recursive: true });
 		await mkdir(path.join(root, 'Work'), { recursive: true });
 		await writeFile(path.join(root, '.fr5a/chats/talk.md'), '# Talk\n\n*AI chat*\n');
 		await writeFile(path.join(root, '.fr5a/sessions/device/s.md'), '# Session\n');
 		await writeFile(path.join(root, '.fr5a/top.md'), '# Not a note\n');
+		await writeFile(path.join(root, '.fr5a/maps/Ideas.canvas'), '{"nodes":[],"edges":[]}');
+		await writeFile(path.join(root, '.fr5a/maps/readme.md'), '# Not a note\n');
 		await writeFile(path.join(root, 'Work/plan.md'), '# Plan\n\n![](../assets/cat.png)\n');
 		const mem = memIndex();
 		notes = mem.notes;

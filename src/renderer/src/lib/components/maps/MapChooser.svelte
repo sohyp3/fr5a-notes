@@ -22,6 +22,9 @@
 		maps = await listMaps();
 	}
 	void reload();
+	$effect(() => {
+		if (app.mapSyncVersion) void reload();
+	});
 
 	/** Why `value` can't name a map (`except`: the map being renamed). */
 	function nameError(value: string, except?: string): string | null {
@@ -66,8 +69,10 @@
 		if (to === from) return;
 		try {
 			await renameMap(from, to);
+			app.renamedMindMap(from, to);
 		} catch (err) {
 			app.notify('error', `Couldn’t rename the map: ${err instanceof Error ? err.message : err}`);
+			return;
 		}
 		if (app.activeMindMap === from) app.openMindMap(null);
 		await reload();
@@ -95,8 +100,10 @@
 		if (!ok) return;
 		try {
 			await removeMap(name);
+			app.forgotMindMap(name);
 		} catch (err) {
 			app.notify('error', `Couldn’t delete the map: ${err instanceof Error ? err.message : err}`);
+			return;
 		}
 		await reload();
 	}
@@ -130,7 +137,12 @@
 				<code>.fr5a/maps</code>, synced with your notes.
 			</p>
 		</div>
-		<button class="close" aria-label="Close mind maps" onclick={() => app.setView('editor')}>
+		<button
+			class="close"
+			title="Close mind maps"
+			aria-label="Close mind maps"
+			onclick={() => app.setView('editor')}
+		>
 			<Icon name="close" size={18} />
 		</button>
 	</header>

@@ -19,11 +19,80 @@ vi.mock('../platform', () => ({
 	}
 }));
 
-const { listMaps, readMap, renameMap, removeMap, trackSave, writeMap } = await import('./files');
+const {
+	clearMapSaveFailure,
+	guardMapWrite,
+	listMaps,
+	readMap,
+	recordMapSaveFailure,
+	registerMapEditor,
+	renameMap,
+	removeMap,
+	savedAll,
+	trackSave,
+	writeMap
+} = await import('./files');
 
 beforeEach(() => disk.clear());
 
 describe('map files', () => {
+	it('guards AI writes against active editor changes and pending saves', async () => {
+		let land!: () => void;
+		const save = new Promise<void>((done) => (land = done)).then(() => writeMap('Atlas', 'saved'));
+		trackSave('Atlas', save);
+		let available = false;
+		const unregister = registerMapEditor('Atlas', async () => available);
+		await expect(guardMapWrite('Atlas')).rejects.toThrow(/unsaved/);
+		available = true;
+		let finished = false;
+		const waiting = guardMapWrite('Atlas').then(() => {
+			finished = true;
+		});
+		await Promise.resolve();
+		expect(finished).toBe(false);
+		land();
+		await waiting;
+		expect(await readMap('Atlas')).toBe('saved');
+		unregister();
+	});
+	it('rejects bad map names before calling the platform', async () => {
+		for (const name of [null, '', 'all', '../escape', 'dir/name', '.hidden', 'bad\\name']) {
+			expect(() => readMap(name as string)).toThrow('Invalid map name');
+			expect(() => writeMap(name as string, 'x')).toThrow('Invalid map name');
+		}
+		expect(disk.size).toBe(0);
+	});
+
+	it('waits for an in-flight save after a canvas has closed', async () => {
+		let land!: () => void;
+		const save = new Promise<void>((resolve) => (land = resolve)).then(() =>
+			writeMap('Atlas', 'latest')
+		);
+		trackSave('Atlas', save);
+		let complete = false;
+		const waiting = savedAll().then(() => (complete = true));
+		await Promise.resolve();
+		expect(complete).toBe(false);
+		land();
+		await waiting;
+		expect(await readMap('Atlas')).toBe('latest');
+	});
+
+	it('does not report a successful sync after a failed map save', async () => {
+		recordMapSaveFailure('Atlas', new Error('disk full'));
+		await expect(savedAll()).rejects.toThrow('disk full');
+		clearMapSaveFailure('Atlas');
+		await expect(savedAll()).resolves.toBeUndefined();
+	});
+	it('lists newly synced maps and stops listing removed ones on the next read', async () => {
+		expect(await listMaps()).toEqual([]);
+		await writeMap('Local', '{"nodes":[]}');
+		disk.set(key('maps/Remote.canvas'), { path: 'maps/Remote.canvas', text: '{"nodes":[1]}' });
+		expect(await listMaps()).toEqual(['Local', 'Remote']);
+		expect(await readMap('Remote')).toContain('[1]');
+		disk.delete(key('maps/Local.canvas'));
+		expect(await listMaps()).toEqual(['Remote']);
+	});
 	it('renames a map whose name only changes case without losing it', async () => {
 		await writeMap('atlas', '{"nodes":[{"id":"a"}]}');
 		await renameMap('atlas', 'Atlas');

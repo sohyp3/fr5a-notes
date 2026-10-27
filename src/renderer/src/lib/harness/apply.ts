@@ -2,7 +2,8 @@ import { getAppState } from '../stores/app.svelte';
 import { platform } from '../platform';
 import { docToText, textToDoc, detectLocked } from '../editor/markdown';
 import { appendText, insertAfterLine, newNoteText, replaceText } from './edits';
-import type { WriteProposal } from './tools';
+import type { EditProposal, WriteProposal } from './tools';
+import { AbortError } from './openai';
 
 /**
  * Turns a write proposal into a concrete before/after (for the diff card) and
@@ -15,13 +16,127 @@ export interface PreparedWrite {
 	label: string;
 	before: string;
 	after: string;
-	apply(): Promise<string>;
+	apply(signal?: AbortSignal): Promise<string>;
 }
 
 /** The note buffer that "current" meant when an AI run started. */
 export interface CurrentWriteTarget {
 	id: string | null;
 	editorSession: number;
+}
+
+/** Read the editor buffer, not the last persisted copy, when this note is open. */
+function liveText(id: string): string {
+	const app = getAppState();
+	return app.editor ? docToText(app.editor) : app.activeContent;
+}
+
+async function noteText(id: string): Promise<string> {
+	const app = getAppState();
+	if (!app.notes.some((n) => n.id === id)) throw new Error(`${id} no longer exists.`);
+	if (app.activeId === id) return liveText(id);
+	return platform.readNote(id);
+}
+
+function assertSafe(id: string, text: string): void {
+	const app = getAppState();
+	const note = app.notes.find((n) => n.id === id);
+	if (
+		!note ||
+		note.locked ||
+		note.encrypted ||
+		(app.activeId === id && app.aiBlocksActive) ||
+		detectLocked(text)
+	)
+		throw new Error(`${id} is missing, locked or encrypted.`);
+}
+
+/** Targeted replacement and soft-delete both bind approval to the reviewed snapshot. */
+export async function prepareEdit(p: EditProposal): Promise<PreparedWrite> {
+	const app = getAppState();
+	const id = p.target === 'current' ? app.activeId : p.target;
+	if (!id) throw new Error('No saved note is open.');
+	if (app.activeId === id) await app.flush();
+	const before = await noteText(id);
+	assertSafe(id, before);
+	const diskBefore = await platform.readNote(id);
+	if (
+		!p.oldText ||
+		!before.includes(p.oldText) ||
+		before.indexOf(p.oldText) !== before.lastIndexOf(p.oldText)
+	)
+		throw new Error(
+			'The exact old text must occur once in the note. Read it again and choose a unique passage.'
+		);
+	if (p.oldText === p.newText) throw new Error('The edit makes no change.');
+	const after = before.replace(p.oldText, p.newText);
+	return {
+		label: id,
+		before,
+		after,
+		async apply(signal) {
+			const now = await noteText(id);
+			assertSafe(id, now);
+			if (now !== before || (await platform.readNote(id)) !== diskBefore)
+				throw new Error('The note changed since review; nothing edited.');
+			if (signal?.aborted) throw new AbortError();
+			if (app.activeId === id && app.editor) setEditorText(after);
+			else {
+				await platform.writeNote(id, after);
+				await app.refresh();
+			}
+			return `Edited ${id}`;
+		}
+	};
+}
+
+export async function prepareDelete(id: string): Promise<PreparedWrite> {
+	const app = getAppState();
+	if (app.activeId === id) await app.flush();
+	const before = await noteText(id);
+	assertSafe(id, before);
+	const diskBefore = await platform.readNote(id);
+	const title = app.notes.find((n) => n.id === id)?.title ?? id;
+	return {
+		label: `${title} (${id})`,
+		before,
+		after: '',
+		async apply(signal) {
+			const now = await noteText(id);
+			assertSafe(id, now);
+			if (now !== before || (await platform.readNote(id)) !== diskBefore)
+				throw new Error('The note changed since review; nothing deleted.');
+			if (signal?.aborted) throw new AbortError();
+			// Confirm after approval, then recheck once more before touching Trash.
+			const decision = app.confirm({
+				title: 'Move note to Trash?',
+				body: `“${title}” (${id}) will move to Trash. You can restore it later.`,
+				confirm: 'Move to Trash',
+				danger: true
+			});
+			const request = app.confirmRequest;
+			const cancel = () => {
+				if (request && app.confirmRequest === request) app.answerConfirm(false);
+			};
+			signal?.addEventListener('abort', cancel, { once: true });
+			let confirmed: boolean;
+			try {
+				if (signal?.aborted) cancel();
+				confirmed = await decision;
+			} finally {
+				signal?.removeEventListener('abort', cancel);
+			}
+			if (signal?.aborted) throw new AbortError();
+			if (!confirmed) return 'The user rejected deletion; note kept.';
+			const latest = await noteText(id);
+			assertSafe(id, latest);
+			if (latest !== before || (await platform.readNote(id)) !== diskBefore)
+				throw new Error('The note changed since review; nothing deleted.');
+			if (signal?.aborted) throw new AbortError();
+			await app.deleteNote(id);
+			return `Moved ${id} to Trash (restorable)`;
+		}
+	};
 }
 
 /** Index of the line (top-level paragraph) holding the caret, or the last line. */

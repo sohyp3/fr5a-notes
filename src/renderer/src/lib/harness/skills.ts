@@ -115,12 +115,14 @@ export function allowedTools<T>(skill: Skill | null, all: T[], nameOf: (t: T) =>
 
 const NOTE_TOOLS = ['read_note', 'list_notes', 'search_notes', 'ask_user'];
 const WEB_TOOLS = ['web_search', 'fetch_url'];
+// Existing user skills retain their explicit allowlists; map writes are never implicit.
+const MAP_READ_TOOLS = ['list_maps', 'read_map'];
 
 export const BUILTIN_SKILLS: Skill[] = [
 	{
 		name: 'clarify',
 		description: 'Interview me and turn rough notes into a clear spec',
-		tools: [...NOTE_TOOLS, 'write_note'],
+		tools: [...NOTE_TOOLS, ...MAP_READ_TOOLS, 'write_note', 'edit_note'],
 		output: 'chat',
 		provider: '',
 		prompt: `Help the user turn rough ideas in the attached note into a clear plan or spec.
@@ -143,7 +145,7 @@ Return a Markdown outline: working title, one-sentence thesis, H2 sections with 
 	{
 		name: 'draft',
 		description: 'Write or expand a section in my voice',
-		tools: [...NOTE_TOOLS, 'write_note'],
+		tools: [...NOTE_TOOLS, 'write_note', 'edit_note'],
 		output: 'insert',
 		provider: '',
 		prompt: `Write prose for the user's article. Match the tone, language and formatting of the attached note (if the note is Arabic, write Arabic).
@@ -166,8 +168,8 @@ Give the 3-7 most valuable points, most important first, each with a quote of th
 		output: 'chat',
 		provider: '',
 		prompt: `Find good sources for the attached note.
-List the key factual claims, search the web for each (web_search; fetch_url to read the most promising pages), and prefer primary sources, papers, official data and reputable outlets.
-Return a Markdown list per claim: the claim, then 1-3 sources as [title](url) with one line on what each supports. Say clearly when you found nothing solid.`
+List the key factual claims. If web search is available, search for each and read promising pages when page fetching is available; prefer primary sources, papers, official data and reputable outlets. If web search is unavailable, explain that you cannot verify sources in this run instead of inventing any.
+Return a Markdown list per claim: the claim, then 1-3 verified sources as [title](url) with one line on what each supports. Say clearly when you found nothing solid.`
 	},
 	{
 		name: 'fact-check',
@@ -175,9 +177,9 @@ Return a Markdown list per claim: the claim, then 1-3 sources as [title](url) wi
 		tools: [...NOTE_TOOLS, ...WEB_TOOLS],
 		output: 'chat',
 		provider: '',
-		prompt: `Fact-check the attached note.
+		prompt: `Fact-check the attached note. If web search is unavailable, say you cannot verify claims in this run; do not guess verdicts or invent sources.
 1. Extract every checkable factual claim (numbers, dates, names, causal claims). Skip opinions.
-2. For each, web_search and read at least one source with fetch_url when the snippet isn't conclusive.
+2. When web search is available, search each claim and read at least one source when page fetching is available and the snippet isn't conclusive.
 3. Return a Markdown table: | Claim | Verdict | Evidence | Source |, where Verdict is one of ✅ supported, ⚠️ partly / needs nuance, ❌ contradicted, ❓ unverified. Keep Evidence to one sentence; Source is a [title](url) link.
 4. End with suggested corrections for anything ⚠️ or ❌. Never invent sources — if you couldn't verify, say ❓.`
 	},

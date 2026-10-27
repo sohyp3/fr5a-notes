@@ -5,14 +5,25 @@
  * module doesn't know round-trips untouched. Pure: no Svelte, no platform, so
  * it is unit-tested in Node and cheap for the store to import on a move.
  */
-import { remapPath } from '../../../../shared/paths';
+import { APP_DIR, APP_MAPS_DIR, remapPath } from '../../../../shared/paths';
 import { ACCENTS } from '../accents';
 
-export const MAPS_DIR = 'maps';
+export const MAPS_DIR = APP_MAPS_DIR.slice(APP_DIR.length + 1);
 export const MAP_EXT = '.canvas';
 
 /** `.fr5a/`-relative path of a map file. */
-export const mapPath = (name: string): string => `${MAPS_DIR}/${name}${MAP_EXT}`;
+export function mapPath(name: string): string {
+	if (
+		typeof name !== 'string' ||
+		!name.trim() ||
+		name !== name.trim() ||
+		name.startsWith('.') ||
+		name.toLowerCase() === 'all' ||
+		/[\\/:*?"<>|\p{Cc}]/u.test(name)
+	)
+		throw new Error('Invalid map name');
+	return `${MAPS_DIR}/${name}${MAP_EXT}`;
+}
 
 /** Map name of a `listMeta('maps')` entry, or null for anything else. */
 export function mapNameOf(entry: string): string | null {

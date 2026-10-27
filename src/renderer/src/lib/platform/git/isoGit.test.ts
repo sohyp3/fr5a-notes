@@ -153,6 +153,31 @@ async function twoClones() {
 }
 
 describe('isomorphic-git sync', () => {
+	it('transfers hidden maps, assets and saved chats but ignores device sessions', async () => {
+		const a = client('a');
+		await a.sync.connect(remoteUrl);
+		write(a.dir, 'note.md', '# Note');
+		write(a.dir, '.fr5a/maps/Ideas.canvas', '{"nodes":[],"edges":[]}');
+		write(a.dir, '.fr5a/assets/photo.png', 'binary-placeholder');
+		write(a.dir, '.fr5a/chats/Talk.md', '# Talk');
+		write(a.dir, '.fr5a/sessions/.gitignore', 'device/\n');
+		write(a.dir, '.fr5a/sessions/device/private.md', '# Private');
+		await a.sync.push();
+		expect(remoteTree()).toContain('.fr5a/maps/Ideas.canvas');
+		expect(remoteTree()).not.toContain('.fr5a/sessions/device/private.md');
+		const b = client('b');
+		await b.sync.connect(remoteUrl);
+		expect(read(b.dir, '.fr5a/chats/Talk.md')).toBe('# Talk');
+		expect(read(b.dir, '.fr5a/assets/photo.png')).toBe('binary-placeholder');
+		write(a.dir, '.fr5a/maps/Ideas.canvas', '{"nodes":[{"id":"n"}],"edges":[]}');
+		await a.sync.push();
+		await b.sync.pull();
+		expect(read(b.dir, '.fr5a/maps/Ideas.canvas')).toContain('"n"');
+		fs.rmSync(path.join(a.dir, '.fr5a/maps/Ideas.canvas'));
+		await a.sync.push();
+		await b.sync.pull();
+		expect(has(b.dir, '.fr5a/maps/Ideas.canvas')).toBe(false);
+	});
 	it('clones, pushes and fast-forward pulls', async () => {
 		const { a, b } = await twoClones();
 		expect(remoteLog()).toHaveLength(1);

@@ -1,5 +1,5 @@
 import type { NoteMeta } from '../../../../shared/types';
-import { blockedReason } from './privacy';
+import { blockedReason, isHidden } from './privacy';
 import { formatResults, type SearchResult } from './web';
 import {
 	ASK_USER_PARAMETERS,
@@ -8,6 +8,8 @@ import {
 	type QuestionItem
 } from './questions';
 import type { AiConfig, ProviderProfile, ToolDef } from './types';
+import { allowedTools, type Skill } from './skills';
+import { validMapName } from './mapTools';
 
 /**
  * The harness tools. Each runs on-device against injected deps, so the same
@@ -26,6 +28,12 @@ export interface WriteProposal {
 	title?: string;
 }
 
+export interface EditProposal {
+	target: string;
+	oldText: string;
+	newText: string;
+}
+
 export interface ToolDeps {
 	profile: ProviderProfile;
 	config: AiConfig;
@@ -37,6 +45,15 @@ export interface ToolDeps {
 	ask(questions: QuestionItem[]): Promise<string[]>;
 	/** Resolves with what happened, e.g. "Applied to x.md" or "Rejected by the user". */
 	proposeWrite(p: WriteProposal): Promise<string>;
+	proposeEdit?(p: EditProposal): Promise<string>;
+	proposeDelete?(id: string): Promise<string>;
+	maps?: {
+		list(): Promise<string[]>;
+		read(name: string): Promise<string>;
+		create(name: string): Promise<string>;
+		edit(name: string, patch: unknown): Promise<string>;
+		delete(name: string): Promise<string>;
+	};
 	/** Absent when no search provider is configured. */
 	search?(query: string): Promise<SearchResult[]>;
 	fetchPage?(url: string): Promise<string>;
@@ -45,6 +62,19 @@ export interface ToolDeps {
 export interface Tool {
 	def: ToolDef;
 	run(args: Record<string, unknown>): Promise<string>;
+}
+
+/** Exactly the tools handed to the model and accepted by the loop for this run. */
+export function toolsForRun(skill: Skill | null, deps: ToolDeps): Tool[] {
+	return deps.profile.tools ? allowedTools(skill, createTools(deps), (tool) => tool.def.name) : [];
+}
+
+/** "current" is a chat attachment, not a bypass around note permissions. */
+export function canWriteCurrent(
+	useCurrent: boolean,
+	current: { id: string | null } | null
+): boolean {
+	return useCurrent && current !== null;
 }
 
 const s = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
@@ -63,8 +93,21 @@ function scoreNote(n: NoteMeta, terms: string[]): number {
 
 export function createTools(d: ToolDeps): Tool[] {
 	const canRead = (id: string) => d.allowedNoteIds === null || d.allowedNoteIds.has(id);
-	const readableNotes = () => d.notes().filter((n) => canRead(n.id));
+	const readableNotes = () =>
+		d
+			.notes()
+			.filter((n) => canRead(n.id) && (d.profile.local || !isHidden(n, d.config.localOnlyFolders)));
 	const restricted = d.allowedNoteIds !== null;
+	const eligible = (id: string): string | null => {
+		if (!canRead(id))
+			return `Cannot change "${id}": it wasn't mentioned or attached in this chat. Ask the user to mention it with @, or enable Read all notes.`;
+		const note = d.notes().find((n) => n.id === id);
+		if (!note) return `No note with id "${id}".`;
+		if (note.locked || note.encrypted) return `Cannot change "${id}": it is locked or encrypted.`;
+		if (!d.profile.local && isHidden(note, d.config.localOnlyFolders))
+			return `Cannot change "${id}": it is hidden from cloud AI.`;
+		return null;
+	};
 	const tools: Tool[] = [
 		{
 			def: {
@@ -82,6 +125,9 @@ export function createTools(d: ToolDeps): Tool[] {
 				const id = s(a.id);
 				if (!canRead(id))
 					return `Cannot read "${id}": it wasn't mentioned or attached in this chat. Ask the user to mention it with @, or ask them to turn on Read all notes.`;
+				const note = d.notes().find((n) => n.id === id);
+				if (note && !d.profile.local && isHidden(note, d.config.localOnlyFolders))
+					return blockedReason(id, null, d.profile, d.config) ?? `"${id}" is hidden from cloud AI.`;
 				if (!readableNotes().some((n) => n.id === id))
 					return `No note with id "${id}". Use list_notes or search_notes.`;
 				const content = await d.readNote(id);
@@ -92,8 +138,8 @@ export function createTools(d: ToolDeps): Tool[] {
 			def: {
 				name: 'list_notes',
 				description: restricted
-					? 'List only notes attached or mentioned in this chat (id, title, tags), optionally inside a folder.'
-					: 'List notes (id, title, tags), optionally only inside a folder.',
+					? 'List eligible attached or mentioned notes by id, title and tags, optionally in a folder; not full contents.'
+					: 'List eligible workspace notes by id, title and tags, optionally in a folder; not full contents.',
 				parameters: {
 					type: 'object',
 					properties: { folder: { type: 'string', description: 'Folder path; omit for all' } }
@@ -112,8 +158,8 @@ export function createTools(d: ToolDeps): Tool[] {
 			def: {
 				name: 'search_notes',
 				description: restricted
-					? 'Search only notes attached or mentioned in this chat by title, path, tags or opening text.'
-					: "Search the user's notes by words in the title, path, tags or opening text.",
+					? 'Search eligible attached or mentioned notes by title, path, tags or opening snippet; returns matches, not full contents.'
+					: 'Search eligible workspace notes by title, path, tags or opening snippet; returns matches, not full contents.',
 				parameters: {
 					type: 'object',
 					properties: { query: { type: 'string' } },
@@ -150,7 +196,7 @@ export function createTools(d: ToolDeps): Tool[] {
 			def: {
 				name: 'write_note',
 				description:
-					'Propose a change to a note. The user sees a diff and approves or rejects it. target: "current" (open note), "new", or a note id. mode: append (end of note), insert (at the cursor, current note only), replace (whole note).',
+					'Propose an approved note change after reading the note. The user reviews a diff. target: "current" (only if the open note is attached), "new", or an eligible note id. mode: append (end), insert (at cursor, current only), replace (whole note).',
 				parameters: {
 					type: 'object',
 					properties: {
@@ -167,8 +213,10 @@ export function createTools(d: ToolDeps): Tool[] {
 					['append', 'insert', 'replace'].includes(s(a.mode)) ? s(a.mode) : 'append'
 				) as WriteMode;
 				const target = s(a.target) || 'current';
-				if (target !== 'current' && target !== 'new' && !d.notes().some((n) => n.id === target))
-					return `No note with id "${target}".`;
+				if (target !== 'current' && target !== 'new') {
+					const reason = eligible(target);
+					if (reason) return reason;
+				}
 				return d.proposeWrite({
 					target,
 					mode,
@@ -176,8 +224,141 @@ export function createTools(d: ToolDeps): Tool[] {
 					title: s(a.title) || undefined
 				});
 			}
-		}
+		},
+		...(d.proposeEdit
+			? [
+					{
+						def: {
+							name: 'edit_note',
+							description:
+								'Propose a precise edit to an eligible note after reading it. Replace exactly one occurrence of oldText with newText; ambiguous or missing text is rejected. The user reviews a diff and must approve. target is a note id or "current" for an attached open note.',
+							parameters: {
+								type: 'object',
+								properties: {
+									target: { type: 'string' },
+									oldText: { type: 'string' },
+									newText: { type: 'string' }
+								},
+								required: ['target', 'oldText', 'newText']
+							}
+						},
+						async run(a: Record<string, unknown>) {
+							const target = s(a.target);
+							if (target !== 'current') {
+								const reason = eligible(target);
+								if (reason) return reason;
+							}
+							if (!target || !s(a.oldText) || typeof a.newText !== 'string')
+								return 'Not edited: target, nonempty oldText and newText are required.';
+							return d.proposeEdit!({ target, oldText: s(a.oldText), newText: a.newText });
+						}
+					} satisfies Tool
+				]
+			: []),
+		...(d.proposeDelete
+			? [
+					{
+						def: {
+							name: 'delete_note',
+							description:
+								'Propose moving an eligible note to Trash. Requires approval and a separate destructive confirmation; it can be restored from Trash. Pass its exact note id (not "current").',
+							parameters: {
+								type: 'object',
+								properties: { id: { type: 'string' } },
+								required: ['id']
+							}
+						},
+						async run(a: Record<string, unknown>) {
+							const id = s(a.id);
+							const reason = eligible(id);
+							return reason ?? d.proposeDelete!(id);
+						}
+					} satisfies Tool
+				]
+			: [])
 	];
+	if (d.maps) {
+		const maps = d.maps;
+		const checked = async (name: unknown, action: (name: string) => Promise<string>) => {
+			try {
+				return await action(validMapName(s(name)));
+			} catch (err) {
+				return `Map operation failed: ${err instanceof Error ? err.message : String(err)}`;
+			}
+		};
+		tools.push(
+			{
+				def: {
+					name: 'list_maps',
+					description: 'List saved mind map names (not note contents). Mind maps must be enabled.',
+					parameters: { type: 'object', properties: {} }
+				},
+				run: () => maps.list().then((names) => JSON.stringify(names))
+			},
+			{
+				def: {
+					name: 'read_map',
+					description:
+						'Read a map as structured node ids, labels, linked note ids and edges. Linked notes are metadata only: reading their contents requires separate chat permission via read_note.',
+					parameters: {
+						type: 'object',
+						properties: { name: { type: 'string' } },
+						required: ['name']
+					}
+				},
+				run: (a) => checked(a.name, maps.read)
+			},
+			{
+				def: {
+					name: 'create_map',
+					description: 'Propose a new empty mind map by name; user approval required.',
+					parameters: {
+						type: 'object',
+						properties: { name: { type: 'string' } },
+						required: ['name']
+					}
+				},
+				run: (a) => checked(a.name, maps.create)
+			},
+			{
+				def: {
+					name: 'edit_map',
+					description:
+						'Propose node and edge updates after read_map. Pass patch with nodes/edges arrays of objects with ids (upserts), removeNodes/removeEdges arrays of ids; existing unknown fields remain. File nodes must link existing note ids. Requires approval and rejects stale maps.',
+					parameters: {
+						type: 'object',
+						properties: {
+							name: { type: 'string' },
+							patch: {
+								type: 'object',
+								properties: {
+									nodes: { type: 'array', items: { type: 'object', additionalProperties: true } },
+									edges: { type: 'array', items: { type: 'object', additionalProperties: true } },
+									removeNodes: { type: 'array', items: { type: 'string' } },
+									removeEdges: { type: 'array', items: { type: 'string' } }
+								}
+							}
+						},
+						required: ['name', 'patch']
+					}
+				},
+				run: (a) => checked(a.name, (name) => maps.edit(name, a.patch))
+			},
+			{
+				def: {
+					name: 'delete_map',
+					description:
+						'Propose permanent deletion of a named mind map (not its linked notes). Requires approval and separate destructive confirmation.',
+					parameters: {
+						type: 'object',
+						properties: { name: { type: 'string' } },
+						required: ['name']
+					}
+				},
+				run: (a) => checked(a.name, maps.delete)
+			}
+		);
+	}
 
 	if (d.search) {
 		const search = d.search;

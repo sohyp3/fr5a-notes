@@ -1,5 +1,4 @@
 import { platform } from '../platform';
-import { SvelteSet } from 'svelte/reactivity';
 import { getAppState } from '../stores/app.svelte';
 import { docToText } from '../editor/markdown';
 import { getAiSettings } from './config.svelte';
@@ -8,8 +7,14 @@ import { compactDiff, diffLines } from './diff';
 import { abortable, closeCalls, runLoop } from './loop';
 import { describeError } from './errors';
 import { AbortError, ProviderError, chatCompletion } from './openai';
-import { blockedReason } from './privacy';
-import { prepareWrite, type CurrentWriteTarget, type PreparedWrite } from './apply';
+import { blockedReason, isHidden } from './privacy';
+import {
+	prepareDelete,
+	prepareEdit,
+	prepareWrite,
+	type CurrentWriteTarget,
+	type PreparedWrite
+} from './apply';
 import {
 	DEVICE_DIR,
 	forkTitle,
@@ -33,18 +38,26 @@ import {
 	BUILTIN_SKILLS,
 	SEEDED_MARKER,
 	SKILLS_DIR,
-	allowedTools,
 	loadSkillTree,
 	serializeSkill,
 	type Skill
 } from './skills';
-import { createTools, type WriteProposal } from './tools';
+import { canWriteCurrent, toolsForRun, type WriteProposal } from './tools';
+import { blankMap, mapPatch, mapSummary } from './mapTools';
+import { listMaps, readMap, writeMap, deleteMap, guardMapWrite } from '../maps/files';
+import { parseCanvas, serializeCanvas } from '../maps/canvas';
 import { parseFrontmatter, str } from './frontmatter';
 import { addUsage, runRecord, type ChatUsage, type Usage, type UsageRecord } from './usage';
 import { expandMentions, mentionKey, parseMentions, remapKey } from './mentions';
 import { fetchPage, webSearch } from './web';
 import type { QuestionItem } from './questions';
-import { OPENCODE, OPENCODE_KEY_URL, type ChatMessage, type ProviderProfile } from './types';
+import {
+	OPENCODE,
+	OPENCODE_KEY_URL,
+	SEARCH_KINDS,
+	type ChatMessage,
+	type ProviderProfile
+} from './types';
 
 /**
  * Harness runtime: tmux-like tabs, one session each. A run builds the system
@@ -81,7 +94,7 @@ export interface Question {
 
 export interface Approval {
 	label: string;
-	mode: WriteProposal['mode'];
+	mode: WriteProposal['mode'] | 'edit' | 'delete' | 'create-map' | 'edit-map' | 'delete-map';
 	diff: ReturnType<typeof compactDiff>;
 	added: number;
 	removed: number;
@@ -672,7 +685,11 @@ class HarnessState {
 		];
 		for (const id of ctx.ids) {
 			const content = id === run.current?.id ? run.current.content : await platform.readNote(id);
-			const why = blockedReason(id, content, profile, ai.config);
+			const meta = run.notes.find((n) => n.id === id);
+			const why =
+				!profile.local && meta && isHidden(meta, ai.config.localOnlyFolders)
+					? `"${id}" is hidden from cloud AI and ${profile.name} is not a local provider.`
+					: blockedReason(id, content, profile, ai.config);
 			// A note named on its own is an error; one swept in by a folder/tag is just left out.
 			if (why && explicit.includes(id))
 				throw new Error(`${why} Pick a local provider or detach it.`);
@@ -684,7 +701,15 @@ class HarnessState {
 		}
 		// Folder / tag mentions also get an index, so the model can read_note the rest.
 		for (const g of ctx.groups) {
-			const listed = g.ids.filter((id) => !skipped.includes(id));
+			const listed = g.ids.filter(
+				(id) =>
+					!skipped.includes(id) &&
+					(profile.local ||
+						!isHidden(
+							run.notes.find((n) => n.id === id)!,
+							ai.config.localOnlyFolders
+						))
+			);
 			notes.push({
 				id: `index of ${g.key}`,
 				content: `${listed.length} notes match ${g.key}:\n${listed.map((id) => `- ${id}`).join('\n')}`
@@ -818,19 +843,10 @@ class HarnessState {
 				...(run.current?.id && tab.useCurrent ? [run.current.id] : []),
 				...tab.attached
 			];
-			const system = buildSystemPrompt({
-				skillPrompt: skill?.prompt,
-				notes,
-				noteBudget: Math.floor(profile.contextTokens * 0.5),
-				readAll: tab.readAll,
-				today: today()
-			});
-			// A new message answers calls a stopped run left open (the API wants one result each).
-			if (userText !== null)
-				tab.history = [...closeCalls(tab.history), { role: 'user', content: userText }];
-			messages = [{ role: 'system', content: system }, ...tab.history];
-
 			const search = ai.config.search;
+			const searchReady =
+				!!search &&
+				(!SEARCH_KINDS.find((kind) => kind.kind === search.kind)?.needsKey || !!searchKey?.trim());
 			const first = tab.useCurrent && run.current?.id ? [run.current.id] : [];
 			const mentioned = expandMentions(
 				tab.attached,
@@ -839,30 +855,88 @@ class HarnessState {
 				MAX_INLINE_NOTES,
 				run.tabIds
 			);
-			const allowedNoteIds = new SvelteSet([
+			const allowedNoteIds = new Set([
 				...mentioned.ids,
 				...mentioned.groups.flatMap((group) => group.ids)
 			]);
-			const tools = allowedTools(
-				skill,
-				createTools({
-					profile,
-					config: ai.config,
-					notes: () => run.notes,
-					allowedNoteIds: tab.readAll ? null : allowedNoteIds,
-					readNote: (id) => {
-						if (run.notes.find((n) => n.id === id)?.encrypted) tab.keepOnDevice();
-						return id === run.current?.id
-							? Promise.resolve(run.current.content)
-							: platform.readNote(id);
-					},
-					ask: (items) => tab.ask({ items }),
-					proposeWrite: (p) => this.reviewWrite(tab, p, run.current),
-					search: search ? (q) => webSearch(platform, search, searchKey, q) : undefined,
-					fetchPage: search ? (url) => fetchPage(platform, url) : undefined
-				}),
-				(t) => t.def.name
-			);
+			const tools = toolsForRun(skill, {
+				profile,
+				config: ai.config,
+				notes: () => run.notes,
+				allowedNoteIds: tab.readAll ? null : allowedNoteIds,
+				readNote: (id) => {
+					if (run.notes.find((n) => n.id === id)?.encrypted) tab.keepOnDevice();
+					return id === run.current?.id
+						? Promise.resolve(run.current.content)
+						: platform.readNote(id);
+				},
+				ask: (items) => tab.ask({ items }),
+				proposeWrite: (p) =>
+					p.target === 'current' && !canWriteCurrent(tab.useCurrent, run.current)
+						? Promise.resolve('Cannot change the current note: it was not attached to this chat.')
+						: this.reviewWrite(tab, p, run.current),
+				proposeEdit: (p) =>
+					p.target === 'current' && !canWriteCurrent(tab.useCurrent, run.current)
+						? Promise.resolve('Cannot change the current note: it was not attached to this chat.')
+						: this.reviewChange(tab, 'edit_note', 'edit', () =>
+								prepareEdit({
+									...p,
+									target: p.target === 'current' ? (run.current?.id ?? '') : p.target
+								})
+							),
+				proposeDelete: (id) =>
+					this.reviewChange(tab, 'delete_note', 'delete', () => prepareDelete(id)),
+				maps: getAppState().settings.mindMaps
+					? {
+							list: () =>
+								getAppState().settings.mindMaps
+									? listMaps()
+									: Promise.reject(new Error('Mind maps are disabled.')),
+							read: async (name) => {
+								if (!getAppState().settings.mindMaps) return 'Mind maps are disabled.';
+								await guardMapWrite(name);
+								const text = await readMap(name);
+								return text === null
+									? `No map called “${name}”.`
+									: mapSummary(
+											name,
+											text,
+											run.notes,
+											new Set(
+												run.notes
+													.filter(
+														(n) =>
+															!n.locked &&
+															!n.encrypted &&
+															(profile.local || !isHidden(n, ai.config.localOnlyFolders))
+													)
+													.map((n) => n.id)
+											)
+										);
+							},
+							create: (name) => this.reviewMap(tab, 'create_map', name),
+							edit: (name, patch) => this.reviewMap(tab, 'edit_map', name, patch),
+							delete: (name) => this.reviewMap(tab, 'delete_map', name)
+						}
+					: undefined,
+				search:
+					searchReady && search ? (q) => webSearch(platform, search, searchKey, q) : undefined,
+				fetchPage: search ? (url) => fetchPage(platform, url) : undefined
+			});
+			const system = buildSystemPrompt({
+				skillPrompt: skill?.prompt,
+				notes,
+				noteBudget: Math.floor(profile.contextTokens * 0.5),
+				readAll: tab.readAll,
+				tools,
+				currentNoteAttached: tab.useCurrent && !!run.current,
+				localProvider: profile.local,
+				today: today()
+			});
+			// A new message answers calls a stopped run left open (the API wants one result each).
+			if (userText !== null)
+				tab.history = [...closeCalls(tab.history), { role: 'user', content: userText }];
+			messages = [{ role: 'system', content: system }, ...tab.history];
 
 			const outcome = await runLoop({
 				profile,
@@ -1015,34 +1089,126 @@ class HarnessState {
 		p: WriteProposal,
 		current: CurrentWriteTarget | null
 	): Promise<string> {
+		return this.reviewChange(tab, 'write_note', p.mode, () => prepareWrite(p, current));
+	}
+
+	private async reviewMap(
+		tab: HarnessTab,
+		tool: 'create_map' | 'edit_map' | 'delete_map',
+		name: string,
+		patch?: unknown
+	): Promise<string> {
+		const app = getAppState();
+		const mode =
+			tool === 'create_map' ? 'create-map' : tool === 'edit_map' ? 'edit-map' : 'delete-map';
+		return this.reviewChange(tab, tool, mode, async () => {
+			if (!app.settings.mindMaps) throw new Error('Mind maps are disabled.');
+			await guardMapWrite(name);
+			const names = await listMaps();
+			const existing = names.find((n) => n.toLowerCase() === name.toLowerCase());
+			if (tool === 'create_map' && existing)
+				throw new Error(`A map called “${existing}” already exists.`);
+			if (tool !== 'create_map' && !existing) throw new Error(`No map called “${name}”.`);
+			const before = tool === 'create_map' ? null : await readMap(name);
+			if (tool !== 'create_map' && before === null) throw new Error(`No map called “${name}”.`);
+			let after = tool === 'create_map' ? blankMap() : '';
+			if (tool === 'edit_map') {
+				const parsed = parseCanvas(before!);
+				if (parsed.skipped.nodes.length || parsed.skipped.edges.length)
+					throw new Error(
+						'This map has malformed nodes or edges; repair it in the map editor before AI editing.'
+					);
+				after = serializeCanvas(mapPatch(patch, parsed.doc, app.notes));
+				if (after === before) throw new Error('The map patch makes no change.');
+			}
+			return {
+				label: `mind map “${name}”${mode === 'delete-map' ? ' (permanent deletion; linked notes remain)' : ''}`,
+				before: before ?? '',
+				after,
+				async apply(signal?: AbortSignal) {
+					if (!app.settings.mindMaps) throw new Error('Mind maps were disabled; nothing changed.');
+					await guardMapWrite(name);
+					const latest = await readMap(name);
+					if (
+						latest !== before ||
+						(tool === 'create_map' &&
+							(await listMaps()).some((n) => n.toLowerCase() === name.toLowerCase()))
+					)
+						throw new Error('The map changed since review; nothing applied. Read it again.');
+					if (tool === 'edit_map') mapPatch(patch, parseCanvas(before!).doc, app.notes);
+					if (signal?.aborted) throw new AbortError();
+					if (tool === 'delete_map') {
+						const decision = app.confirm({
+							title: 'Delete mind map permanently?',
+							body: `“${name}” will be deleted. Linked notes are not deleted.`,
+							confirm: 'Delete map',
+							danger: true
+						});
+						const request = app.confirmRequest;
+						const cancel = () => {
+							if (request && app.confirmRequest === request) app.answerConfirm(false);
+						};
+						signal?.addEventListener('abort', cancel, { once: true });
+						let confirmed: boolean;
+						try {
+							if (signal?.aborted) cancel();
+							confirmed = await decision;
+						} finally {
+							signal?.removeEventListener('abort', cancel);
+						}
+						if (signal?.aborted) throw new AbortError();
+						if (!confirmed) return 'The user rejected deletion; map kept.';
+						await guardMapWrite(name);
+						if ((await readMap(name)) !== before)
+							throw new Error('The map changed during confirmation; nothing deleted.');
+						await deleteMap(name);
+						app.forgotMindMap(name);
+					} else await writeMap(name, after);
+					app.mapSyncVersion++;
+					return `${tool === 'create_map' ? 'Created' : tool === 'edit_map' ? 'Edited' : 'Deleted'} map “${name}”.`;
+				}
+			} satisfies PreparedWrite;
+		});
+	}
+
+	private async reviewChange(
+		tab: HarnessTab,
+		name: string,
+		mode: Approval['mode'],
+		prepare: () => Promise<PreparedWrite>
+	): Promise<string> {
 		let prepared: PreparedWrite;
 		try {
-			prepared = await prepareWrite(p, current);
+			prepared = await prepare();
 		} catch (err) {
-			return `Not written: ${err instanceof Error ? err.message : String(err)}`;
+			return `Not applied: ${err instanceof Error ? err.message : String(err)}`;
 		}
 		const lines = diffLines(prepared.before, prepared.after);
 		const approval: Approval = {
 			label: prepared.label,
-			mode: p.mode,
+			mode,
 			diff: compactDiff(lines),
 			added: lines.filter((l) => l.op === 'add').length,
 			removed: lines.filter((l) => l.op === 'del').length
 		};
-		const ok = await tab.confirm(approval);
-		// Keep the reviewed diff on the tool row, so the transcript shows what changed.
+		// The current tool row belongs to this call even when the user presses Stop.
 		let row: Extract<Entry, { kind: 'tool' }> | null = null;
 		for (let i = tab.entries.length - 1; i >= 0 && !row; i--) {
 			const e = tab.entries[i];
-			if (e.kind === 'tool' && e.name === 'write_note' && e.result === null) row = e;
+			if (e.kind === 'tool' && e.name === name && e.result === null) row = e;
 		}
-		if (row) row.write = { ...approval, applied: ok };
+		if (row) row.write = { ...approval, applied: false };
+		const ok = await tab.confirm(approval);
+		// Keep the reviewed diff on the tool row, so the transcript shows what changed.
 		if (!ok) return 'The user rejected this change. Ask what they want instead.';
 		try {
-			return await prepared.apply();
+			if (tab.ctl?.signal.aborted) throw new AbortError();
+			const result = await prepared.apply(tab.ctl?.signal);
+			if (row?.write) row.write.applied = !/rejected/i.test(result);
+			return result;
 		} catch (err) {
-			if (row?.write) row.write.applied = false;
-			return `Not written: ${err instanceof Error ? err.message : String(err)}`;
+			if (err instanceof AbortError) throw err;
+			return `Not applied: ${err instanceof Error ? err.message : String(err)}`;
 		}
 	}
 

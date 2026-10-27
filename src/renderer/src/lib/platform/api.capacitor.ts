@@ -29,6 +29,7 @@ import {
 	withNestedIgnored
 } from '../../../../shared/multiSync';
 import {
+	APP_DIR,
 	folderDeleteError,
 	folderMoveError,
 	isAppAssetPath,
@@ -67,7 +68,7 @@ const DIR = Directory.Data;
 export const NOTES_ROOT = 'notes';
 const TRASH_DIR = '.fr5a_trash';
 /** Hidden app folder (sessions, skills, images, maps); the walk only enters its `chats/`. */
-const META_DIR = '.fr5a';
+const META_DIR = APP_DIR;
 const MD_EXT = new Set(['.md', '.markdown', '.mdown', '.txt']);
 const STATE_PREFIX = 'fr5a:';
 const CHANGE_DEBOUNCE = 120;
@@ -813,8 +814,10 @@ export function createCapacitorPlatform(): PlatformApi {
 			await ready;
 			try {
 				return await readRaw(metaId(path));
-			} catch {
-				return null;
+			} catch (err) {
+				const code = (err as { code?: string })?.code;
+				if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'OS-PLUG-FILE-0008') return null;
+				throw err;
 			}
 		},
 		async writeMeta(path, content) {

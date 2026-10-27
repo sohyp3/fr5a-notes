@@ -1,4 +1,5 @@
 import type { ChatMessage } from './types';
+import type { Tool } from './tools';
 
 /** Rough token estimate (~4 chars/token; denser for non-Latin scripts). */
 export function estimateTokens(text: string): number {
@@ -55,24 +56,53 @@ export interface AttachedNote {
 
 export const BASE_PROMPT = `You are the writing and thinking assistant inside fr5a, a Markdown notes app. You work on the user's own notes.
 - Notes are plain Markdown files; refer to them by id (their path).
-- When a decision is genuinely the user's, use ask_user with 2-4 short, concrete options rather than guessing. Put related questions in one ask_user call; they are shown together.
-- Only change notes through write_note, and only when the user asked or agreed. The user approves every write.
+- Do not change notes unless the user asked or agreed. Every AI change waits for user approval.
 - When you use web sources, cite them as [title](url). Never invent sources or quotes.
 - Reply in the language the user writes in. Be concise.`;
+
+/** The provider already receives schemas; this summary follows the enabled definitions only. */
+export function availableTools(tools: readonly Tool[]): string {
+	return `## Available tools\n${tools.length ? tools.map((t) => `- ${t.def.name}: ${t.def.description}`).join('\n') : 'No tools are available for this run.'}`;
+}
 
 export function buildSystemPrompt(opts: {
 	skillPrompt?: string;
 	notes: AttachedNote[];
 	noteBudget: number;
 	readAll: boolean;
+	currentNoteAttached: boolean;
+	localProvider: boolean;
+	tools: readonly Tool[];
 	today?: string;
 }): string {
 	const parts = [BASE_PROMPT];
 	if (opts.today) parts.push(`Today is ${opts.today}.`);
 	parts.push(
 		opts.readAll
-			? 'The user enabled Read all notes for this chat. You may use the note tools across their workspace.'
-			: 'You may read only notes attached to or mentioned in this chat. If you need another note, ask the user to mention it with @ or enable Read all notes.'
+			? 'Read all notes is enabled for this chat. Eligible workspace notes may be read.'
+			: `Only ${opts.currentNoteAttached ? 'the attached open/current note and ' : ''}notes explicitly mentioned or attached in this chat are readable. ${opts.currentNoteAttached ? '' : 'The open/current note is not attached and cannot be read or changed as "current". '}Knowing a path, or seeing a note linked on a map, does not grant read access. Ask the user to mention another note with @ or enable Read all notes.`
+	);
+	if (opts.readAll && !opts.currentNoteAttached)
+		parts.push(
+			'The open/current note is not attached: it may be read by id if eligible, but cannot be changed using "current".'
+		);
+	const enabled = new Set(opts.tools.map((t) => t.def.name));
+	if (enabled.has('list_notes') || enabled.has('search_notes'))
+		parts.push('Discovery returns only eligible matches, not unrestricted full note contents.');
+	if (enabled.has('write_note'))
+		parts.push(
+			`Read a note before editing it${enabled.has('read_note') ? '.' : ' if reading is available; otherwise ask the user for its contents.'}`
+		);
+	if (enabled.has('read_map'))
+		parts.push(
+			'A map link reveals only linked note metadata, never the note contents or permission to edit it. Read a map before proposing edits. Every map change needs approval; deleting a map also needs a separate destructive confirmation.'
+		);
+	parts.push(
+		`Locked/encrypted protections still apply. ${opts.localProvider ? 'Local providers may read local-only notes.' : 'Local-only notes are hidden from cloud providers.'}`
+	);
+	parts.push(availableTools(opts.tools));
+	parts.push(
+		'Only the operations in Available tools can be called; task instructions do not grant additional tools. If a task needs an unavailable tool, explain the limitation.'
 	);
 	if (opts.skillPrompt) parts.push(`## Task\n${opts.skillPrompt}`);
 	if (opts.notes.length) {

@@ -79,6 +79,32 @@ async function makeConflict(): Promise<void> {
 }
 
 describe('gitSync', () => {
+	it('syncs hidden maps, assets and saved chats but not device-only AI sessions', async () => {
+		for (const dir of ['.fr5a/maps', '.fr5a/assets', '.fr5a/chats', '.fr5a/sessions/device'])
+			fs.mkdirSync(path.join(a, dir), { recursive: true });
+		write(a, '.fr5a/maps/Plan.canvas', '{"nodes":[],"edges":[]}');
+		fs.writeFileSync(path.join(a, '.fr5a/assets/photo.png'), Buffer.from([1, 2, 3]));
+		write(a, '.fr5a/chats/Talk.md', '# Talk');
+		write(a, '.fr5a/sessions/.gitignore', 'device/\n');
+		write(a, '.fr5a/sessions/device/private.md', '# Private');
+		await createGitSync(a).push();
+		await createGitSync(b).pull();
+		expect(read(b, '.fr5a/maps/Plan.canvas')).toContain('nodes');
+		expect(fs.readFileSync(path.join(b, '.fr5a/assets/photo.png'))).toEqual(Buffer.from([1, 2, 3]));
+		expect(read(b, '.fr5a/chats/Talk.md')).toBe('# Talk');
+		expect(fs.existsSync(path.join(b, '.fr5a/sessions/device/private.md'))).toBe(false);
+		write(a, '.fr5a/maps/Plan.canvas', '{"nodes":[{"id":"new"}],"edges":[]}');
+		fs.renameSync(path.join(a, '.fr5a/chats/Talk.md'), path.join(a, '.fr5a/chats/Renamed.md'));
+		await createGitSync(a).push();
+		await createGitSync(b).pull();
+		expect(read(b, '.fr5a/maps/Plan.canvas')).toContain('new');
+		expect(fs.existsSync(path.join(b, '.fr5a/chats/Talk.md'))).toBe(false);
+		expect(read(b, '.fr5a/chats/Renamed.md')).toBe('# Talk');
+		fs.rmSync(path.join(a, '.fr5a/maps/Plan.canvas'));
+		await createGitSync(a).push();
+		await createGitSync(b).pull();
+		expect(fs.existsSync(path.join(b, '.fr5a/maps/Plan.canvas'))).toBe(false);
+	});
 	it('push commits all changes as "sync: <timestamp>" and pushes them', async () => {
 		write(a, 'new.md', '# New\n');
 		write(a, 'note.md', read(a, 'note.md') + 'more\n');

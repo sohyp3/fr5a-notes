@@ -5,9 +5,20 @@
 	import Icon from './Icon.svelte';
 
 	const app = getAppState();
+	let {
+		sidebarVisible,
+		onSidebarToggle
+	}: { sidebarVisible: boolean; onSidebarToggle: () => void } = $props();
 	// macOS draws native traffic lights (top-left); don't duplicate them.
 	const isMac = platform.platform === 'darwin';
 	const phone = $derived(app.layout === 'phone');
+	const backLabel = $derived(
+		app.view !== 'graph'
+			? 'Back'
+			: app.activeMindMap !== null && app.settings.mindMaps
+				? 'Back to maps'
+				: 'Close mind maps'
+	);
 	const changeCount = $derived(app.changes?.length ?? 0);
 
 	let moreBtn = $state<HTMLButtonElement | null>(null);
@@ -101,17 +112,22 @@
 			</button>
 		{:else if phone}
 			{#if app.canGoBack}
-				<button class="icon-btn back" title="Back" aria-label="Back" onclick={() => app.back()}>
+				<button
+					class="icon-btn back"
+					title={backLabel}
+					aria-label={backLabel}
+					onclick={() => app.back()}
+				>
 					<Icon name="back" size={19} stroke={2} />
 				</button>
 			{/if}
 		{:else}
 			<button
-				class={['icon-btn', { on: app.sidebarOpen && !app.zen }]}
-				title="Toggle sidebar"
+				class={['icon-btn', { on: sidebarVisible }]}
+				title={sidebarVisible ? 'Hide navigation' : 'Show navigation'}
 				aria-label="Toggle sidebar"
-				aria-pressed={app.sidebarOpen}
-				onclick={() => app.toggleSidebar()}
+				aria-pressed={sidebarVisible}
+				onclick={onSidebarToggle}
 			>
 				<Icon name="sidebar" size={17} />
 			</button>

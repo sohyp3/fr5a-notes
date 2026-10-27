@@ -13,13 +13,14 @@
 		type Edge,
 		type Node
 	} from '@xyflow/svelte';
-	import { onDestroy } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import type { Attachment } from 'svelte/attachments';
 	import type { TagNode as TagTreeNode } from '../../../../../shared/types';
 	import { parentOf } from '../../../../../shared/paths';
 	import { resolveNoteHref } from '../../linkedNotes';
 	import {
 		cleanTag,
+		colorHex,
 		emptyCanvas,
 		excludeDeleted,
 		fromFlow,
@@ -44,7 +45,18 @@
 		type ParsedCanvas
 	} from '../../maps/canvas';
 	import { setMapApi } from '../../maps/context';
-	import { readMap, saved, trackSave, writeMap } from '../../maps/files';
+	import {
+		clearMapSaveFailure,
+		freeName,
+		listMaps,
+		readMap,
+		registerMapEditor,
+		recordMapSaveFailure,
+		saved,
+		trackSave,
+		writeMap
+	} from '../../maps/files';
+	import { mapRefreshDecision } from '../../maps/refresh';
 	import { easeInOut, ms } from '../../motion';
 	import { haptic } from '../../portal';
 	import { getAppState } from '../../stores/app.svelte';
@@ -58,6 +70,8 @@
 	import TagNode from './TagNode.svelte';
 
 	let { name }: { name: string } = $props();
+	// The keyed parent can update the prop to null before Svelte runs teardown.
+	const mapName = untrack(() => name);
 
 	type MapNode = Node<{ raw: CanvasNode }>;
 	type MapEdgeT = Edge<{ raw: CanvasEdge }>;
@@ -107,6 +121,9 @@
 	/** The canvas before a delete, for the tag nodes' exclude lists. */
 	let beforeDelete: CanvasDoc | null = null;
 	let cancelPress: (() => void) | null = null;
+	let destroyed = false;
+	let interacting = false;
+	let deferredRefresh = false;
 
 	const single = $derived(
 		selection.nodes.length === 1 && selection.edges.length === 0 ? selection.nodes[0] : null
@@ -157,14 +174,22 @@
 
 	async function load(): Promise<void> {
 		// Reopened right after closing: let that last save land first.
-		await saved(name);
-		const text = await readMap(name).catch(() => null);
-		if (text === null) {
-			app.notify('error', `There’s no map called “${name}” any more`);
-			app.openMindMap(null);
-			return;
+		try {
+			await saved(mapName);
+			if (destroyed) return;
+			const text = await readMap(mapName);
+			if (destroyed) return;
+			if (text === null) {
+				app.notify('error', `There’s no map called “${mapName}” any more`);
+				app.openMindMap(null);
+				return;
+			}
+			if (applyText(text)) status = 'ready';
+		} catch (err) {
+			if (destroyed) return;
+			failure = `Couldn’t read this map: ${err instanceof Error ? err.message : err}`;
+			status = 'error';
 		}
-		if (applyText(text)) status = 'ready';
 	}
 	void load();
 
@@ -173,10 +198,18 @@
 
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let dirty = false;
+	let localVersion = 0;
 	let chain: Promise<void> = Promise.resolve();
+	let refreshRequest = 0;
+	const unregisterExternalGuard = registerMapEditor(mapName, async () => {
+		if (status !== 'ready' || editingId !== null || interacting) return false;
+		await flush();
+		return !dirty && editingId === null && !interacting;
+	});
 
 	function scheduleSave(): void {
 		dirty = true;
+		localVersion++;
 		clearTimeout(timer);
 		timer = setTimeout(() => void flush(), 500);
 	}
@@ -188,35 +221,142 @@
 		if (!dirty || status !== 'ready') return chain;
 		dirty = false;
 		const text = serializeCanvas(current(), skipped);
+		const version = localVersion;
 		chain = chain
-			.then(() => write(text))
-			.catch((err) =>
-				app.notify('error', `Couldn’t save the map: ${err instanceof Error ? err.message : err}`)
-			);
-		trackSave(name, chain);
+			.then(() => write(text, version))
+			.catch((err) => {
+				if (version === localVersion) dirty = true;
+				recordMapSaveFailure(mapName, err);
+				app.notify('error', `Couldn’t save the map: ${err instanceof Error ? err.message : err}`);
+			});
+		trackSave(mapName, chain);
 		return chain;
 	}
 
-	async function write(text: string): Promise<void> {
+	async function write(text: string, version: number): Promise<void> {
 		if (text === diskText) return;
-		const now = await readMap(name);
-		if (now !== null && diskText !== null && now !== diskText && now !== text) {
+		const now = await readMap(mapName);
+		if (version !== localVersion) return; // A newer edit has its own queued save.
+		if (diskText !== null && now !== diskText && now !== text) {
+			if (destroyed) {
+				await saveRecovery(text);
+				clearMapSaveFailure(mapName);
+				return;
+			}
 			const reload = await app.confirm({
 				title: 'This map changed on disk',
-				body: `“${name}” was changed somewhere else (a sync?) since it opened here. Reload that version, or keep yours and save it over it.`,
+				body: `“${mapName}” was changed or removed somewhere else (a sync?) since it opened here. Reload that version, or keep yours and save it over it.`,
 				confirm: 'Reload',
 				cancel: 'Keep mine'
 			});
+			if (version !== localVersion) return;
+			if (destroyed) {
+				await saveRecovery(text);
+				clearMapSaveFailure(mapName);
+				return;
+			}
+			// Another sync may have landed while the decision was open.
+			if ((await readMap(mapName)) !== now) {
+				scheduleSave();
+				return;
+			}
 			if (reload) {
-				applyText(now);
+				if (now === null) removedBySync();
+				else applyText(now);
 				return;
 			}
 		}
-		await writeMap(name, text);
+		if (version !== localVersion) return;
+		await writeMap(mapName, text);
 		diskText = text;
+		clearMapSaveFailure(mapName);
 	}
 
-	onDestroy(() => void flush());
+	async function saveRecovery(text: string): Promise<void> {
+		const copy = freeName(`${mapName} local copy`, await listMaps());
+		await writeMap(copy, text);
+		app.notify('error', `“${mapName}” changed elsewhere. Your edits were saved as “${copy}”.`);
+	}
+
+	function removedBySync(): void {
+		if (destroyed) return;
+		app.notify('ok', `“${mapName}” was removed or renamed by sync. See the map list.`);
+		app.forgotMindMap(mapName);
+		app.openMindMap(null);
+	}
+
+	/** Sync does not notify the map watcher; compare the file, not its mtime. */
+	async function refreshAfterSync(): Promise<void> {
+		const request = ++refreshRequest;
+		if (interacting) {
+			deferredRefresh = true;
+			return;
+		}
+		await chain;
+		if (destroyed || request !== refreshRequest || status !== 'ready') return;
+		const text = await readMap(mapName).catch((err) => {
+			if (!destroyed)
+				app.notify(
+					'error',
+					`Couldn’t refresh the map: ${err instanceof Error ? err.message : err}`
+				);
+			return undefined;
+		});
+		if (destroyed || text === undefined || request !== refreshRequest || status !== 'ready') return;
+		const local = dirty || editingId !== null || interacting;
+		const decision = mapRefreshDecision(diskText, text, local);
+		if (decision === 'unchanged') return;
+		if (decision === 'removed') {
+			removedBySync();
+			return;
+		}
+		if (decision === 'reload') {
+			applyText(text!);
+			return;
+		}
+		const reload = await app.confirm({
+			title: 'This map changed on disk',
+			body: `“${mapName}” changed during sync while you had unsaved edits. Reload the synced version, or keep yours and save it over it.`,
+			confirm: 'Reload',
+			cancel: 'Keep mine'
+		});
+		if (destroyed || request !== refreshRequest || status !== 'ready') return;
+		// Recheck after the dialog: another edit or sync must not be silently lost.
+		const latest = await readMap(mapName).catch((err) => {
+			if (!destroyed)
+				app.notify(
+					'error',
+					`Couldn’t refresh the map: ${err instanceof Error ? err.message : err}`
+				);
+			return undefined;
+		});
+		if (destroyed || latest === undefined || request !== refreshRequest) return;
+		if (latest !== text) {
+			void refreshAfterSync();
+			return;
+		}
+		if (reload) {
+			clearTimeout(timer);
+			dirty = false;
+			editingId = null;
+			if (text === null) removedBySync();
+			else applyText(text);
+		} else {
+			// The user explicitly chose to overwrite this particular remote version.
+			diskText = text;
+			scheduleSave();
+		}
+	}
+	$effect(() => {
+		if (app.mapSyncVersion && status === 'ready') void refreshAfterSync();
+	});
+
+	onDestroy(() => {
+		unregisterExternalGuard();
+		destroyed = true;
+		refreshRequest++;
+		void flush();
+	});
 	// Closing the window / quitting mid-debounce: the store's leave hook writes it too.
 	onDestroy(app.beforeLeave(flush));
 
@@ -280,6 +420,14 @@
 	function commit(): void {
 		doc = current();
 		scheduleSave();
+	}
+
+	function interactionEnd(): void {
+		interacting = false;
+		if (deferredRefresh) {
+			deferredRefresh = false;
+			void refreshAfterSync();
+		}
 	}
 
 	function undo(): void {
@@ -532,14 +680,25 @@
 	}
 
 	function colorMenu(ids: string[], at: { x: number; y: number }): void {
+		const colors = ids.map((id) => rawOf(id)?.color);
+		const chosen =
+			colors.length && colors.every((color) => color === colors[0])
+				? (colors[0] ?? null)
+				: undefined;
 		menu = {
 			title: 'Color',
 			at,
 			items: [
-				{ label: 'No color', icon: 'off', action: () => setColor(ids, null) },
+				{
+					label: 'No color',
+					icon: 'off',
+					selected: chosen === null,
+					action: () => setColor(ids, null)
+				},
 				...PRESETS.map((c): MenuItem => ({
 					label: COLOR_NAMES[c],
-					icon: 'on',
+					swatch: colorHex(c, app.theme) ?? undefined,
+					selected: chosen === c,
 					action: () => setColor(ids, c)
 				}))
 			]
@@ -686,6 +845,10 @@
 		if (c.source === c.target) return false;
 		checkpoint();
 		return edgeOf(link(c.source, c.target));
+	}
+	function commitInteraction(): void {
+		commit();
+		interactionEnd();
 	}
 
 	function deselect(): boolean {
@@ -845,7 +1008,7 @@
 
 	function moreMenu(at: { x: number; y: number }): void {
 		menu = {
-			title: name,
+			title: mapName,
 			at,
 			items: [
 				{ label: 'Tidy', icon: 'tidy', action: () => void tidy() },
@@ -879,7 +1042,7 @@
 	}}
 />
 
-<section class={['map', { touch: app.touch }]} aria-label={`Mind map ${name}`} bind:this={host}>
+<section class={['map', { touch: app.touch }]} aria-label={`Mind map ${mapName}`} bind:this={host}>
 	{#if status === 'loading'}
 		<p class="state">Opening…</p>
 	{:else if status === 'error'}
@@ -910,13 +1073,19 @@
 			isValidConnection={(c) => c.source !== c.target}
 			onbeforeconnect={connectEdge}
 			onconnect={commit}
+			onconnectstart={() => (interacting = true)}
+			onconnectend={interactionEnd}
 			onnodedragstart={() => {
 				cancelPress?.();
+				interacting = true;
 				checkpoint();
 			}}
-			onnodedragstop={commit}
-			onselectiondragstart={checkpoint}
-			onselectiondragstop={commit}
+			onnodedragstop={commitInteraction}
+			onselectiondragstart={() => {
+				interacting = true;
+				checkpoint();
+			}}
+			onselectiondragstop={commitInteraction}
 			onbeforedelete={async () => {
 				if (editingId) return false;
 				beforeDelete = current();
@@ -949,6 +1118,7 @@
 				event.preventDefault();
 				addMenu({ x: event.clientX, y: event.clientY });
 			}}
+			proOptions={{ hideAttribution: true }}
 		>
 			<Background variant={BackgroundVariant.Dots} gap={snap ? 10 : 24} size={1.2} />
 
@@ -958,8 +1128,8 @@
 					{#if app.layout !== 'phone'}
 						<button
 							class="ib"
-							title="All maps"
-							aria-label="All maps"
+							title="Back to maps"
+							aria-label="Back to maps"
 							onclick={() => app.openMindMap(null)}><Icon name="back" size={18} /></button
 						>
 					{/if}
@@ -968,7 +1138,7 @@
 							><Icon name="plus" size={18} /></button
 						>
 					{:else}
-						<span class="name" title={name}>{name}</span>
+						<span class="name" title={mapName}>{mapName}</span>
 						<span class="sep"></span>
 						<button class="ib" title="Add an idea" aria-label="Add an idea" onclick={addConcept}
 							><Icon name="concept" size={17} /></button
@@ -1024,8 +1194,8 @@
 						<span class="sep"></span>
 						<button
 							class="ib"
-							title="Close"
-							aria-label="Close mind map"
+							title="Close mind maps"
+							aria-label="Close mind maps"
 							onclick={() => app.setView('editor')}><Icon name="close" size={18} /></button
 						>
 					{/if}

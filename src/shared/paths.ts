@@ -142,6 +142,8 @@ export const APP_DIR = '.fr5a';
 export const APP_ASSETS_DIR = '.fr5a/assets';
 /** "Save to notes" AI chats: the one hidden folder the note index scans. */
 export const APP_CHATS_DIR = '.fr5a/chats';
+/** Saved JSON Canvas maps (not part of the note index). */
+export const APP_MAPS_DIR = '.fr5a/maps';
 /** Where images went before they moved into `.fr5a/` (workspace root). */
 export const LEGACY_ASSETS_DIR = 'assets';
 /** The saved-chats folder older versions defaulted to. */

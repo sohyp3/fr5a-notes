@@ -987,7 +987,11 @@
 					<button class="ghost" onclick={() => tab.stop()} title="Stop the run">Stop</button>
 					<span class="spacer"></span>
 					<button class="ghost" onclick={() => tab.settle(false)}>Reject</button>
-					<button class="primary" onclick={() => tab.settle(true)}>Apply</button>
+					<button class="primary" onclick={() => tab.settle(true)}
+						>{a.mode === 'delete' || a.mode === 'delete-map'
+							? 'Continue to confirmation'
+							: 'Apply'}</button
+					>
 				</div>
 			</div>
 		{:else}

@@ -22,8 +22,8 @@
 	<div class="map-shell">
 		<!-- Phones go back with the title bar's Back (and keep the graph legend's corner). -->
 		{#if app.settings.mindMaps && app.layout !== 'phone'}
-			<button class="chooser-back" onclick={() => app.openMindMap(null)}>
-				<Icon name="back" size={17} /> Maps
+			<button class="chooser-back" aria-label="Back to maps" onclick={() => app.openMindMap(null)}>
+				<Icon name="back" size={17} /> Back to maps
 			</button>
 		{/if}
 		{#await graph then m}<m.default />{/await}

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+	APP_ASSETS_DIR,
+	APP_CHATS_DIR,
+	APP_MAPS_DIR,
 	cleanChatsFolder,
 	cleanFolder,
 	isAppAssetPath,
@@ -56,6 +59,11 @@ describe('paths', () => {
 });
 
 describe('app files under .fr5a/', () => {
+	it('keeps synced app data in hidden folders', () => {
+		expect([APP_ASSETS_DIR, APP_CHATS_DIR, APP_MAPS_DIR]).toEqual([
+			'.fr5a/assets', '.fr5a/chats', '.fr5a/maps'
+		]);
+	});
 	it('lets images into .fr5a/assets only', () => {
 		expect(isAppAssetPath('.fr5a/assets/a.png')).toBe(true);
 		expect(isAppAssetPath('.fr5a/assets/sub/a.png')).toBe(true);

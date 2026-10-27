@@ -57,6 +57,21 @@ function fakeApi(): void {
 		}
 	};
 	const metaFiles: Record<string, string> = {};
+	const syncDoneListeners = new Set<() => void>();
+	const syncHarness = {
+		done: () => {
+			for (const cb of syncDoneListeners) cb();
+		},
+		holdWrite: false,
+		failRead: false,
+		holdRead: false,
+		readStarted: false,
+		releaseRead: () => {},
+		writeStarted: false,
+		releaseWrite: () => {},
+		pushSnapshot: {} as Record<string, string>
+	};
+	(window as unknown as { __syncHarness: typeof syncHarness }).__syncHarness = syncHarness;
 	const metaWrites: string[] = [];
 	// Saved images (path → byte count); every workspace image shows as a 400×200 SVG.
 	const assets: Record<string, number> = {};
@@ -95,6 +110,14 @@ function fakeApi(): void {
 		const { messages } = JSON.parse(body) as { messages: { role: string; content: string }[] };
 		const last = messages[messages.length - 1];
 		const say = (content: string) => sse({ choices: [{ delta: { content } }] });
+		if (last.role === 'user' && last.content === 'edit plan precisely?')
+			return call('edit_note', {
+				target: 'current',
+				oldText: 'first line',
+				newText: 'edited line'
+			});
+		if (last.role === 'user' && last.content === 'trash plan?')
+			return call('delete_note', { id: 'Work/plan.md' });
 		// "context?" → report which notes the system prompt carried.
 		if (last.role === 'user' && last.content.includes('context?')) {
 			const ids = [...messages[0].content.matchAll(/<note id="([^"]+)">/g)].map((m) => m[1]);
@@ -257,6 +280,10 @@ function fakeApi(): void {
 		},
 		deleteNote: async (id: string) => {
 			trashed.push(id);
+			if (id === 'Work/plan.md') {
+				trash[`.fr5a_trash/${id}`] = files[id];
+				delete files[id];
+			}
 		},
 		exportPdf: async (id: string) => {
 			pdfExports.push(id);
@@ -399,8 +426,19 @@ function fakeApi(): void {
 			}
 			return { moved: plan.moves.length, rewritten: plan.rewrites.length, skipped: plan.skipped };
 		},
-		readMeta: async (rel: string) => metaFiles[rel] ?? null,
+		readMeta: async (rel: string) => {
+			if (syncHarness.holdRead && rel.endsWith('.canvas')) {
+				syncHarness.readStarted = true;
+				await new Promise<void>((resolve) => (syncHarness.releaseRead = resolve));
+			}
+			if (syncHarness.failRead && rel.endsWith('.canvas')) throw new Error('EIO');
+			return metaFiles[rel] ?? null;
+		},
 		writeMeta: async (rel: string, content: string) => {
+			if (syncHarness.holdWrite && rel.endsWith('.canvas')) {
+				syncHarness.writeStarted = true;
+				await new Promise<void>((resolve) => (syncHarness.releaseWrite = resolve));
+			}
 			metaFiles[rel] = content;
 			metaWrites.push(rel);
 		},
@@ -420,7 +458,11 @@ function fakeApi(): void {
 		maximize: async () => {},
 		close: async () => {},
 		syncPull: ok,
-		syncPush: ok,
+		syncPush: async () => {
+			syncHarness.pushSnapshot = { ...metaFiles };
+			syncHarness.done();
+			return { ok: true, result: { status: 'ok' } } as const;
+		},
 		syncResolve: ok,
 		syncAbort: ok,
 		syncConflicts: async () => [],
@@ -466,7 +508,10 @@ function fakeApi(): void {
 			return () => {};
 		},
 		onSyncConflict: noop,
-		onSyncDone: noop,
+		onSyncDone: (cb: () => void) => {
+			syncDoneListeners.add(cb);
+			return () => syncDoneListeners.delete(cb);
+		},
 		onNotesChanged: noop
 	};
 }

@@ -333,6 +333,9 @@ class AppState {
 	view = $state<View>('editor');
 	/** null opens the chooser; 'all' is the automatic graph; else a map's name (`.fr5a/maps/<name>.canvas`). */
 	activeMindMap = $state<string | 'all' | null>(null);
+	/** Last opened map, even after Back reaches the chooser. */
+	private lastMindMap: string | null = null;
+	private mapOpenRequest = 0;
 	/** Lets the active graph surface dismiss transient UI before navigation. */
 	graphDismiss: (() => boolean) | null = null;
 	/** Zen mode hides the sidebar + note list and centres the editor. */
@@ -355,6 +358,8 @@ class AppState {
 
 	/** Git sync in flight ('pull' | 'push'), or null when idle. */
 	syncing = $state<'pull' | 'push' | null>(null);
+	/** Bumped when a completed sync may have changed hidden map files. */
+	mapSyncVersion = $state(0);
 	/** Last sync outcome shown in the titlebar; errors stay until dismissed. */
 	/** Inline conflict resolver open (hosts with `conflictsInline`, i.e. Android). */
 	conflictOpen = $state(false);
@@ -497,9 +502,9 @@ class AppState {
 		// Folder privacy (hidden from cloud AI) shows in the sidebar and list.
 		if (this.settings.ai) void getAiSettings().load();
 		await this.refresh();
-		// A map that's gone by now sends the chooser back (MindMaps.svelte).
+		// Remember the last opened map separately from the current chooser location.
 		const lastMap = await platform.getState<string>('lastMindMap');
-		if (typeof lastMap === 'string' && lastMap) this.activeMindMap = lastMap;
+		if (typeof lastMap === 'string' && lastMap) this.lastMindMap = lastMap;
 
 		if (this.settings.tabs) {
 			const tabs = (await platform.getState<string[]>('tabs')) ?? [];
@@ -529,6 +534,7 @@ class AppState {
 		// Git sync: reload from disk after a clean sync; surface conflicts.
 		platform.onSyncDone(() => {
 			this.conflictOpen = false;
+			this.mapSyncVersion++;
 			void this.reloadFromDisk().then(() => this.refreshChanges());
 		});
 		platform.onSyncConflict((files) => {
@@ -954,6 +960,11 @@ class AppState {
 
 	selectTag(path: string | null): void {
 		this.view = 'editor';
+		if (!this.listOpen) {
+			this.listOpen = true;
+			this.persistPanes();
+		}
+		this.zen = false;
 		this.trashOpen = false;
 		this.selectedFolder = null;
 		// Touch layouts: tapping a tag always drills into it (no toggle-off).
@@ -1017,15 +1028,64 @@ class AppState {
 	/** Mod+G: reopen the last map (or the graph); a missing map falls back to the chooser. */
 	openGraph(): void {
 		if (!this.graphEnabled) return;
-		this.activeMindMap = this.mapTarget(this.activeMindMap);
-		this.setView('graph');
+		const target = this.mapTarget(this.lastMindMap);
+		// The sidebar entry and Mod+G must not destroy the open canvas (undo, selection, viewport).
+		if (this.view === 'graph' && this.activeMindMap === target) return;
+		const request = ++this.mapOpenRequest;
+		if (!target || target === 'all') {
+			this.activeMindMap = target;
+			this.setView('graph');
+			return;
+		}
+		// Only load map persistence when a saved map is actually being reopened.
+		// Do not show the chooser while checking: it unmounts an existing map.
+		void (async () => {
+			try {
+				const { readMap, saved } = await import('../maps/files');
+				await saved(target);
+				const text = await readMap(target);
+				if (request !== this.mapOpenRequest) return;
+				if (text === null) {
+					this.lastMindMap = null;
+					void platform.setState('lastMindMap', null);
+				}
+				this.activeMindMap = text === null ? null : target;
+				this.setView('graph');
+			} catch (err) {
+				if (request === this.mapOpenRequest)
+					this.notify(
+						'error',
+						`Couldn’t open the map: ${err instanceof Error ? err.message : err}`
+					);
+			}
+		})();
+	}
+
+	/** A successful rename keeps the last-map shortcut pointed at the same map. */
+	renamedMindMap(from: string, to: string): void {
+		if (this.lastMindMap !== from) return;
+		++this.mapOpenRequest;
+		this.lastMindMap = to;
+		void platform.setState('lastMindMap', to);
+	}
+
+	/** A successful deletion clears only the remembered map it removed. */
+	forgotMindMap(name: string): void {
+		if (this.lastMindMap !== name) return;
+		++this.mapOpenRequest;
+		this.lastMindMap = null;
+		void platform.setState('lastMindMap', null);
 	}
 
 	openMindMap(id: string | 'all' | null): void {
 		if (!this.graphEnabled) return;
+		++this.mapOpenRequest;
 		this.activeMindMap = this.mapTarget(id);
 		this.setView('graph');
-		void platform.setState('lastMindMap', this.activeMindMap);
+		if (this.activeMindMap !== null) {
+			this.lastMindMap = this.activeMindMap;
+			void platform.setState('lastMindMap', this.lastMindMap);
+		}
 	}
 
 	/**
@@ -1874,6 +1934,7 @@ class AppState {
 	// --- navigation / modes ------------------------------------------------
 
 	setView(view: View): void {
+		if (view !== 'graph') ++this.mapOpenRequest;
 		this.view = view;
 		this.drawerOpen = false;
 		this.swipeOpen = null;
@@ -2152,6 +2213,14 @@ class AppState {
 		this.showSyncMessage(null);
 		try {
 			await this.flush();
+			// Let the open canvas land its debounced edits before Git snapshots the tree.
+			await Promise.all([...this.leaveHooks].map((flush) => flush()));
+			// A closed canvas no longer owns a leave hook, but its teardown save may
+			// still be in flight. Keep the map module lazy until sync is requested.
+			if (this.settings.mindMaps) {
+				const { savedAll } = await import('../maps/files');
+				await savedAll();
+			}
 			const res = await (op === 'pull' ? platform.syncPull() : platform.syncPush());
 			if (!res.ok) {
 				this.showSyncMessage('error', syncErrorMessage(res.error));
