@@ -169,7 +169,10 @@ async function checkBackWhileSaving(p: Page, touch: boolean): Promise<void> {
 	await expect(p.getByRole('alertdialog', { name: 'This map changed on disk' })).toHaveCount(0);
 }
 
-test('Back while saving keeps the original map on phone and desktop', async ({ browser, page }, info) => {
+test('Back while saving keeps the original map on phone and desktop', async ({
+	browser,
+	page
+}, info) => {
 	await checkBackWhileSaving(page, true);
 	if (info.project.name === 'phone 390x844') {
 		const d = await desktopPage(browser);

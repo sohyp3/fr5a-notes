@@ -12,13 +12,13 @@ The two blocking issues from the first review are fixed. Back during a save now 
 
 ## Score breakdown
 
-| Area | Result | Points |
-| --- | --- | --- |
-| Hidden synced data and path hygiene | Maps/assets/chats still hidden and carried by both Git implementations; `APP_MAPS_DIR` is centralised and map names are validated; no real Android/two-device run | 29 / 30 |
-| Chooser and open-map refresh after sync | Clean reload, dirty conflict, remote removal, chooser refresh and last-map tracking work; removal is explained; a late-started save can still miss the sync gate | 24 / 25 |
-| Pending/debounced edits and changed-on-disk coordination | Stable map name, awaited closed-map saves, read-error handling, destroyed guards and interaction deferral are in place; a stale save failure can block sync | 27 / 30 |
-| Tests and platform verification | Strong unit coverage plus a sync-capable fake API and e2e tests; the committed Back test misses the debounce window, and no real device/two-repo run was done | 12 / 15 |
-| **Total** | | **92 / 100** |
+| Area                                                     | Result                                                                                                                                                            | Points       |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| Hidden synced data and path hygiene                      | Maps/assets/chats still hidden and carried by both Git implementations; `APP_MAPS_DIR` is centralised and map names are validated; no real Android/two-device run | 29 / 30      |
+| Chooser and open-map refresh after sync                  | Clean reload, dirty conflict, remote removal, chooser refresh and last-map tracking work; removal is explained; a late-started save can still miss the sync gate  | 24 / 25      |
+| Pending/debounced edits and changed-on-disk coordination | Stable map name, awaited closed-map saves, read-error handling, destroyed guards and interaction deferral are in place; a stale save failure can block sync       | 27 / 30      |
+| Tests and platform verification                          | Strong unit coverage plus a sync-capable fake API and e2e tests; the committed Back test misses the debounce window, and no real device/two-repo run was done     | 12 / 15      |
+| **Total**                                                |                                                                                                                                                                   | **92 / 100** |
 
 ---
 
@@ -117,26 +117,26 @@ The fake `onSyncDone` event and the two-repo Git tests cover the file semantics,
 
 ## Edge checklist
 
-| Concern | Result |
-| --- | --- |
-| `.fr5a/maps`, `.fr5a/assets`, `.fr5a/chats` hidden from the note tree | Pass: existing path/file-service tests |
-| Both Git implementations carry hidden maps/assets/chats | Pass: `gitSync.test.ts`, `isoGit.test.ts` |
-| Device-only AI sessions stay out of sync | Pass in both repo tests via `sessions/.gitignore` |
-| Clean open map reloads a remote change | Pass: committed e2e plus `refresh.test.ts` |
-| Local dirty edit + remote change | Pass: conflict dialog, Reload/Keep mine e2e |
-| Remote delete while clean | Pass: chooser plus “removed or renamed” notice |
-| Remote delete while dirty | Pass at the pure-decision level; no dedicated e2e for delete-with-dirty |
-| Chooser list refreshes after sync | Code path present (`MapChooser.svelte:25-28`); not directly asserted in e2e |
-| Open dirty map save waits before sync push | Pass: leave hook plus `savedAll` |
-| Map closed, then push immediately | Pass: committed e2e holds the write and asserts the push waits |
-| Back while a save is debounced | Pass: throwaway Playwright repro; committed test uses a later timing |
-| Phone/Android Back from a dirty map | Pass on the phone e2e viewport; real Android not run |
-| Transient read error / permission error | Pass: inline load error / refresh notice; desktop and Android unit tests |
-| Sync during a node drag / connection | Code defers the refresh; no automated test |
-| Remote rename while open | Treated as removal with a notice; no stale last-map fallback |
-| Media and saved chats survive rename/delete across repos | Pass at file level in repo tests; no in-app asset-reference check |
-| Two real devices/repositories | Not run |
-| Android map sync end-to-end | Not run; unit tests cover `readMeta`/`writeMeta`/`listMeta` |
+| Concern                                                               | Result                                                                      |
+| --------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `.fr5a/maps`, `.fr5a/assets`, `.fr5a/chats` hidden from the note tree | Pass: existing path/file-service tests                                      |
+| Both Git implementations carry hidden maps/assets/chats               | Pass: `gitSync.test.ts`, `isoGit.test.ts`                                   |
+| Device-only AI sessions stay out of sync                              | Pass in both repo tests via `sessions/.gitignore`                           |
+| Clean open map reloads a remote change                                | Pass: committed e2e plus `refresh.test.ts`                                  |
+| Local dirty edit + remote change                                      | Pass: conflict dialog, Reload/Keep mine e2e                                 |
+| Remote delete while clean                                             | Pass: chooser plus “removed or renamed” notice                              |
+| Remote delete while dirty                                             | Pass at the pure-decision level; no dedicated e2e for delete-with-dirty     |
+| Chooser list refreshes after sync                                     | Code path present (`MapChooser.svelte:25-28`); not directly asserted in e2e |
+| Open dirty map save waits before sync push                            | Pass: leave hook plus `savedAll`                                            |
+| Map closed, then push immediately                                     | Pass: committed e2e holds the write and asserts the push waits              |
+| Back while a save is debounced                                        | Pass: throwaway Playwright repro; committed test uses a later timing        |
+| Phone/Android Back from a dirty map                                   | Pass on the phone e2e viewport; real Android not run                        |
+| Transient read error / permission error                               | Pass: inline load error / refresh notice; desktop and Android unit tests    |
+| Sync during a node drag / connection                                  | Code defers the refresh; no automated test                                  |
+| Remote rename while open                                              | Treated as removal with a notice; no stale last-map fallback                |
+| Media and saved chats survive rename/delete across repos              | Pass at file level in repo tests; no in-app asset-reference check           |
+| Two real devices/repositories                                         | Not run                                                                     |
+| Android map sync end-to-end                                           | Not run; unit tests cover `readMeta`/`writeMeta`/`listMeta`                 |
 
 ---
 

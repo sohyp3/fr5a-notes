@@ -16,6 +16,11 @@
 		write_note: 'Change',
 		edit_note: 'Edit note',
 		delete_note: 'Move to Trash',
+		list_maps: 'Listed maps',
+		read_map: 'Read map',
+		create_map: 'Create map',
+		edit_map: 'Edit map',
+		delete_map: 'Delete map',
 		web_search: 'Web search',
 		fetch_url: 'Read page'
 	};
@@ -42,7 +47,7 @@
 	/** One-line summary: the most telling argument. */
 	const summary = $derived.by(() => {
 		const pick = args.find(([k]) =>
-			['query', 'id', 'url', 'target', 'folder', 'question', 'questions'].includes(k)
+			['query', 'id', 'name', 'url', 'target', 'folder', 'question', 'questions'].includes(k)
 		);
 		const text = (pick ?? args[0])?.[1] ?? '';
 		return text.replace(/\s+/g, ' ').slice(0, 120);
@@ -55,7 +60,7 @@
 		if (r === '(cancelled)') return 'cancelled';
 		if (entry.write && !entry.write.applied) return /rejected/i.test(r) ? 'rejected' : 'failed';
 		if (
-			/^(Error:|Not written|Not applied|Not edited|Cannot change|Unknown tool|Invalid JSON|No note with id|Search failed|HTTP \d|Withheld)/.test(
+			/^(Error:|Not written|Not applied|Not edited|Cannot change|Unknown tool|Invalid JSON|No note with id|Search failed|Map operation failed|No map called|HTTP \d|Withheld)/.test(
 				r
 			)
 		)

@@ -61,7 +61,9 @@ describe('paths', () => {
 describe('app files under .fr5a/', () => {
 	it('keeps synced app data in hidden folders', () => {
 		expect([APP_ASSETS_DIR, APP_CHATS_DIR, APP_MAPS_DIR]).toEqual([
-			'.fr5a/assets', '.fr5a/chats', '.fr5a/maps'
+			'.fr5a/assets',
+			'.fr5a/chats',
+			'.fr5a/maps'
 		]);
 	});
 	it('lets images into .fr5a/assets only', () => {

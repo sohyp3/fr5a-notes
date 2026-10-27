@@ -4,7 +4,7 @@
 	import { online } from 'svelte/reactivity/window';
 	import { getAppState } from '../../stores/app.svelte';
 	import { getAiSettings } from '../../harness/config.svelte';
-	import { getHarness, type Entry } from '../../harness/harness.svelte';
+	import { getHarness, type Approval, type Entry } from '../../harness/harness.svelte';
 	import { fromKey, mentionText, type Mention } from '../../harness/mentions';
 	import { describeError } from '../../harness/errors';
 	import { flattenTagTree } from '../../editor/TagSuggest';
@@ -48,6 +48,17 @@
 	const skill = $derived(tab ? h.skill(tab.skill) : null);
 	const ctx = $derived(tab ? h.context(tab) : null);
 	const phone = $derived(app.layout === 'phone');
+
+	const MODE_LABEL: Record<Approval['mode'], string> = {
+		append: 'append',
+		replace: 'replace',
+		insert: 'insert',
+		edit: 'edit',
+		delete: 'delete',
+		'create-map': 'Create map',
+		'edit-map': 'Edit map',
+		'delete-map': 'Delete map'
+	};
 
 	let inputEl: HTMLTextAreaElement | undefined = $state();
 	let scroller: HTMLDivElement | undefined = $state();
@@ -976,13 +987,23 @@
 				in:fly={{ y: 16, duration: ms.pane }}
 			>
 				<div class="dock-head">
-					<span class="dock-title">Review change</span>
+					<span class="dock-title"
+						>{a.mode.endsWith('-map') ? 'Review map change' : 'Review change'}</span
+					>
 					<span class="stat add">+{a.added}</span><span class="stat del">−{a.removed}</span>
 				</div>
-				<p class="what"><strong>{a.mode}</strong> → {a.label}</p>
-				<div class="dock-body">
-					<DiffView lines={a.diff} numbers={false} />
-				</div>
+				<p class="what"><strong>{MODE_LABEL[a.mode] ?? a.mode}</strong> → {a.label}</p>
+				{#if a.summary?.length}
+					<ul class="change-list">
+						{#each a.summary as line (line)}
+							<li>{line}</li>
+						{/each}
+					</ul>
+				{:else}
+					<div class="dock-body">
+						<DiffView lines={a.diff} numbers={false} />
+					</div>
+				{/if}
 				<div class="dock-foot">
 					<button class="ghost" onclick={() => tab.stop()} title="Stop the run">Stop</button>
 					<span class="spacer"></span>
@@ -1837,6 +1858,19 @@
 	}
 	.what strong {
 		color: var(--text);
+	}
+	.change-list {
+		flex: 1 1 auto;
+		min-height: 0;
+		overflow-y: auto;
+		margin: 0;
+		padding: 0 0 0 18px;
+		font-size: 12.5px;
+		line-height: 1.55;
+		color: var(--text);
+	}
+	.change-list li::marker {
+		color: var(--text-faint);
 	}
 	.dock-body {
 		flex: 1 1 auto;

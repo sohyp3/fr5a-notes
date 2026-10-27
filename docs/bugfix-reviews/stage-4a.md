@@ -13,14 +13,14 @@ Remaining items are non-blocking: a formatting regression in the new prompt code
 
 ## Score breakdown
 
-| Area | Result | Points |
-| --- | --- | --- |
-| Dynamic “Available tools” after skill/web/provider filtering | Generated from filtered definitions; skill allowlist and provider gating tested; web readiness applied; built-in skills capability-phrased | 35 / 35 |
-| Accurate permissions and boundaries | Open-note wording now follows attachment; workflow prose conditional; local-provider branch added; minor qualification wording remains | 24 / 25 |
-| Map links do not grant access | Boundary stated; allowlist test now parses a real canvas file node; real map traversal deferred to Stage 5 | 15 / 15 |
-| Policy tests | Default/restricted/Read-all/web/tool-less/denied-read/positive/map-link/local-provider cases present; harness wiring and current-write guard only unit-tested | 14 / 15 |
-| Verification and quality | `check` 0/0; harness 122 tests; policy 14 tests; full suite 461 tests green; `prettier --check` still flags 3 touched harness files | 9 / 10 |
-| **Total** | | **97 / 100** |
+| Area                                                         | Result                                                                                                                                                        | Points       |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| Dynamic “Available tools” after skill/web/provider filtering | Generated from filtered definitions; skill allowlist and provider gating tested; web readiness applied; built-in skills capability-phrased                    | 35 / 35      |
+| Accurate permissions and boundaries                          | Open-note wording now follows attachment; workflow prose conditional; local-provider branch added; minor qualification wording remains                        | 24 / 25      |
+| Map links do not grant access                                | Boundary stated; allowlist test now parses a real canvas file node; real map traversal deferred to Stage 5                                                    | 15 / 15      |
+| Policy tests                                                 | Default/restricted/Read-all/web/tool-less/denied-read/positive/map-link/local-provider cases present; harness wiring and current-write guard only unit-tested | 14 / 15      |
+| Verification and quality                                     | `check` 0/0; harness 122 tests; policy 14 tests; full suite 461 tests green; `prettier --check` still flags 3 touched harness files                           | 9 / 10       |
+| **Total**                                                    |                                                                                                                                                               | **97 / 100** |
 
 ---
 
@@ -106,25 +106,25 @@ A tool-less provider with a skill gets “No tools are available for this run.�
 
 ## Edge checklist
 
-| Concern | Result |
-| --- | --- |
-| Available tools generated from `ToolDef`s, not a hard-coded prompt catalog | Pass: `context.ts:63-66`, `:91`; provider receives schemas separately |
-| Skill allowlist applied before the prompt is built | Pass: `tools.ts:60-64`; `harness.svelte.ts:838-859`; `policy.test.ts:75-82` |
-| Web tools absent when no search is configured | Pass: `createTools`; `policy.test.ts:71-83`, `:142-156` |
-| Web tools absent when the search profile has no key | Pass for `web_search` (`searchReady`); `fetch_url` intentionally remains — see finding 6 |
-| Provider with tool calling off advertises no tools | Pass: `policy.test.ts:84-92`, `:123-140` |
-| No JSON schemas duplicated in the prompt | Pass: names and descriptions only |
-| Read/list/search respect the allowlist | Pass: `tools.ts:86-122`, `:138-168`; `policy.test.ts:209-248` |
-| Hidden-from-cloud notes filtered from discovery and reads | Pass: `readableNotes`; `policy.test.ts:250-272` |
-| Read all + hidden note on cloud provider | Pass: `policy.test.ts:250-272` |
-| Read all + local provider may read local-only notes | Pass: `policy.test.ts:250-272` |
-| Map link does not become a read permission | Pass at allowlist level with a parsed canvas (`policy.test.ts:226-248`); full traversal from map tools deferred to Stage 5 |
-| Open note readable when the “open note” chip is off | Pass: prompt says detached and tools reject (`policy.test.ts:109-116`) |
-| Current note writable only when attached | Pass at predicate/guard level (`tools.ts:66-69`, `harness.svelte.ts:852-855`); no harness integration test |
-| Every write waits for approval | Pass for `write_note`; `reviewWrite` |
-| Deletion requires destructive confirmation | Stage 4B; not advertised by the Stage 4A prompt |
-| Built-in skill allowlists do not silently gain future powers | Explicit lists remain safe; `tools: null`/`*` still means “all”, so Stage 4B/5 must decide that policy deliberately |
-| Tool registry extensible | Pass structurally; new 4B `edit_note`/`delete_note` flow through `toolsForRun` and the dynamic prompt without a second catalog |
+| Concern                                                                    | Result                                                                                                                         |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Available tools generated from `ToolDef`s, not a hard-coded prompt catalog | Pass: `context.ts:63-66`, `:91`; provider receives schemas separately                                                          |
+| Skill allowlist applied before the prompt is built                         | Pass: `tools.ts:60-64`; `harness.svelte.ts:838-859`; `policy.test.ts:75-82`                                                    |
+| Web tools absent when no search is configured                              | Pass: `createTools`; `policy.test.ts:71-83`, `:142-156`                                                                        |
+| Web tools absent when the search profile has no key                        | Pass for `web_search` (`searchReady`); `fetch_url` intentionally remains — see finding 6                                       |
+| Provider with tool calling off advertises no tools                         | Pass: `policy.test.ts:84-92`, `:123-140`                                                                                       |
+| No JSON schemas duplicated in the prompt                                   | Pass: names and descriptions only                                                                                              |
+| Read/list/search respect the allowlist                                     | Pass: `tools.ts:86-122`, `:138-168`; `policy.test.ts:209-248`                                                                  |
+| Hidden-from-cloud notes filtered from discovery and reads                  | Pass: `readableNotes`; `policy.test.ts:250-272`                                                                                |
+| Read all + hidden note on cloud provider                                   | Pass: `policy.test.ts:250-272`                                                                                                 |
+| Read all + local provider may read local-only notes                        | Pass: `policy.test.ts:250-272`                                                                                                 |
+| Map link does not become a read permission                                 | Pass at allowlist level with a parsed canvas (`policy.test.ts:226-248`); full traversal from map tools deferred to Stage 5     |
+| Open note readable when the “open note” chip is off                        | Pass: prompt says detached and tools reject (`policy.test.ts:109-116`)                                                         |
+| Current note writable only when attached                                   | Pass at predicate/guard level (`tools.ts:66-69`, `harness.svelte.ts:852-855`); no harness integration test                     |
+| Every write waits for approval                                             | Pass for `write_note`; `reviewWrite`                                                                                           |
+| Deletion requires destructive confirmation                                 | Stage 4B; not advertised by the Stage 4A prompt                                                                                |
+| Built-in skill allowlists do not silently gain future powers               | Explicit lists remain safe; `tools: null`/`*` still means “all”, so Stage 4B/5 must decide that policy deliberately            |
+| Tool registry extensible                                                   | Pass structurally; new 4B `edit_note`/`delete_note` flow through `toolsForRun` and the dynamic prompt without a second catalog |
 
 ---
 

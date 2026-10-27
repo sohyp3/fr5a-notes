@@ -14,6 +14,8 @@ import { AbortError } from './openai';
 export interface PreparedWrite {
 	/** Human label: "current note (drafts/a.md)", "new note “Title”"… */
 	label: string;
+	/** Optional readable list of changes for the approval card (maps). */
+	summary?: string[];
 	before: string;
 	after: string;
 	apply(signal?: AbortSignal): Promise<string>;
@@ -26,7 +28,7 @@ export interface CurrentWriteTarget {
 }
 
 /** Read the editor buffer, not the last persisted copy, when this note is open. */
-function liveText(id: string): string {
+function liveText(): string {
 	const app = getAppState();
 	return app.editor ? docToText(app.editor) : app.activeContent;
 }
@@ -34,7 +36,7 @@ function liveText(id: string): string {
 async function noteText(id: string): Promise<string> {
 	const app = getAppState();
 	if (!app.notes.some((n) => n.id === id)) throw new Error(`${id} no longer exists.`);
-	if (app.activeId === id) return liveText(id);
+	if (app.activeId === id) return liveText();
 	return platform.readNote(id);
 }
 

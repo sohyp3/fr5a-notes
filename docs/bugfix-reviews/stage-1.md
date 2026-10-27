@@ -11,28 +11,28 @@ The previous review (`68/100`, FAIL) was against the pre-repair tree. All five b
 
 ## Score breakdown
 
-| Area | Result | Points |
-| --- | --- | --- |
-| §1.1 Numbering follows the list level | Core Enter/Tab/Shift-Tab paths correct, descendants move with their parent, task lines no longer renumber, end-of-item sibling runs advance. One mid-line Enter edge still duplicates an ordinal. | 41 / 45 |
-| §1.2 Selecting a tag reveals the filtered list | Works on desktop/tablet/phone; tag + AI at 900 px keeps navigation and list; all three fit at ≥1100 px; empty state is tag-specific; DOM-level e2e added. Extreme narrow widths still yield a very small editor. | 34 / 35 |
-| Tests, checks, and regression safety | `check`, lint/format, unit suite, and the Stage 1 e2e specs pass. Coverage is substantially better; mid-line Enter and empty nested-item edges are untested, and the full e2e run was inconclusive under concurrent edits. | 19 / 20 |
-| **Total** | | **94 / 100** |
+| Area                                           | Result                                                                                                                                                                                                                     | Points       |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| §1.1 Numbering follows the list level          | Core Enter/Tab/Shift-Tab paths correct, descendants move with their parent, task lines no longer renumber, end-of-item sibling runs advance. One mid-line Enter edge still duplicates an ordinal.                          | 41 / 45      |
+| §1.2 Selecting a tag reveals the filtered list | Works on desktop/tablet/phone; tag + AI at 900 px keeps navigation and list; all three fit at ≥1100 px; empty state is tag-specific; DOM-level e2e added. Extreme narrow widths still yield a very small editor.           | 34 / 35      |
+| Tests, checks, and regression safety           | `check`, lint/format, unit suite, and the Stage 1 e2e specs pass. Coverage is substantially better; mid-line Enter and empty nested-item edges are untested, and the full e2e run was inconclusive under concurrent edits. | 19 / 20      |
+| **Total**                                      |                                                                                                                                                                                                                            | **94 / 100** |
 
 ---
 
 ## Previous blocking issues — closure
 
-| # | Issue | Status |
-| --- | --- | --- |
-| 1 | Enter on a task renumbered a following numbered list | **Fixed.** Renumber block is gated on `!task && m[3]`; regression test at `ListBehavior.test.ts:214`. |
-| 2 | Tab on a list item orphaned its nested children | **Fixed.** `sink` now moves descendants with the item; tests for numbered, bullet, and task parents at `:162`, `:178`. |
-| 3 | Shift-Tab left following siblings nested without renumbering | **Fixed as a deliberate hierarchy.** Lifted item keeps its outer number; former siblings stay under the old parent and restart at 1; test at `:193`. This matches normal outdent semantics. |
-| 4 | Enter on a parent inserted before its children / duplicated ordinals | **Fixed at end of line.** New item is inserted after the subtree and a contiguous sibling run advances; tests at `:221`, `:236`, `:243`. A mid-line variant remains (R1 below). |
-| 5 | Existing e2e broke on the renamed navigation button | **Fixed.** `TitleBar.svelte:127-129` keeps the stable `aria-label="Toggle sidebar"` while the visible title is stateful. `e2e/mobile.spec.ts:331` and both new tag tests pass. |
-| 6 | Tag + AI at ~900 px dropped navigation although it fits after AI yields | **Fixed.** `layout.ts:43-46` hides AI and re-runs the shrink, restoring both sidebars; `layout.test.ts:35-38` and the 900 px e2e case assert it. AI is closed visibly with a notice instead of staying silently open. |
-| 7 | Wide tag + AI dropped navigation before shrinking a pane | **Fixed.** Panes shrink in order before the sidebar is dropped; `layout.test.ts:44-50` requires all three visible at 1100/1280 px, and the 1280 px e2e case passes. |
-| 8 | `EDITOR_MIN` not an invariant at very narrow desktop widths | **Still present, low severity** (R2 below); behavior is now explicit in the code comment and tests. |
-| 9 | Empty tag results showed the generic "No notes here yet" copy | **Fixed.** `NoteList.svelte:149-150` shows "No notes with this tag"; the touch e2e asserts it. |
+| #   | Issue                                                                   | Status                                                                                                                                                                                                                |
+| --- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Enter on a task renumbered a following numbered list                    | **Fixed.** Renumber block is gated on `!task && m[3]`; regression test at `ListBehavior.test.ts:214`.                                                                                                                 |
+| 2   | Tab on a list item orphaned its nested children                         | **Fixed.** `sink` now moves descendants with the item; tests for numbered, bullet, and task parents at `:162`, `:178`.                                                                                                |
+| 3   | Shift-Tab left following siblings nested without renumbering            | **Fixed as a deliberate hierarchy.** Lifted item keeps its outer number; former siblings stay under the old parent and restart at 1; test at `:193`. This matches normal outdent semantics.                           |
+| 4   | Enter on a parent inserted before its children / duplicated ordinals    | **Fixed at end of line.** New item is inserted after the subtree and a contiguous sibling run advances; tests at `:221`, `:236`, `:243`. A mid-line variant remains (R1 below).                                       |
+| 5   | Existing e2e broke on the renamed navigation button                     | **Fixed.** `TitleBar.svelte:127-129` keeps the stable `aria-label="Toggle sidebar"` while the visible title is stateful. `e2e/mobile.spec.ts:331` and both new tag tests pass.                                        |
+| 6   | Tag + AI at ~900 px dropped navigation although it fits after AI yields | **Fixed.** `layout.ts:43-46` hides AI and re-runs the shrink, restoring both sidebars; `layout.test.ts:35-38` and the 900 px e2e case assert it. AI is closed visibly with a notice instead of staying silently open. |
+| 7   | Wide tag + AI dropped navigation before shrinking a pane                | **Fixed.** Panes shrink in order before the sidebar is dropped; `layout.test.ts:44-50` requires all three visible at 1100/1280 px, and the 1280 px e2e case passes.                                                   |
+| 8   | `EDITOR_MIN` not an invariant at very narrow desktop widths             | **Still present, low severity** (R2 below); behavior is now explicit in the code comment and tests.                                                                                                                   |
+| 9   | Empty tag results showed the generic "No notes here yet" copy           | **Fixed.** `NoteList.svelte:149-150` shows "No notes with this tag"; the touch e2e asserts it.                                                                                                                        |
 
 Coverage gaps called out last time are largely closed: `e2e/tags.spec.ts` selects a tag and checks the rendered `.list-wrap` on phone, tablet, and desktop, including empty results, the nav/list swap at 700 px, and the tag + AI cases. `tagNavigation.test.ts` still asserts store state only, but the call site and DOM are now covered end to end.
 
@@ -80,23 +80,23 @@ Widening/closing logic correctly avoids an invisible AI pane and gives the user 
 
 ## Edge concerns checklist
 
-| Concern | Result |
-| --- | --- |
-| Tag selection while list hidden / Zen on | Pass: `selectTag` opens/persists the list and exits Zen; unit + e2e |
-| Tag selection on phone | Pass: pane becomes `list`; Back returns to nav with the tag intact; e2e |
-| Tablet drawer | Pass: drawer closes; list filters beside the editor; e2e |
-| Empty tag results | Pass: tag-specific empty copy and breadcrumb; e2e |
-| Narrow desktop where nav + list do not fit | Pass: nav hides, list stays, title bar swaps back; 700 px e2e |
-| Tag + AI at ~900 px | Pass: AI yields, nav + list both remain; notice explains why AI closed |
-| Wide desktop with tag + AI (1100/1280 px) | Pass: all three panes visible; editor keeps ≥ 320 px |
-| Tag survives nav/list swaps | Pass: swapping only toggles list/sidebar state; e2e keeps `#focus` |
-| Enter on task followed by numbered list | Pass: no renumbering; regression test |
-| Tab / Shift-Tab with nested children | Pass: descendants move with the item; bullet/task/numbered tests |
-| Shift-Tab with following siblings | Pass: siblings stay with the old parent and restart at 1; test |
-| Enter at end of a parent with children | Pass: inserts after the subtree and advances the sibling run; test |
-| Enter in the middle of a numbered item | **Fails to advance the following sibling** (R1) |
-| Unrelated literal Markdown | Pass for tasks, bullets, prose, blank lines, and custom ordinals in the covered paths |
-| Existing e2e behavior | Pass: stable accessible name; focused desktop-mouse test green |
+| Concern                                    | Result                                                                                |
+| ------------------------------------------ | ------------------------------------------------------------------------------------- |
+| Tag selection while list hidden / Zen on   | Pass: `selectTag` opens/persists the list and exits Zen; unit + e2e                   |
+| Tag selection on phone                     | Pass: pane becomes `list`; Back returns to nav with the tag intact; e2e               |
+| Tablet drawer                              | Pass: drawer closes; list filters beside the editor; e2e                              |
+| Empty tag results                          | Pass: tag-specific empty copy and breadcrumb; e2e                                     |
+| Narrow desktop where nav + list do not fit | Pass: nav hides, list stays, title bar swaps back; 700 px e2e                         |
+| Tag + AI at ~900 px                        | Pass: AI yields, nav + list both remain; notice explains why AI closed                |
+| Wide desktop with tag + AI (1100/1280 px)  | Pass: all three panes visible; editor keeps ≥ 320 px                                  |
+| Tag survives nav/list swaps                | Pass: swapping only toggles list/sidebar state; e2e keeps `#focus`                    |
+| Enter on task followed by numbered list    | Pass: no renumbering; regression test                                                 |
+| Tab / Shift-Tab with nested children       | Pass: descendants move with the item; bullet/task/numbered tests                      |
+| Shift-Tab with following siblings          | Pass: siblings stay with the old parent and restart at 1; test                        |
+| Enter at end of a parent with children     | Pass: inserts after the subtree and advances the sibling run; test                    |
+| Enter in the middle of a numbered item     | **Fails to advance the following sibling** (R1)                                       |
+| Unrelated literal Markdown                 | Pass for tasks, bullets, prose, blank lines, and custom ordinals in the covered paths |
+| Existing e2e behavior                      | Pass: stable accessible name; focused desktop-mouse test green                        |
 
 ---
 

@@ -208,7 +208,7 @@ function toolDeps(overrides: Partial<ToolDeps> = {}): ToolDeps {
 }
 
 describe('note tool access', () => {
-	it('exposes map operations only when enabled, and links never authorize note reads', async () => {
+	it('exposes map operations only when supplied, and links never authorize note reads', async () => {
 		const maps = {
 			list: async () => ['Project'],
 			read: async () =>
@@ -220,7 +220,12 @@ describe('note tool access', () => {
 						],
 						edges: []
 					}),
-					[meta('private/a.md')]
+					[meta('private/a.md', { title: 'Hidden title' })],
+					{
+						allowedIds: new Set(['public.md']),
+						hidden: (file, n) =>
+							n ? isHidden(n, config.localOnlyFolders) : isLocalOnly(file, null, config)
+					}
 				),
 			create: async () => 'proposed',
 			edit: async () => 'proposed',
@@ -229,7 +234,11 @@ describe('note tool access', () => {
 		const tools = toolsForRun(null, toolDeps({ maps }));
 		const call = (name: string, args: Record<string, unknown>) =>
 			tools.find((t) => t.def.name === name)!.run(args);
-		expect(await call('read_map', { name: 'Project' })).toContain('private/a.md');
+		const summary = await call('read_map', { name: 'Project' });
+		// The map link does not disclose a local-only path or a title the chat cannot read.
+		expect(summary).not.toContain('private/a.md');
+		expect(summary).not.toContain('Hidden title');
+		expect(summary).toContain('"accessible":false');
 		expect(await call('read_note', { id: 'private/a.md' })).toMatch(/wasn't mentioned/);
 		expect(await call('delete_map', { name: '../private' })).toMatch(/Invalid map name/);
 		expect(await call('list_maps', {})).toBe('["Project"]');
@@ -258,6 +267,12 @@ describe('note tool access', () => {
 				localProvider: false
 			})
 		).not.toContain('list_maps:');
+	});
+
+	it('offers no map tools when the feature supplies no map deps', () => {
+		const names = toolsForRun(null, toolDeps()).map((t) => t.def.name);
+		expect(names.filter((n) => n.endsWith('_map'))).toEqual([]);
+		expect(names).toContain('read_note');
 	});
 	it('does not expose unmentioned notes through discovery or reads', async () => {
 		const tools = createTools(toolDeps());

@@ -40,12 +40,16 @@ export function registerMapEditor(name: string, guard: () => Promise<boolean>): 
 		if (editors.get(name) === guard) editors.delete(name);
 	};
 }
-/** Flush queued saves and refuse external writes while the canvas is being edited. */
-export async function guardMapWrite(name: string): Promise<void> {
+/** Flush queued saves and refuse reads while the canvas is being edited. */
+export async function guardMapRead(name: string): Promise<void> {
 	const guard = editors.get(name);
 	if (guard && !(await guard()))
 		throw new Error('The map has unsaved or active editor changes; finish editing and try again.');
 	await saved(name);
+}
+/** Flush queued saves and refuse external writes while the canvas is being edited. */
+export async function guardMapWrite(name: string): Promise<void> {
+	await guardMapRead(name);
 	const failure = failures.get(name);
 	if (failure) throw new Error(`The map could not be saved: ${failure.message}`);
 }

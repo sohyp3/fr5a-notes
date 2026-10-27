@@ -103,13 +103,13 @@ After each stage, run `npm run check`, `npm test`, and focused manual desktop/ph
 
 Independent reviews and remaining manual checks are recorded in `docs/bugfix-reviews/`.
 
-| Stage | Status | Review | Summary |
-| --- | --- | --- | --- |
-| 1 | Implemented, review passed | 94/100 | Nested numbering and tag-list navigation, with regression tests and responsive navigation coverage. |
-| 2 | Implemented, review passed | 94/100 | Theme-aware map color swatches and consistent reopen/Back/Close behavior. |
-| 3 | Implemented, review passed | 92/100 | Synced hidden app data and conflict-aware live map refresh; save/navigation races repaired. |
-| 4A | Implemented, review passed | 97/100 | Dynamic effective-tool guidance and note-read privacy enforcement. |
-| 4B | Implemented, review passed | 92/100 | Approved precise note edits and separately confirmed, restorable note deletion. |
-| 5 | Implemented; review pending | — | AI map tools with approvals, stale-write guards, validation, and linked-note privacy. |
+| Stage | Status                     | Review | Summary                                                                                             |
+| ----- | -------------------------- | ------ | --------------------------------------------------------------------------------------------------- |
+| 1     | Implemented, review passed | 94/100 | Nested numbering and tag-list navigation, with regression tests and responsive navigation coverage. |
+| 2     | Implemented, review passed | 94/100 | Theme-aware map color swatches and consistent reopen/Back/Close behavior.                           |
+| 3     | Implemented, review passed | 92/100 | Synced hidden app data and conflict-aware live map refresh; save/navigation races repaired.         |
+| 4A    | Implemented, review passed | 97/100 | Dynamic effective-tool guidance and note-read privacy enforcement.                                  |
+| 4B    | Implemented, review passed | 92/100 | Approved precise note edits and separately confirmed, restorable note deletion.                     |
+| 5     | Implemented, review passed | 97/100 | AI map tools with approvals, stale-write guards, validation, and linked-note privacy.               |
 
-Automated `npm run check` and `npm test` passed after each implementation. The full `npm run test:e2e` run had 279 passes, 47 intentional skips, and one image-drag failure on tablet landscape; that single test passed when rerun alone. Manual checks on actual desktop and phone devices, including two-device sync, remain outstanding.
+Final verification: `npm run check`, `npm test` (494 tests), and `npm run lint` passed. The full `npm run test:e2e -- --retries=1 --reporter=dot` run passed (280 tests, 47 intentional skips). Manual checks on actual desktop and phone devices, including two-device sync and live AI map approvals, remain outstanding. Review reports retain lower-priority follow-ups and the intermediate failures that were repaired.

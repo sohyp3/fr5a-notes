@@ -11,15 +11,15 @@ Stage 4B meets its acceptance criterion: the agent can propose a precise note ed
 
 ## Score breakdown
 
-| Area | Result | Points |
-| --- | --- | --- |
-| Targeted `edit_note` (target validation, one-occurrence rule, live editor, exact-content recheck) | Solid; a draft/`current` edit gets a terse "No saved note is open"; `setContent` resets selection and scroll | 22 / 25 |
-| `delete_note` (identity, destructive confirmation, soft delete, privacy, stale/missing) | Meets the roadmap; two wording/restore-promise nits | 22 / 25 |
-| Approval binding and stale detection | Rechecks before and after the destructive dialog; Stop-before-card race and a small post-check window remain | 18 / 20 |
-| Rejection / Stop / failure results and transcript rows | Status and labels are accurate; late applies after Stop can be reported as cancelled | 12 / 15 |
-| Tests | Good apply/tool tests and a phone e2e; no harness-level approval/Stop tests, two over-claiming test names, no built-in delete-allowlist assertion | 10 / 15 |
-| Verification and quality | `check` 0/0; 474 tests green (Stage 5 included); `eslint` fails on 3 errors (only `apply.ts:29` is 4B; the others are 4A/Stage 5) | 8 / 10 |
-| **Total** | | **92 / 100** |
+| Area                                                                                              | Result                                                                                                                                            | Points       |
+| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| Targeted `edit_note` (target validation, one-occurrence rule, live editor, exact-content recheck) | Solid; a draft/`current` edit gets a terse "No saved note is open"; `setContent` resets selection and scroll                                      | 22 / 25      |
+| `delete_note` (identity, destructive confirmation, soft delete, privacy, stale/missing)           | Meets the roadmap; two wording/restore-promise nits                                                                                               | 22 / 25      |
+| Approval binding and stale detection                                                              | Rechecks before and after the destructive dialog; Stop-before-card race and a small post-check window remain                                      | 18 / 20      |
+| Rejection / Stop / failure results and transcript rows                                            | Status and labels are accurate; late applies after Stop can be reported as cancelled                                                              | 12 / 15      |
+| Tests                                                                                             | Good apply/tool tests and a phone e2e; no harness-level approval/Stop tests, two over-claiming test names, no built-in delete-allowlist assertion | 10 / 15      |
+| Verification and quality                                                                          | `check` 0/0; 474 tests green (Stage 5 included); `eslint` fails on 3 errors (only `apply.ts:29` is 4B; the others are 4A/Stage 5)                 | 8 / 10       |
+| **Total**                                                                                         |                                                                                                                                                   | **92 / 100** |
 
 ---
 
@@ -162,22 +162,22 @@ Also note: Escape stops a run only from the composer textarea (`HarnessPane.svel
 
 ## Acceptance checklist
 
-| Requirement | Result |
-| --- | --- |
-| Existing `write_note` diff-and-approval behavior kept | Pass: `reviewWrite` → `reviewChange` (`harness.svelte.ts:1087-1093`); same card and apply path |
-| Targeted edit without replacing the whole note | Pass at content level; editor-path selection reset — finding 3 |
-| Validate the edit target | Pass: `eligible` (`tools.ts:101-109`), missing/empty args, `current` resolution |
-| Recheck current contents before applying | Pass: text + disk snapshot before and after the multi-step confirm (`apply.ts:62`, `:80`, `:98`, `:107`, `:133`) |
-| Live editor path, undo and auto-save | Pass for the open note (`apply.ts:150-154`); `replaceLines`-style transaction would be better |
-| `delete_note` is explicit and not "current" | Pass (`tools.ts:258-278`) |
-| Note identity on the approval | Pass: `Title (id)` (`apply.ts:99-101`) |
-| Destructive confirmation popup | Pass: `app.confirm({ danger: true, confirm: 'Move to Trash' })` (`apply.ts:111-116`), rendered as an alertdialog |
-| Uses soft delete/Trash, not permanent delete | Pass: `app.deleteNote` (`app.svelte.ts:886`) → `platform.deleteNote` → trash on both platforms; restore e2e |
-| Locked/encrypted/privacy restrictions | Pass: `eligible`, `assertSafe`, tool tests; hidden local-only refused for cloud |
-| Reject stale or missing target | Pass: `not exists` / `changed since review`; small final-call window — finding 2 |
-| Rejection / Stop / failure results and transcript rows | Pass for rejection and failures; Stop races — findings 1–2 |
-| Approve/reject/stop/changed/privacy/restore tests | Partial: apply/tool/e2e present; harness-level gaps — finding 7 |
-| Built-in skills do not silently gain deletion | Pass at code level; no regression test |
+| Requirement                                            | Result                                                                                                           |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| Existing `write_note` diff-and-approval behavior kept  | Pass: `reviewWrite` → `reviewChange` (`harness.svelte.ts:1087-1093`); same card and apply path                   |
+| Targeted edit without replacing the whole note         | Pass at content level; editor-path selection reset — finding 3                                                   |
+| Validate the edit target                               | Pass: `eligible` (`tools.ts:101-109`), missing/empty args, `current` resolution                                  |
+| Recheck current contents before applying               | Pass: text + disk snapshot before and after the multi-step confirm (`apply.ts:62`, `:80`, `:98`, `:107`, `:133`) |
+| Live editor path, undo and auto-save                   | Pass for the open note (`apply.ts:150-154`); `replaceLines`-style transaction would be better                    |
+| `delete_note` is explicit and not "current"            | Pass (`tools.ts:258-278`)                                                                                        |
+| Note identity on the approval                          | Pass: `Title (id)` (`apply.ts:99-101`)                                                                           |
+| Destructive confirmation popup                         | Pass: `app.confirm({ danger: true, confirm: 'Move to Trash' })` (`apply.ts:111-116`), rendered as an alertdialog |
+| Uses soft delete/Trash, not permanent delete           | Pass: `app.deleteNote` (`app.svelte.ts:886`) → `platform.deleteNote` → trash on both platforms; restore e2e      |
+| Locked/encrypted/privacy restrictions                  | Pass: `eligible`, `assertSafe`, tool tests; hidden local-only refused for cloud                                  |
+| Reject stale or missing target                         | Pass: `not exists` / `changed since review`; small final-call window — finding 2                                 |
+| Rejection / Stop / failure results and transcript rows | Pass for rejection and failures; Stop races — findings 1–2                                                       |
+| Approve/reject/stop/changed/privacy/restore tests      | Partial: apply/tool/e2e present; harness-level gaps — finding 7                                                  |
+| Built-in skills do not silently gain deletion          | Pass at code level; no regression test                                                                           |
 
 ---
 

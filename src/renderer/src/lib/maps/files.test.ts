@@ -21,6 +21,7 @@ vi.mock('../platform', () => ({
 
 const {
 	clearMapSaveFailure,
+	guardMapRead,
 	guardMapWrite,
 	listMaps,
 	readMap,
@@ -81,6 +82,9 @@ describe('map files', () => {
 	it('does not report a successful sync after a failed map save', async () => {
 		recordMapSaveFailure('Atlas', new Error('disk full'));
 		await expect(savedAll()).rejects.toThrow('disk full');
+		// A read is not a write: a past save failure must not block read_map.
+		await expect(guardMapRead('Atlas')).resolves.toBeUndefined();
+		await expect(guardMapWrite('Atlas')).rejects.toThrow(/could not be saved/);
 		clearMapSaveFailure('Atlas');
 		await expect(savedAll()).resolves.toBeUndefined();
 	});

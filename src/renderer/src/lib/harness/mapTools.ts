@@ -1,5 +1,13 @@
 import type { NoteMeta } from '../../../../shared/types';
-import { mapPath, parseCanvas, serializeCanvas, emptyCanvas, type CanvasDoc } from '../maps/canvas';
+import {
+	mapPath,
+	parseCanvas,
+	serializeCanvas,
+	emptyCanvas,
+	type CanvasDoc,
+	type CanvasEdge,
+	type CanvasNode
+} from '../maps/canvas';
 
 export interface MapChange {
 	name: string;
@@ -39,6 +47,9 @@ function ids(value: unknown, label: string): string[] {
 	return value;
 }
 
+const isStringList = (value: unknown): value is string[] =>
+	Array.isArray(value) && value.every((v) => typeof v === 'string');
+
 export function mapPatch(raw: unknown, before: CanvasDoc, notes: readonly NoteMeta[]): CanvasDoc {
 	if (!raw || typeof raw !== 'object' || Array.isArray(raw))
 		throw new Error('Pass a patch object.');
@@ -68,18 +79,35 @@ export function mapPatch(raw: unknown, before: CanvasDoc, notes: readonly NoteMe
 		const byId = new Map(old.map((entry) => [entry.id, entry]));
 		for (const entry of incoming) {
 			const prior = byId.get(entry.id);
-			byId.set(entry.id, {
-				...prior,
-				...entry,
-				...(entry.fr5a &&
-				typeof entry.fr5a === 'object' &&
-				!Array.isArray(entry.fr5a) &&
-				prior?.fr5a &&
-				typeof prior.fr5a === 'object' &&
-				!Array.isArray(prior.fr5a)
-					? { fr5a: { ...prior.fr5a, ...entry.fr5a } }
-					: {})
-			});
+			const next: Record<string, unknown> = { ...prior, ...entry };
+			const incomingExtra = entry.fr5a;
+			const priorExtra = prior?.fr5a;
+			const validIncoming =
+				!!incomingExtra && typeof incomingExtra === 'object' && !Array.isArray(incomingExtra);
+			const validPrior =
+				!!priorExtra && typeof priorExtra === 'object' && !Array.isArray(priorExtra);
+			const mergeExtra = (): Record<string, unknown> | undefined => {
+				// An invalid fr5a (null, a string) must not erase the entry's real extras.
+				if (!validIncoming) return validPrior ? (priorExtra as Record<string, unknown>) : undefined;
+				const merged: Record<string, unknown> = {
+					...(validPrior ? (priorExtra as Record<string, unknown>) : {}),
+					...(incomingExtra as Record<string, unknown>)
+				};
+				if ('exclude' in merged && !isStringList(merged.exclude)) {
+					// The parser repairs a non-list exclude to []: keep the reviewed
+					// exclusions instead of silently making old notes eligible again.
+					const priorExclude = validPrior
+						? (priorExtra as Record<string, unknown>).exclude
+						: undefined;
+					if (isStringList(priorExclude)) merged.exclude = priorExclude;
+					else delete merged.exclude;
+				}
+				return merged;
+			};
+			const extra = mergeExtra();
+			if (extra) next.fr5a = extra;
+			else delete next.fr5a;
+			byId.set(entry.id, next);
 		}
 		for (const id of removed) byId.delete(id);
 		return [...byId.values()];
@@ -107,30 +135,52 @@ export function mapPatch(raw: unknown, before: CanvasDoc, notes: readonly NoteMe
 	return parsed.doc;
 }
 
+export interface MapNoteAccess {
+	/** Note ids whose title/metadata this chat may see; null/undefined = no chat gate. */
+	allowedIds?: ReadonlySet<string> | null;
+	/** A linked note hidden from this provider (local-only for cloud): omit its path too. */
+	hidden?(file: string, note?: NoteMeta): boolean;
+	/** Encrypted note metadata may be shown (vault unlocked and AI reads encrypted notes). */
+	encryptedReadable?: boolean;
+}
+
+/**
+ * `notes` is the full vault index (so an encrypted link is not "missing"), while
+ * `access` decides which linked ids/titles this chat/provider may see.
+ */
 export function mapSummary(
 	name: string,
 	text: string,
 	notes: readonly NoteMeta[],
-	metadataIds?: ReadonlySet<string>
+	access?: MapNoteAccess
 ): string {
 	const { doc, skipped } = parseCanvas(text);
 	const byId = new Map(notes.map((n) => [n.id, n]));
+	const fileInfo = (file: string | undefined) => {
+		const note = file ? byId.get(file) : undefined;
+		const hidden = !!file && !!access?.hidden?.(file, note);
+		const allowed =
+			access?.allowedIds === undefined ||
+			access.allowedIds === null ||
+			(!!file && access.allowedIds.has(file));
+		const encryptedBlocked = !!note?.encrypted && access?.encryptedReadable === false;
+		const restricted = !!note && (hidden || !allowed || !!note.locked || encryptedBlocked);
+		return {
+			// A local-only path is itself cloud metadata: don't send it at all.
+			...(hidden ? {} : { noteId: file || null }),
+			noteTitle: note && !restricted ? note.title : null,
+			...(note ? {} : { missing: true }),
+			...(restricted ? { accessible: false } : {}),
+			...(note?.encrypted ? { encrypted: true } : {})
+		};
+	};
 	return JSON.stringify({
 		name,
 		nodes: doc.nodes.map((n) => ({
 			id: n.id,
 			type: n.type,
 			label: n.label ?? n.text?.slice(0, 120) ?? '',
-			...(n.type === 'file'
-				? {
-						noteId: n.file ?? null,
-						noteTitle:
-							metadataIds && !metadataIds.has(n.file ?? '')
-								? null
-								: (byId.get(n.file ?? '')?.title ?? null),
-						missing: !byId.has(n.file ?? '')
-					}
-				: {}),
+			...(n.type === 'file' ? fileInfo(n.file) : {}),
 			x: n.x,
 			y: n.y
 		})),
@@ -144,6 +194,60 @@ export function mapSummary(
 			? { malformed: { nodes: skipped.nodes.length, edges: skipped.edges.length } }
 			: {})
 	});
+}
+
+const short = (text: string | undefined, fallback: string): string => {
+	const value = (text ?? '').replace(/\s+/g, ' ').trim();
+	return value ? value.slice(0, 60) : fallback;
+};
+
+const nodeLabel = (node: CanvasNode): string =>
+	short(node.label ?? node.text, node.type === 'file' ? short(node.file, node.id) : node.id);
+
+const nodeLabelById = (id: string, nodes: ReadonlyMap<string, CanvasNode>): string => {
+	const node = nodes.get(id);
+	return node ? nodeLabel(node) : id;
+};
+
+const edgeLabel = (edge: CanvasEdge, nodes: ReadonlyMap<string, CanvasNode>): string =>
+	short(
+		edge.label,
+		`${nodeLabelById(edge.fromNode, nodes)} → ${nodeLabelById(edge.toNode, nodes)}`
+	);
+
+/** Readable, non-JSON lines for the approval card. */
+export function mapChangeLines(
+	tool: 'create_map' | 'edit_map' | 'delete_map',
+	before: CanvasDoc | null,
+	after: CanvasDoc
+): string[] {
+	if (tool === 'delete_map')
+		return ['The map file is permanently deleted.', 'Linked notes remain in the workspace.'];
+	if (tool === 'create_map') return ['New empty map; add nodes and links in the editor.'];
+	const lines: string[] = [];
+	const beforeNodes = new Map((before?.nodes ?? []).map((n) => [n.id, n]));
+	const afterNodes = new Map(after.nodes.map((n) => [n.id, n]));
+	const nodes = new Map([...beforeNodes, ...afterNodes]);
+	for (const [id, node] of afterNodes) {
+		const previous = beforeNodes.get(id);
+		if (!previous) lines.push(`Added node “${nodeLabel(node)}”`);
+		else if (JSON.stringify(previous) !== JSON.stringify(node))
+			lines.push(`Updated node “${nodeLabel(node)}”`);
+	}
+	for (const [id, node] of beforeNodes)
+		if (!afterNodes.has(id)) lines.push(`Removed node “${nodeLabel(node)}”`);
+	const beforeEdges = new Map((before?.edges ?? []).map((e) => [e.id, e]));
+	const afterEdges = new Map(after.edges.map((e) => [e.id, e]));
+	for (const [id, edge] of afterEdges) {
+		const previous = beforeEdges.get(id);
+		if (!previous) lines.push(`Added link “${edgeLabel(edge, nodes)}”`);
+		else if (JSON.stringify(previous) !== JSON.stringify(edge))
+			lines.push(`Updated link “${edgeLabel(edge, nodes)}”`);
+	}
+	for (const [id, edge] of beforeEdges)
+		if (!afterEdges.has(id)) lines.push(`Removed link “${edgeLabel(edge, nodes)}”`);
+	if (lines.length > 12) return [...lines.slice(0, 12), `…and ${lines.length - 12} more changes.`];
+	return lines.length ? lines : ['No visible change.'];
 }
 
 export const blankMap = () => serializeCanvas(emptyCanvas());
