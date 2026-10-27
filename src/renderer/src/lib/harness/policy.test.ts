@@ -232,6 +232,12 @@ describe('note tool access', () => {
 			delete: async () => 'proposed'
 		};
 		const tools = toolsForRun(null, toolDeps({ maps }));
+		const create = tools.find((t) => t.def.name === 'create_map')!;
+		const edit = tools.find((t) => t.def.name === 'edit_map')!;
+		expect(create.def.description).toContain('fromNode and toNode');
+		expect(edit.def.description).toContain('finite numeric x and y');
+		expect(edit.def.description).toContain('NOT Svelte Flow position/source/target');
+		expect(create.def.parameters.properties).toHaveProperty('patch');
 		const call = (name: string, args: Record<string, unknown>) =>
 			tools.find((t) => t.def.name === name)!.run(args);
 		const summary = await call('read_map', { name: 'Project' });

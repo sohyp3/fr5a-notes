@@ -1,7 +1,7 @@
 {
 	"name": "fr5a-notes",
 	"private": true,
-	"version": "0.2.1",
+	"version": "0.2.2",
 	"type": "module",
 	"description": "fr5a — Best md based note taking app, with great ai harness built in",
 	"author": {

@@ -54,8 +54,10 @@ export async function prepareMapReview(
 		);
 	const beforeDoc = parsedBefore?.doc ?? null;
 	let after = tool === 'create_map' ? blankMap() : '';
-	if (tool === 'edit_map') {
-		after = serializeCanvas(mapPatch(patch, beforeDoc!, deps.notes()));
+	if (tool === 'edit_map' || (tool === 'create_map' && patch !== undefined)) {
+		after = serializeCanvas(
+			mapPatch(patch, beforeDoc ?? parseCanvas(blankMap()).doc, deps.notes())
+		);
 		if (after === before) throw new Error('The map patch makes no change.');
 	}
 	const afterDoc = parseCanvas(after).doc;
@@ -74,7 +76,12 @@ export async function prepareMapReview(
 					(await deps.list()).some((n) => n.toLowerCase() === target.toLowerCase()))
 			)
 				throw new Error('The map changed since review; nothing applied. Read it again.');
-			if (tool === 'edit_map') mapPatch(patch, parseCanvas(before!).doc, deps.notes());
+			if (tool === 'edit_map' || (tool === 'create_map' && patch !== undefined))
+				mapPatch(
+					patch,
+					before === null ? parseCanvas(blankMap()).doc : parseCanvas(before).doc,
+					deps.notes()
+				);
 			if (signal?.aborted) throw new AbortError();
 			if (tool === 'delete_map') {
 				const confirmed = await deps.confirmDelete(target, signal);

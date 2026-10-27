@@ -913,7 +913,7 @@ class HarnessState {
 											encryptedReadable: app.aiReadsEncrypted
 										});
 							},
-							create: (name) => this.reviewMap(tab, 'create_map', name, undefined, signal),
+							create: (name, patch) => this.reviewMap(tab, 'create_map', name, patch, signal),
 							edit: (name, patch) => this.reviewMap(tab, 'edit_map', name, patch, signal),
 							delete: (name) => this.reviewMap(tab, 'delete_map', name, undefined, signal)
 						}

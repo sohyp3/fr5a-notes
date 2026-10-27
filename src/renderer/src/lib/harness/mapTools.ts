@@ -120,10 +120,26 @@ export function mapPatch(raw: unknown, before: CanvasDoc, notes: readonly NoteMe
 	// The parser keeps malformed entries aside for round-tripping in the editor;
 	// AI must not silently drop or normalize malformed proposed changes.
 	const parsed = parseCanvas(JSON.stringify(proposed));
-	if (parsed.skipped.nodes.length || parsed.skipped.edges.length)
+	if (parsed.skipped.nodes.length || parsed.skipped.edges.length) {
+		const names = (entries: unknown[]) =>
+			entries
+				.map((entry) =>
+					entry && typeof entry === 'object' && 'id' in entry && typeof entry.id === 'string'
+						? entry.id
+						: '(missing id)'
+				)
+				.join(', ');
 		throw new Error(
-			'Invalid canvas nodes or edges (check positions, ids and connection endpoints).'
+			`Invalid canvas ${[
+				parsed.skipped.nodes.length ? `nodes: ${names(parsed.skipped.nodes)}` : '',
+				parsed.skipped.edges.length ? `edges: ${names(parsed.skipped.edges)}` : ''
+			]
+				.filter(Boolean)
+				.join(
+					'; '
+				)}. Nodes need type and numeric x/y; edges need fromNode/toNode ids present on the map.`
 		);
+	}
 	const known = new Set(notes.map((n) => n.id));
 	for (const node of addedNodes) {
 		const next = parsed.doc.nodes.find((n) => n.id === node.id);
@@ -223,7 +239,8 @@ export function mapChangeLines(
 ): string[] {
 	if (tool === 'delete_map')
 		return ['The map file is permanently deleted.', 'Linked notes remain in the workspace.'];
-	if (tool === 'create_map') return ['New empty map; add nodes and links in the editor.'];
+	if (tool === 'create_map' && !after.nodes.length && !after.edges.length)
+		return ['New empty map; add nodes and links in the editor.'];
 	const lines: string[] = [];
 	const beforeNodes = new Map((before?.nodes ?? []).map((n) => [n.id, n]));
 	const afterNodes = new Map(after.nodes.map((n) => [n.id, n]));

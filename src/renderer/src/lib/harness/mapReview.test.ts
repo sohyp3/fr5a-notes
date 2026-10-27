@@ -198,4 +198,37 @@ describe('map approvals', () => {
 		expect(await prepared.apply()).toBe('Created map “Fresh”.');
 		expect(disk.get('Fresh')).toBe(blankMap());
 	});
+
+	it('creates a populated map in one reviewed write', async () => {
+		const { disk, writes, deps } = setup({});
+		const patch = {
+			nodes: [
+				{ id: 'idea', type: 'text', text: 'Idea', x: 0, y: 0 },
+				{ id: 'plan', type: 'text', text: 'Plan', x: 280, y: 0 }
+			],
+			edges: [{ id: 'link', fromNode: 'idea', toNode: 'plan' }]
+		};
+		const prepared = await prepareMapReview('create_map', 'Fresh', patch, deps);
+		expect(writes).toEqual([]);
+		expect(prepared.summary).toEqual([
+			'Added node “Idea”',
+			'Added node “Plan”',
+			'Added link “Idea → Plan”'
+		]);
+		await prepared.apply();
+		expect(JSON.parse(disk.get('Fresh')!)).toMatchObject(patch);
+	});
+
+	it('rejects invalid initial patches without creating a map', async () => {
+		const { disk, deps } = setup({});
+		await expect(
+			prepareMapReview(
+				'create_map',
+				'Fresh',
+				{ nodes: [{ id: 'missing-position', type: 'text' }] },
+				deps
+			)
+		).rejects.toThrow(/Invalid canvas/);
+		expect(disk.size).toBe(0);
+	});
 });

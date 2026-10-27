@@ -114,7 +114,10 @@ describe('AI canvas patches', () => {
 		).toThrow(/does not exist/);
 		expect(() =>
 			mapPatch({ edges: [{ id: 'bad', fromNode: 'n', toNode: 'gone' }] }, doc, notes)
-		).toThrow(/Invalid canvas/);
+		).toThrow(/Invalid canvas edges: bad.*fromNode\/toNode/);
+		expect(() => mapPatch({ nodes: [{ id: 'bad', type: 'text' }] }, doc, notes)).toThrow(
+			/Invalid canvas nodes: bad.*numeric x\/y/
+		);
 		expect(() => mapPatch({ nodes: [{ id: 'x' }, { id: 'x' }] }, doc, notes)).toThrow(/Duplicate/);
 		expect(() => mapPatch({ other: 1 }, doc, notes)).toThrow(/Patch/);
 		expect(() => validMapName('../sessions/device')).toThrow();

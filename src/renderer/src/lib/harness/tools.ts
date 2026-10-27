@@ -50,7 +50,7 @@ export interface ToolDeps {
 	maps?: {
 		list(): Promise<string[]>;
 		read(name: string): Promise<string>;
-		create(name: string): Promise<string>;
+		create(name: string, patch?: unknown): Promise<string>;
 		edit(name: string, patch: unknown): Promise<string>;
 		delete(name: string): Promise<string>;
 	};
@@ -78,6 +78,9 @@ export function canWriteCurrent(
 }
 
 const s = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
+
+const MAP_PATCH_SYNTAX =
+	'JSON Canvas patch: nodes and edges are upsert arrays (existing ids update, new ids add); removeNodes and removeEdges are arrays of existing ids. New nodes need unique nonempty id, type, finite numeric x and y; use type "text" with text for concepts, or type "file" with file set to an existing workspace-relative note id. Optional width/height are positive numbers (defaults: 200/60); tag nodes are type "text" with fr5a: {tag: "tag-name"}. New edges need unique nonempty id, fromNode and toNode set to node ids on this map (including nodes added in the same patch). Use JSON Canvas fields x/y and fromNode/toNode, NOT Svelte Flow position/source/target. Example: {"nodes":[{"id":"idea","type":"text","text":"Idea","x":0,"y":0},{"id":"plan","type":"text","text":"Plan","x":280,"y":0}],"edges":[{"id":"idea-plan","fromNode":"idea","toNode":"plan"}]}. Updates to existing nodes/edges may include only id and fields being changed. Removing a node also requires removing its connected edges.';
 
 function scoreNote(n: NoteMeta, terms: string[]): number {
 	const title = n.title.toLowerCase();
@@ -311,20 +314,30 @@ export function createTools(d: ToolDeps): Tool[] {
 			{
 				def: {
 					name: 'create_map',
-					description: 'Propose a new empty mind map by name; user approval required.',
+					description: `Propose a new mind map by name, optionally populated with patch containing nodes/edges (no removals on a new map). User approval required. ${MAP_PATCH_SYNTAX}`,
 					parameters: {
 						type: 'object',
-						properties: { name: { type: 'string' } },
+						properties: {
+							name: { type: 'string' },
+							patch: {
+								type: 'object',
+								description:
+									'Optional initial nodes and edges; same JSON Canvas patch syntax as edit_map.',
+								properties: {
+									nodes: { type: 'array', items: { type: 'object', additionalProperties: true } },
+									edges: { type: 'array', items: { type: 'object', additionalProperties: true } }
+								}
+							}
+						},
 						required: ['name']
 					}
 				},
-				run: (a) => checked(a.name, maps.create)
+				run: (a) => checked(a.name, (name) => maps.create(name, a.patch))
 			},
 			{
 				def: {
 					name: 'edit_map',
-					description:
-						'Propose node and edge updates after read_map. Pass patch with nodes/edges arrays of objects with ids (upserts), removeNodes/removeEdges arrays of ids; existing unknown fields remain. File nodes must link existing note ids. Requires approval and rejects stale maps.',
+					description: `Propose changes to an existing map after read_map. Requires approval and rejects stale maps; existing unknown fields remain. ${MAP_PATCH_SYNTAX}`,
 					parameters: {
 						type: 'object',
 						properties: {
