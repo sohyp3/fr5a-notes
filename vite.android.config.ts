@@ -12,6 +12,8 @@ const WEBVIEW_TARGET = 'chrome92';
 // (main window only — conflicts are shown in-app), output to `out/android`.
 export default defineConfig({
 	root: 'src/renderer',
+	// Tidy loads dagre on demand; prebundle it to avoid a first-use dev-server reload.
+	optimizeDeps: { include: ['@dagrejs/dagre'] },
 	base: './',
 	define: buildInfo(),
 	resolve: {

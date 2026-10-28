@@ -327,6 +327,7 @@ test('an in-flight refresh cannot navigate after leaving the map', async ({ brow
 test('dirty open map asks before replacing local edits from sync', async ({ browser }, info) => {
 	test.skip(info.project.name !== 'phone 390x844', 'desktop sync controls');
 	const { ctx, page } = await desktopPage(browser);
+	await page.clock.install();
 	await newAtlas(page);
 	const map = page.getByRole('region', { name: 'Mind map Atlas' });
 	await map.getByRole('button', { name: 'Add an idea' }).click();
@@ -341,6 +342,9 @@ test('dirty open map asks before replacing local edits from sync', async ({ brow
 	const dialog = page.getByRole('alertdialog', { name: 'This map changed on disk' });
 	await expect(dialog).toBeVisible();
 	await expect(map.getByText('Local')).toBeVisible();
+	// Blur committed the idea; expire its autosave while the sync choice is still open.
+	await page.clock.fastForward(750);
+	await expect(dialog).toHaveCount(1);
 	await dialog.getByRole('button', { name: 'Reload' }).click();
 	await expect(
 		page.getByRole('region', { name: 'Mind map Atlas' }).getByText('Remote')
@@ -876,6 +880,58 @@ test('mixed tag and note group deletion preserves surviving tag exclusions and u
 		expect(
 			await page.evaluate(() => (window as unknown as Win).api.readNote('Work/Design.md'))
 		).toBe('# Design\n\nScreens #atlas/ui');
+	} finally {
+		await ctx.close();
+	}
+});
+
+test('sync reload rechecks local edits made while the final disk read is pending', async ({
+	browser
+}, info) => {
+	test.skip(info.project.name !== 'phone 390x844', 'desktop sync controls');
+	const { ctx, page } = await desktopPage(browser);
+	try {
+		await newAtlas(page);
+		const map = page.getByRole('region', { name: 'Mind map Atlas' });
+		await map.getByRole('button', { name: 'Add an idea' }).click();
+		await map.getByRole('textbox', { name: 'Idea text' }).fill('Local');
+		await page.evaluate((rel) => {
+			(window as unknown as Win).__meta[rel] = JSON.stringify({
+				nodes: [
+					{ id: 'remote', type: 'text', text: 'Remote', x: 20, y: 20, width: 180, height: 44 }
+				],
+				edges: []
+			});
+			(window as unknown as { __syncHarness: SyncHarness }).__syncHarness.done();
+		}, MAP);
+		const dialog = page.getByRole('alertdialog', { name: 'This map changed on disk' });
+		await expect(dialog).toBeVisible();
+		await page.evaluate(() => {
+			const h = (window as unknown as { __syncHarness: SyncHarness }).__syncHarness;
+			h.readStarted = false;
+			h.holdRead = true;
+		});
+		await dialog.getByRole('button', { name: 'Reload' }).click();
+		await expect
+			.poll(() =>
+				page.evaluate(
+					() => (window as unknown as { __syncHarness: SyncHarness }).__syncHarness.readStarted
+				)
+			)
+			.toBe(true);
+		await addIdea(page, 'Newer local edit', false);
+		await page.evaluate(() => {
+			const h = (window as unknown as { __syncHarness: SyncHarness }).__syncHarness;
+			h.holdRead = false;
+			h.releaseRead();
+		});
+		await expect(dialog).toBeVisible();
+		await expect(map.getByText('Newer local edit')).toBeVisible();
+		await dialog.getByRole('button', { name: 'Keep mine' }).click();
+		await expect
+			.poll(async () => (await savedMap(page))?.nodes.some((n) => n.text === 'Newer local edit'))
+			.toBe(true);
+		await expect(dialog).toHaveCount(0);
 	} finally {
 		await ctx.close();
 	}

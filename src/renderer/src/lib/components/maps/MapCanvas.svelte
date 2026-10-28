@@ -205,8 +205,9 @@
 	let localVersion = 0;
 	let chain: Promise<void> = Promise.resolve();
 	let refreshRequest = 0;
+	let refreshInProgress = false;
 	const unregisterExternalGuard = registerMapEditor(mapName, async () => {
-		if (status !== 'ready' || editingId !== null || interacting) return false;
+		if (status !== 'ready' || editingId !== null || interacting || refreshInProgress) return false;
 		await flush();
 		return !dirty && editingId === null && !interacting;
 	});
@@ -222,7 +223,7 @@
 	function flush(): Promise<void> {
 		clearTimeout(timer);
 		timer = undefined;
-		if (!dirty || status !== 'ready') return chain;
+		if (!dirty || status !== 'ready' || refreshInProgress) return chain;
 		dirty = false;
 		const text = serializeCanvas(current(), skipped);
 		const version = localVersion;
@@ -292,10 +293,30 @@
 	/** Sync does not notify the map watcher; compare the file, not its mtime. */
 	async function refreshAfterSync(): Promise<void> {
 		const request = ++refreshRequest;
-		if (interacting) {
+		if (interacting || refreshInProgress) {
 			deferredRefresh = true;
 			return;
 		}
+		// A sync decision owns this map until its disk recheck completes. In
+		// particular, a blur-triggered autosave must not replace its dialog.
+		refreshInProgress = true;
+		clearTimeout(timer);
+		timer = undefined;
+		try {
+			await refreshFromDisk(request);
+		} finally {
+			refreshInProgress = false;
+			if (deferredRefresh && !interacting && !destroyed) {
+				deferredRefresh = false;
+				void refreshAfterSync();
+			} else if (dirty) {
+				if (destroyed) void flush();
+				else timer = setTimeout(() => void flush(), 500);
+			}
+		}
+	}
+
+	async function refreshFromDisk(request: number): Promise<void> {
 		await chain;
 		if (destroyed || request !== refreshRequest || status !== 'ready') return;
 		const text = await readMap(mapName).catch((err) => {
@@ -325,6 +346,7 @@
 			cancel: 'Keep mine'
 		});
 		if (destroyed || request !== refreshRequest || status !== 'ready') return;
+		const answeredVersion = localVersion;
 		// Recheck after the dialog: another edit or sync must not be silently lost.
 		const latest = await readMap(mapName).catch((err) => {
 			if (!destroyed)
@@ -335,7 +357,7 @@
 			return undefined;
 		});
 		if (destroyed || latest === undefined || request !== refreshRequest) return;
-		if (latest !== text) {
+		if (latest !== text || answeredVersion !== localVersion) {
 			void refreshAfterSync();
 			return;
 		}
