@@ -19,9 +19,10 @@ export async function tidyLayout(
 	items: readonly TidyItem[],
 	links: readonly { source: string; target: string }[]
 ): Promise<Map<string, { x: number; y: number }>> {
+	if (items.length === 0) return new Map();
 	const { Graph, layout } = await import('@dagrejs/dagre');
 	const g = new Graph({ multigraph: false });
-	g.setGraph({ rankdir: 'LR', nodesep: 26, ranksep: 90, marginx: 0, marginy: 0 });
+	g.setGraph({ rankdir: 'LR', nodesep: 48, ranksep: 100, marginx: 0, marginy: 0 });
 	g.setDefaultEdgeLabel(() => ({}));
 	const ids = new Set(items.map((i) => i.id));
 	for (const i of items) g.setNode(i.id, { width: i.width, height: i.height });
