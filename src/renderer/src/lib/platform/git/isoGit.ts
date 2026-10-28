@@ -2,6 +2,7 @@ import './bufferShim';
 import git, { Errors, type HttpClient, type PromiseFsClient } from 'isomorphic-git';
 import {
 	isTrackedNote,
+	isTrackedChange,
 	type ChangeStatus,
 	type ConflictFile,
 	type GitChange,
@@ -644,7 +645,7 @@ export function createIsoGitSync({ fs, http, dir, getToken }: IsoGitDeps) {
 	async function changes(): Promise<GitChange[] | null> {
 		if (!(await isRepo())) return null;
 		const head = await resolveRef('HEAD');
-		const rows = await git.statusMatrix({ ...base, filter: (f) => isTrackedNote(f) });
+		const rows = await git.statusMatrix({ ...base, filter: (f) => isTrackedChange(f) });
 		const out: GitChange[] = [];
 		for (const [filepath, h, w] of rows) {
 			// [HEAD, WORKDIR, STAGE]: 1/1 = unchanged on disk; 0/0 = gone everywhere.
@@ -684,6 +685,8 @@ export function createIsoGitSync({ fs, http, dir, getToken }: IsoGitDeps) {
 
 	/** Put each note back to HEAD; returns the ones HEAD doesn't have (left on disk, unstaged). */
 	async function revert(paths: string[]): Promise<string[]> {
+		if (paths.some((p) => !isTrackedNote(safePath(p))))
+			throw new GitSyncError('git', 'Only notes can be reverted.');
 		await ensureRepo();
 		const head = await resolveRef('HEAD');
 		const fresh: string[] = [];
@@ -727,6 +730,8 @@ export function createIsoGitSync({ fs, http, dir, getToken }: IsoGitDeps) {
 		await ensureRepo();
 		if (await readState()) throw new GitSyncError('git', 'Finish the pending merge first.');
 		const want = new Set(paths.map(safePath));
+		if ([...want].some((p) => !isTrackedNote(p)))
+			throw new GitSyncError('git', 'Only notes can be stashed.');
 		const files = ((await changes()) ?? []).filter((c) => want.has(c.path));
 		if (!files.length) throw new GitSyncError('git', 'No changes to stash.');
 		const date = Date.now();

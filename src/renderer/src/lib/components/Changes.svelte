@@ -6,6 +6,10 @@
 	import { compactDiff, diffLines } from '../harness/diff';
 	import { docToText } from '../editor/markdown';
 	import DiffView from './DiffView.svelte';
+	import MapDiff from './MapDiff.svelte';
+	import { isTrackedMap } from '../../../../shared/paths';
+	import { isTrackedNote } from '../../../../shared/types';
+	import { diffMap } from '../maps/diff';
 	import Icon from './Icon.svelte';
 	import EmptyState from './EmptyState.svelte';
 	import mascotClean from '$lib/assets/fr5a-clean.png';
@@ -23,13 +27,19 @@
 		lines: ReturnType<typeof compactDiff>;
 		/** Ciphertext on a side (encrypted note, key locked): no diff to show. */
 		sealed: boolean;
+		map: boolean;
+		mapEdits: number | null;
 	};
 
 	function rowOf(c: GitChange): Row {
 		const sealed = [c.before, c.after].some((t) => t !== null && isEncryptedNote(t));
 		const all = sealed ? [] : diffLines(c.before ?? '', c.after ?? '');
+		const map = isTrackedMap(c.path);
+		const semantic = map && !sealed ? diffMap(c.before, c.after) : null;
 		return {
 			...c,
+			map,
+			mapEdits: semantic && !semantic.error ? semantic.nodes.length + semantic.edges.length : null,
 			sealed,
 			added: all.filter((l) => l.op === 'add').length,
 			removed: all.filter((l) => l.op === 'del').length,
@@ -38,6 +48,16 @@
 	}
 
 	const rows = $derived((app.changes ?? []).map(rowOf));
+	const noteRows = $derived(rows.filter((r) => isTrackedNote(r.path)));
+	const mapCount = $derived(rows.filter((r) => r.map).length);
+	const changeCount = $derived(
+		[
+			noteRows.length ? plural(noteRows.length) : '',
+			mapCount ? `${mapCount} ${mapCount === 1 ? 'map' : 'maps'}` : ''
+		]
+			.filter(Boolean)
+			.join(' and ')
+	);
 	const stashKey = (s: GitStash) => `${s.repo}\0${s.id}`;
 	/** What was last picked: a changed note, or a stash shown instead of one. */
 	let picked = $state<string | null>(null);
@@ -85,7 +105,9 @@
 
 	const STATUS = { added: 'A', modified: 'M', deleted: 'D' } as const;
 	const exists = (p: string) => app.notes.some((n) => n.id === p);
-	const plural = (n: number) => `${n} ${n === 1 ? 'note' : 'notes'}`;
+	function plural(n: number): string {
+		return `${n} ${n === 1 ? 'note' : 'notes'}`;
+	}
 	/** "plan.md" for one note, "3 notes" for more. */
 	const count = (paths: string[]) =>
 		paths.length === 1 ? split(paths[0]).name : plural(paths.length);
@@ -133,7 +155,7 @@
 	}
 
 	function startStash(paths: string[]): void {
-		stashing = paths;
+		stashing = paths.filter(isTrackedNote);
 		stashMessage = '';
 		notice = null;
 	}
@@ -152,6 +174,8 @@
 	}
 
 	async function revert(paths: string[]): Promise<void> {
+		paths = paths.filter(isTrackedNote);
+		if (!paths.length) return;
 		const fresh = rows.filter((r) => paths.includes(r.path) && r.status === 'added').length;
 		const ok = await app.confirm({
 			title: `Revert ${count(paths)}?`,
@@ -196,7 +220,7 @@
 				{#if app.changes === null}
 					Not a git repository
 				{:else if rows.length}
-					{plural(rows.length)} changed since the last sync
+					{changeCount} changed since the last sync
 				{:else}
 					Everything is committed
 				{/if}
@@ -293,7 +317,7 @@
 			<EmptyState
 				src={mascotClean}
 				title="All caught up"
-				body="No note differs from the last commit. Edits show up here until the next push or pull."
+				body="No note or map differs from the last commit. Edits show up here until the next push or pull."
 			/>
 		</div>
 	{:else}
@@ -302,22 +326,24 @@
 				{#if rows.length}
 					<div class="side-head">
 						<h2>Changed</h2>
-						{#if canStash}
+						{#if canStash && noteRows.length}
 							<button
 								class="mini"
 								disabled={app.gitBusy}
-								onclick={() => startStash(rows.map((r) => r.path))}>Stash all</button
+								onclick={() => startStash(noteRows.map((r) => r.path))}
+								>Stash {mapCount ? 'notes' : 'all'}</button
 							>
 						{/if}
-						{#if canRevert}
+						{#if canRevert && noteRows.length}
 							<button
 								class="mini danger"
 								disabled={app.gitBusy}
-								onclick={() => revert(rows.map((r) => r.path))}>Revert all</button
+								onclick={() => revert(noteRows.map((r) => r.path))}
+								>Revert {mapCount ? 'notes' : 'all'}</button
 							>
 						{/if}
 					</div>
-					<ul class="files" aria-label="Changed notes">
+					<ul class="files" aria-label="Changed notes and maps">
 						{#each rows as r (r.path)}
 							{@const p = split(r.path)}
 							<li>
@@ -328,11 +354,17 @@
 									<span class="badge {r.status}" title={r.status}>{STATUS[r.status]}</span>
 									<span class="fname">
 										<span class="name">{p.name}</span>
-										{#if p.dir}<span class="dir">{p.dir}</span>{/if}
+										{#if r.map}<span class="dir">Mind map · {p.dir}</span>{:else if p.dir}<span
+												class="dir">{p.dir}</span
+											>{/if}
 									</span>
 									<span class="counts">
-										{#if r.added}<span class="add">+{r.added}</span>{/if}
-										{#if r.removed}<span class="del">−{r.removed}</span>{/if}
+										{#if r.map}
+											<span>{r.mapEdits ? `${r.mapEdits} edits` : 'Source'}</span>
+										{:else}
+											{#if r.added}<span class="add">+{r.added}</span>{/if}
+											{#if r.removed}<span class="del">−{r.removed}</span>{/if}
+										{/if}
 									</span>
 								</button>
 							</li>
@@ -451,21 +483,27 @@
 								>
 							</div>
 							<div class="acts">
-								{#if canRevert}
+								{#if canRevert && !current.map}
 									<button
 										class="btn danger"
 										disabled={app.gitBusy}
 										onclick={() => revert([current.path])}>Revert</button
 									>
 								{/if}
-								{#if canStash}
+								{#if canStash && !current.map}
 									<button
 										class="btn"
 										disabled={app.gitBusy}
 										onclick={() => startStash([current.path])}>Stash</button
 									>
 								{/if}
-								{#if exists(current.path)}
+								{#if current.map && current.after !== null && app.settings.mindMaps && current.path.startsWith('.fr5a/maps/')}
+									<button
+										class="btn"
+										onclick={() => app.openMindMap(split(current.path).name.slice(0, -7))}
+										>Open map</button
+									>
+								{:else if exists(current.path)}
 									<button class="btn" onclick={() => app.openNote(current.path)}>Open note</button>
 								{/if}
 							</div>
@@ -473,6 +511,8 @@
 						<div class="diff-scroll" in:fade={{ duration: ms.fast }}>
 							{#if current.sealed}
 								<p class="muted">Encrypted. Unlock your notes to see what changed.</p>
+							{:else if current.map}
+								<MapDiff before={current.before} after={current.after} />
 							{:else}
 								<DiffView lines={current.lines} />
 							{/if}

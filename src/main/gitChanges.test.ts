@@ -93,3 +93,28 @@ describe('repoChanges', () => {
 		]);
 	});
 });
+
+it('includes changed maps with committed source, including nested repos, but excludes private app data', async () => {
+	const root = repo('maps');
+	const before = '{"nodes":[],"edges":[]}';
+	write(root, '.fr5a/maps/Trade.canvas', before);
+	write(root, '.fr5a/maps/Gone.canvas', before);
+	write(root, '.gitignore', 'nested/\n');
+	git(root, 'add', '-A');
+	git(root, 'commit', '--quiet', '-m', 'maps');
+	write(root, '.fr5a/maps/Trade.canvas', '{"nodes":[{"id":"a"}]}');
+	fs.rmSync(path.join(root, '.fr5a/maps/Gone.canvas'));
+	write(root, '.fr5a/maps/New.canvas', before);
+	write(root, '.fr5a/sessions/private.canvas', 'private');
+	const nested = repo('maps/nested');
+	write(nested, '.fr5a/maps/Nested.canvas', before);
+	const rows = await workspaceChanges(root, ['nested']);
+	expect(rows?.map((r) => r.path)).toEqual([
+		'.fr5a/maps/Gone.canvas',
+		'.fr5a/maps/New.canvas',
+		'.fr5a/maps/Trade.canvas',
+		'nested/.fr5a/maps/Nested.canvas'
+	]);
+	expect(rows?.find((r) => r.path.endsWith('Trade.canvas'))?.before).toBe(before);
+	expect(rows?.find((r) => r.path.endsWith('Gone.canvas'))?.after).toBeNull();
+});

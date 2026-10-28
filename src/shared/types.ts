@@ -1,6 +1,6 @@
 /** Types shared across the main, preload and renderer processes. */
 
-import { isAppNotePath, isHiddenPath } from './paths';
+import { isAppNotePath, isHiddenPath, isTrackedMap } from './paths';
 
 export interface NoteMeta {
 	/** Stable id — the path relative to the workspace root. */
@@ -109,7 +109,7 @@ export interface HttpResponse {
 export type ChangeStatus = 'added' | 'modified' | 'deleted';
 
 /**
- * A note that differs from the last commit (git status). `before` is the
+ * A note or saved map that differs from the last commit (git status). `before` is the
  * committed text (null when new), `after` the file on disk (null when deleted).
  */
 export interface GitChange {
@@ -123,6 +123,11 @@ export interface GitChange {
 /** Note files git status looks at: Markdown / text outside dot-folders, plus saved chats (`.fr5a/chats/`). */
 export function isTrackedNote(path: string): boolean {
 	return /\.(md|markdown|txt)$/i.test(path) && (!isHiddenPath(path) || isAppNotePath(path));
+}
+
+/** Files shown in Changes; does not grant note indexing or destructive note operations. */
+export function isTrackedChange(path: string): boolean {
+	return isTrackedNote(path) || isTrackedMap(path);
 }
 
 /**

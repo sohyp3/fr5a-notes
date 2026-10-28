@@ -177,3 +177,14 @@ export function isScannedPath(p: string): boolean {
 export function isAssetPathAllowed(p: string): boolean {
 	return isImagePath(p) && (!isHiddenPath(p) || isAppAssetPath(p));
 }
+
+/** Saved canvas files, optionally under visible nested repository folders. */
+export function isTrackedMap(path: string): boolean {
+	if (path.includes('\\') || path.startsWith('/') || /\p{Cc}/u.test(path)) return false;
+	const parts = path.split('/');
+	const app = parts.indexOf(APP_DIR);
+	if (app < 0 || parts.length !== app + 3 || parts[app + 1] !== 'maps') return false;
+	if (parts.slice(0, app).some((part) => !part || part.startsWith('.'))) return false;
+	const name = parts[app + 2];
+	return !name.startsWith('.') && /[^/]+\.canvas$/i.test(name);
+}
