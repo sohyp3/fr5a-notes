@@ -509,6 +509,9 @@
 							</div>
 						</div>
 						<div class="diff-scroll" in:fade={{ duration: ms.fast }}>
+							{#if current.map && !current.sealed && current.after !== null && app.settings.mindMaps && !current.path.startsWith('.fr5a/maps/')}
+								<p class="muted">To edit this map, open its repository folder as your workspace.</p>
+							{/if}
 							{#if current.sealed}
 								<p class="muted">Encrypted. Unlock your notes to see what changed.</p>
 							{:else if current.map}

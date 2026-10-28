@@ -6,7 +6,7 @@ Map differences group node and connection additions, removals, and edits. Fields
 
 Map stash and revert are intentionally unavailable: current destructive operations restore notes and may move new notes into the note trash. Map rows omit these actions; mixed batches explicitly offer Stash notes / Revert notes. Desktop note validation is unchanged, and mobile rejects map paths before note operations mutate any file. Map stashes created outside this app are not newly exposed by this change.
 
-Open map is available for existing maps in the current workspace when Mind maps is enabled. Nested repository maps can be compared but cannot be opened through this action because current map navigation accepts a map name only, with no repository context. Deleted maps have no Open action. When Mind maps is disabled, comparisons remain available without loading map persistence or enabling the graph feature.
+Open map is available for existing maps in the current workspace when Mind maps is enabled. Nested repository maps can be compared but cannot be opened through this action because current map navigation accepts a map name only, with no repository context. The detail view tells users to open the nested repository folder as their workspace to edit that map. Deleted maps have no Open action. When Mind maps is disabled, comparisons remain available without loading map persistence or enabling the graph feature.
 
 Changes refresh flushes active map writers and queued saves before reading Git while Mind maps is enabled. A failed save preserves the previous Changes snapshot and logs the existing refresh error path; it does not claim the failed write reached Git.
 

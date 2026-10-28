@@ -72,6 +72,15 @@ for (const mode of ['desktop', 'phone'] as const) {
 			await page.getByRole('button', { name: 'Open map', exact: true }).click();
 			await expect(page.locator('.svelte-flow')).toBeVisible();
 		});
+		test('explains how to open a map from a nested repository', async ({ page }) => {
+			await install(page, [{ ...map, path: 'investing/.fr5a/maps/Trade.canvas' }]);
+			await page.getByRole('list', { name: 'Changed notes and maps' }).getByRole('button').click();
+			await expect(
+				page.getByText('To edit this map, open its repository folder as your workspace.')
+			).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Open map', exact: true })).toHaveCount(0);
+			await expect(page.locator('.map-diff')).toContainText('Horizontal position');
+		});
 		test('keeps malformed map source visible and all actions limited to notes', async ({
 			page
 		}) => {
