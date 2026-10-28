@@ -54,6 +54,7 @@ export const VIM_SHORTCUTS: Shortcut[] = [
 	{ keys: ['i'], desc: 'Insert  ·  Esc → Normal' },
 	{ keys: ['h', 'j', 'k', 'l'], desc: 'Move  ·  w / b / e by word' },
 	{ keys: ['d', 'd'], desc: 'Delete line  ·  yy yank  ·  p paste' },
+	{ keys: ['r'], desc: 'Replace character  ·  R replace mode  ·  Esc → Normal' },
 	{ keys: ['v'], desc: 'Visual  ·  gg / G  top / bottom' },
 	{ keys: ['⇧', 'V'], desc: 'Visual Line  ·  whole-line select' },
 	{ keys: ['/'], desc: 'Find  ·  n next  ·  N previous' }
