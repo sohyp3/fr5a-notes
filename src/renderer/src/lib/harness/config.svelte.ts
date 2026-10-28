@@ -1,3 +1,4 @@
+import { extensions } from '../extensions/registry';
 import { platform } from '../platform';
 import { remapPath } from '../../../../shared/paths';
 import {
@@ -84,7 +85,7 @@ class AiSettings {
 
 	/** Set up and ready to answer: runs locally or has a key. */
 	usable(p: ProviderProfile): boolean {
-		return p.local || !!this.keys[p.id];
+		return p.local || !!this.keys[p.id] || !!extensions.adapter(p.id)?.ownsAuthentication;
 	}
 
 	// --- prices: the profile's own, else models.dev's for the model --------------

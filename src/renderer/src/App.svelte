@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ExtensionViews from './lib/extensions/ExtensionViews.svelte';
 	import { fade, fly } from 'svelte/transition';
 	import { untrack } from 'svelte';
 	import { Spring } from 'svelte/motion';
@@ -651,7 +652,7 @@
 					aria-hidden={!editorShown || overlay}
 					inert={!editorShown || overlay}
 				>
-					<Editor />
+					<ExtensionViews><Editor /></ExtensionViews>
 				</div>
 				{#if overlay}
 					<div
