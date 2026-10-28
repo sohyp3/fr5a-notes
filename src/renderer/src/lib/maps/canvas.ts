@@ -117,6 +117,7 @@ const SIDES = new Set(['top', 'right', 'bottom', 'left']);
 const isObj = (v: unknown): v is Record<string, unknown> =>
 	typeof v === 'object' && v !== null && !Array.isArray(v);
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const optionalString = (v: unknown): boolean => v === undefined || typeof v === 'string';
 
 export const emptyCanvas = (): CanvasDoc => ({ nodes: [], edges: [] });
 
@@ -145,7 +146,8 @@ export function parseCanvas(text: string): ParsedCanvas {
 			ids.has(n.id) ||
 			typeof n.type !== 'string' ||
 			!num(n.x) ||
-			!num(n.y)
+			!num(n.y) ||
+			!['text', 'file', 'url', 'label', 'color'].every((key) => optionalString(n[key]))
 		) {
 			skipped.nodes.push(n);
 			continue;
@@ -170,7 +172,10 @@ export function parseCanvas(text: string): ParsedCanvas {
 			typeof e.fromNode !== 'string' ||
 			typeof e.toNode !== 'string' ||
 			!ids.has(e.fromNode) ||
-			!ids.has(e.toNode)
+			!ids.has(e.toNode) ||
+			!['label', 'color', 'fromSide', 'toSide', 'fromEnd', 'toEnd'].every((key) =>
+				optionalString(e[key])
+			)
 		) {
 			skipped.edges.push(e);
 			continue;

@@ -50,6 +50,33 @@ function ids(value: unknown, label: string): string[] {
 const isStringList = (value: unknown): value is string[] =>
 	Array.isArray(value) && value.every((v) => typeof v === 'string');
 
+/** The canvas parser tolerates foreign data, but AI writes must not introduce
+ * values that Svelte Flow or our node components will treat as strings/numbers. */
+function checkCanvasFields(entries: Record<string, unknown>[], kind: 'node' | 'edge'): void {
+	for (const entry of entries) {
+		const id = entry.id as string;
+		const strings =
+			kind === 'node'
+				? ['type', 'text', 'file', 'url', 'label', 'color']
+				: ['fromNode', 'toNode', 'fromSide', 'toSide', 'fromEnd', 'toEnd', 'label', 'color'];
+		for (const key of strings)
+			if (key in entry && typeof entry[key] !== 'string')
+				throw new Error(`Canvas ${kind} “${id}”: ${key} must be a string.`);
+		if (kind === 'node') {
+			for (const key of ['x', 'y', 'width', 'height'])
+				if (
+					key in entry &&
+					(typeof entry[key] !== 'number' ||
+						!Number.isFinite(entry[key]) ||
+						((key === 'width' || key === 'height') && (entry[key] as number) <= 0))
+				)
+					throw new Error(
+						`Canvas node “${id}”: ${key} must be a finite positive number for sizes, or a finite number for positions.`
+					);
+		}
+	}
+}
+
 export function mapPatch(raw: unknown, before: CanvasDoc, notes: readonly NoteMeta[]): CanvasDoc {
 	if (!raw || typeof raw !== 'object' || Array.isArray(raw))
 		throw new Error('Pass a patch object.');
@@ -59,6 +86,8 @@ export function mapPatch(raw: unknown, before: CanvasDoc, notes: readonly NoteMe
 		throw new Error('Patch must contain only nodes, edges, removeNodes or removeEdges.');
 	const addedNodes = 'nodes' in patch ? objects(patch.nodes, 'nodes') : [];
 	const addedEdges = 'edges' in patch ? objects(patch.edges, 'edges') : [];
+	checkCanvasFields(addedNodes, 'node');
+	checkCanvasFields(addedEdges, 'edge');
 	const removedNodes = 'removeNodes' in patch ? ids(patch.removeNodes, 'removeNodes') : [];
 	const removedEdges = 'removeEdges' in patch ? ids(patch.removeEdges, 'removeEdges') : [];
 	if (

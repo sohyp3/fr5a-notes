@@ -139,6 +139,32 @@ async function newAtlas(page: Page): Promise<void> {
 	await expect(page.getByRole('region', { name: 'Mind map Atlas' })).toBeVisible();
 }
 
+test('opening an externally written map with malformed display fields does not crash', async ({
+	page
+}) => {
+	const errors: string[] = [];
+	page.on('pageerror', (error) => errors.push(error.message));
+	await install(page);
+	await page.evaluate(async (rel) => {
+		await (window as unknown as Win).api.writeMeta(
+			rel,
+			JSON.stringify({
+				nodes: [
+					{ id: 'idea', type: 'text', text: 'Idea', x: 0, y: 0 },
+					{ id: 'bad-file', type: 'file', file: { path: 'Work/Spec.md' }, x: 280, y: 0 }
+				],
+				edges: [{ id: 'edge', fromNode: 'idea', toNode: 'bad-file' }]
+			})
+		);
+	}, MAP);
+	await openMaps(page);
+	await page.getByRole('button', { name: 'Atlas Mind map' }).click();
+	const map = page.getByRole('region', { name: 'Mind map Atlas' });
+	await expect(map.locator('.svelte-flow__node')).toHaveCount(1);
+	await expect(map.locator('.svelte-flow__node', { hasText: 'Idea' })).toBeVisible();
+	expect(errors).toEqual([]);
+});
+
 async function checkBackWhileSaving(p: Page, touch: boolean): Promise<void> {
 	await newAtlas(p);
 	await p.evaluate(

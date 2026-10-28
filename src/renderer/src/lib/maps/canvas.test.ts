@@ -133,6 +133,25 @@ describe('JSON Canvas files', () => {
 		expect(back.edges.map((e: { id: string }) => e.id)).toEqual(['fine', 'dangling']);
 	});
 
+	it('does not pass non-string node and edge fields to the map renderer', () => {
+		const raw = {
+			nodes: [
+				{ id: 'good', type: 'text', text: 'Good', x: 0, y: 0 },
+				{ id: 'bad-file', type: 'file', file: { path: 'x.md' }, x: 1, y: 2 },
+				{ id: 'bad-text', type: 'text', text: ['not text'], x: 2, y: 3 }
+			],
+			edges: [{ id: 'bad-label', fromNode: 'good', toNode: 'good', label: { text: 'bad' } }]
+		};
+		const parsed = parseCanvas(JSON.stringify(raw));
+		expect(parsed.doc.nodes.map((n) => n.id)).toEqual(['good']);
+		expect(parsed.doc.edges).toEqual([]);
+		expect(parsed.skipped.nodes).toHaveLength(2);
+		expect(parsed.skipped.edges).toHaveLength(1);
+		const saved = JSON.parse(serializeCanvas(parsed.doc, parsed.skipped));
+		expect(saved.nodes.slice(1)).toEqual(raw.nodes.slice(1));
+		expect(saved.edges).toEqual(raw.edges);
+	});
+
 	it('names maps after their files', () => {
 		expect(mapNameOf('Atlas plan.canvas')).toBe('Atlas plan');
 		expect(mapNameOf('notes.md')).toBeNull();
