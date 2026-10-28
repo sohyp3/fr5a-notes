@@ -1,25 +1,25 @@
 import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
-import { undo, redo } from '@tiptap/pm/history';
+import { closeHistory, undo, redo } from '@tiptap/pm/history';
 import type { EditorState, Transaction } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 import type { Node as PMNode } from '@tiptap/pm/model';
 
 /**
- * A compact Vim mode for the raw-Markdown editor. There is no maintained
- * ProseMirror/TipTap Vim package, so this implements the essentials directly:
+ * A compact Vim extension for the raw-Markdown ProseMirror editor. The installed
+ * editor extensions do not provide Vim, so modal editing stays in this plugin:
  *
- *   modes    normal · insert · visual · visual-line
+ *   modes    normal · insert · replace · visual · visual-line
  *   motions  h j k l · w b e · 0 $ · gg G
  *   inserts  i a I A o O
- *   edits    x · dd dw d$ · yy · p · u · Ctrl-r
+ *   edits    x · r + character · R replace mode · dd dw d$ · yy · p · u · Ctrl-r
  *   visual   v / V + motions, then d / y / x (V selects whole lines)
  *
  * "Lines" are paragraphs (the editor stores one Markdown line per paragraph).
  */
 
-export type VimMode = 'normal' | 'insert' | 'visual' | 'visual-line';
+export type VimMode = 'normal' | 'insert' | 'replace' | 'visual' | 'visual-line';
 
 interface VimPluginState {
 	mode: VimMode;
@@ -98,7 +98,7 @@ function wordEnd(text: string, col: number): number {
 // --- state transitions ------------------------------------------------------
 
 function setMode(tr: Transaction, mode: VimMode, anchor: number | null = null): Transaction {
-	return tr.setMeta(vimKey, { mode, anchor });
+	return tr.setMeta(vimKey, { mode, anchor, pending: '' });
 }
 
 function apply(view: EditorView, tr: Transaction): void {
@@ -163,19 +163,14 @@ function deleteLines(view: EditorView, selFrom: number, selTo: number): void {
 		.map((l) => l.text)
 		.join('\n');
 	registerLinewise = true;
-	let from: number;
-	let to: number;
-	if (i > 0) {
-		from = ls[i - 1].end;
-		to = ls[j].end;
-	} else if (j < ls.length - 1) {
-		from = ls[i].start;
-		to = ls[j + 1].start - 1;
-	} else {
-		from = ls[i].start;
-		to = ls[j].end;
-	}
-	const tr = view.state.tr.delete(from, to);
+	// Delete whole paragraph nodes; deleting text boundaries can leave an empty
+	// paragraph or merge the neighbouring lines in ProseMirror.
+	const from = ls[i].start - 1;
+	const to = ls[j].end + 1;
+	const tr = closeHistory(view.state.tr).delete(from, to);
+	const remaining = lines(tr.doc);
+	const target = remaining[Math.min(i, remaining.length - 1)];
+	tr.setSelection(TextSelection.create(tr.doc, target.start));
 	setMode(tr, 'normal');
 	apply(view, tr);
 }
@@ -215,6 +210,16 @@ function handleNormal(
 	if (vs.pending) {
 		const op = vs.pending;
 		const clearPending = () => apply(view, view.state.tr.setMeta(vimKey, { pending: '' }));
+		if (op === 'r') {
+			if (key.length === 1 && head < line.end) {
+				const tr = closeHistory(state.tr).insertText(key, head, head + 1);
+				tr.setSelection(TextSelection.create(tr.doc, head));
+				apply(view, setMode(tr, 'normal'));
+			} else {
+				clearPending();
+			}
+			return true;
+		}
 		if (op === 'g') {
 			if (key === 'g') {
 				moveTo(view, ls[0].start, vs.mode, vs.anchor);
@@ -223,18 +228,14 @@ function handleNormal(
 			return true;
 		}
 		if (op === 'd' || op === 'y') {
-			const linewise = key === op; // dd / yy
+			const linewise = false;
 			let from: number;
 			let to: number;
 			if (key === op) {
-				// Whole line: join with a neighbouring newline so the line is removed.
-				if (index === 0 && ls.length > 1) {
-					from = line.start;
-					to = ls[1].start - 1;
-				} else {
-					from = index > 0 ? ls[index - 1].end : line.start;
-					to = line.end;
-				}
+				if (op === 'd') deleteLines(view, head, head);
+				else yankLines(view, head, head);
+				clearPending();
+				return true;
 			} else if (key === 'w') {
 				to = line.start + wordForward(line.text, col);
 				from = head;
@@ -330,12 +331,23 @@ function handleNormal(
 			}
 			return true;
 		}
+		case 'R':
+			apply(view, setMode(closeHistory(state.tr), 'replace'));
+			return true;
+		case 'r':
+			apply(view, state.tr.setMeta(vimKey, { pending: 'r' }));
+			return true;
 		case 'p': {
-			if (!register) return true;
-			const tr = state.tr;
+			if (!register && !registerLinewise) return true;
+			const tr = closeHistory(state.tr);
 			if (registerLinewise) {
-				const insertAt = line.end;
-				tr.insertText('\n' + register, insertAt);
+				const insertAt = line.end + 1;
+				const paragraphs = register
+					.split('\n')
+					.map((text) =>
+						state.schema.nodes.paragraph.create(null, text ? state.schema.text(text) : undefined)
+					);
+				tr.insert(insertAt, paragraphs);
 				tr.setSelection(TextSelection.create(tr.doc, insertAt + 1));
 			} else {
 				const at = Math.min(head + 1, line.end);
@@ -466,6 +478,30 @@ export const Vim = Extension.create<VimOptions>({
 					},
 					handleKeyDown(view, event) {
 						const vs = vimKey.getState(view.state)!;
+						if (vs.mode === 'replace') {
+							const { state } = view;
+							const head = state.selection.head;
+							const { line } = lineAt(lines(state.doc), head);
+							if (event.key === 'Escape') {
+								const tr = state.tr.setSelection(
+									TextSelection.create(state.doc, clampNormal(line, head - 1))
+								);
+								apply(view, setMode(tr, 'normal'));
+							} else if (event.ctrlKey || event.metaKey || event.altKey) {
+								return false;
+							} else if (event.key.length === 1) {
+								const tr = state.tr.insertText(event.key, head, Math.min(head + 1, line.end));
+								tr.setSelection(TextSelection.create(tr.doc, head + event.key.length));
+								apply(view, tr);
+							} else if (event.key === 'Backspace') {
+								// Move back without deleting the paragraph boundary.
+								moveTo(view, Math.max(line.start, head - 1), vs.mode, null);
+							} else {
+								return false;
+							}
+							event.preventDefault();
+							return true;
+						}
 						if (vs.mode === 'insert') {
 							if (event.key === 'Escape') {
 								const ls = lines(view.state.doc);
