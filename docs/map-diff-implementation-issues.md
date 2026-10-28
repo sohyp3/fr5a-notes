@@ -11,3 +11,9 @@ Open map is available for existing maps in the current workspace when Mind maps 
 Changes refresh flushes active map writers and queued saves before reading Git while Mind maps is enabled. A failed save preserves the previous Changes snapshot and logs the existing refresh error path; it does not claim the failed write reached Git.
 
 Verification includes semantic and hostile path tests, real desktop Git repositories including nested maps, real isomorphic-git map inclusion and destructive-operation rejection, and browser checks at 1440×900 and 390×844 with fake Git snapshots. Browser checks cover semantic fields, Open map, map-only action restrictions, mixed note/map actions, and malformed source fallback.
+
+## Lazy comparison loading
+
+The semantic parser and map comparison component load dynamically only when Changes contains an actual unsealed map row. Note-only Changes and the disabled-map startup/graph flow request no map comparison, editor, layout, or persistence modules. Existing changed maps remain reviewable while Mind maps is disabled; this loads only the read-only comparison component and parser. A chunk-loading failure leaves the ordinary source diff visible and offers Try again.
+
+Integration browser coverage checks both disabled-map cases at desktop and phone sizes, plus the original graph-only no-map-requests regression.
