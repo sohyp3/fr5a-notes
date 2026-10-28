@@ -38,6 +38,8 @@ export default defineConfig({
 	},
 	renderer: {
 		root: 'src/renderer',
+		// Tidy loads dagre on demand; prebundle it to avoid a first-use dev-server reload.
+		optimizeDeps: { include: ['@dagrejs/dagre'] },
 		define: buildInfo(),
 		resolve: {
 			alias: {
