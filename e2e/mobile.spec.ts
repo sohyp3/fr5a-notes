@@ -638,7 +638,7 @@ test('changes: stash a note, see it, restore it, then revert', async ({ page }) 
 	await changedFile(page, 'plan.md').tap();
 	await page.getByRole('button', { name: 'Revert', exact: true }).tap();
 	await page.getByRole('alertdialog').getByRole('button', { name: 'Revert' }).tap();
-	await expect(page.getByText('No note differs from the last commit.')).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'All caught up' })).toBeVisible();
 	await page.getByRole('button', { name: 'Close changes' }).tap();
 	await expect(page.locator('.ProseMirror')).toContainText('first line');
 	await expect(page.locator('.ProseMirror')).not.toContainText('extra');
@@ -654,7 +654,7 @@ test('changes: a stash can be dropped after confirming', async ({ page }) => {
 	await page.getByRole('button', { name: 'Drop' }).tap();
 	await page.getByRole('alertdialog').getByRole('button', { name: 'Drop' }).tap();
 	await expect(stashList).toHaveCount(0);
-	await expect(page.getByText('No note differs from the last commit.')).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'All caught up' })).toBeVisible();
 });
 
 // --- layout ----------------------------------------------------------------------------
