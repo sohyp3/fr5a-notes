@@ -804,3 +804,79 @@ test('touch selection exposes group actions without modifier keys', async ({ pag
 		path: `test-results/maps-touch-selection-${test.info().project.name.replaceAll(' ', '-')}.png`
 	});
 });
+
+test('mixed tag and note group deletion preserves surviving tag exclusions and undo', async ({
+	browser
+}) => {
+	const { ctx, page } = await desktopPage(browser);
+	try {
+		await page.evaluate(async (rel) => {
+			await (window as unknown as Win).api.writeMeta(
+				rel,
+				JSON.stringify({
+					nodes: [
+						{
+							id: 'tag-a',
+							type: 'text',
+							text: '#atlas',
+							x: 0,
+							y: 0,
+							width: 160,
+							height: 44,
+							fr5a: { tag: 'atlas', exclude: [] }
+						},
+						{
+							id: 'tag-b',
+							type: 'text',
+							text: '#atlas/ui',
+							x: 0,
+							y: 180,
+							width: 160,
+							height: 44,
+							fr5a: { tag: 'atlas/ui', exclude: [] }
+						},
+						{
+							id: 'design',
+							type: 'file',
+							file: 'Work/Design.md',
+							x: 300,
+							y: 0,
+							width: 240,
+							height: 72,
+							fr5a: { from: 'tag-a' }
+						}
+					],
+					edges: [
+						{ id: 'a-design', fromNode: 'tag-a', toNode: 'design' },
+						{ id: 'b-design', fromNode: 'tag-b', toNode: 'design' }
+					]
+				})
+			);
+		}, MAP);
+		await openMaps(page);
+		await page.getByRole('button', { name: 'Atlas Mind map' }).click();
+		const map = page.getByRole('region', { name: 'Mind map Atlas' });
+		await expect(map.locator('.svelte-flow__node')).toHaveCount(3);
+		await map.getByRole('button', { name: 'Select multiple nodes' }).click();
+		await map.locator('.svelte-flow__node[data-id="tag-a"] .text').click();
+		await map.locator('.svelte-flow__node[data-id="design"]').click();
+		await expect(map.getByText('2 selected', { exact: true })).toBeVisible();
+		await map.getByRole('button', { name: 'Delete selected nodes' }).click();
+		await expect(map.locator('.svelte-flow__node')).toHaveCount(1);
+		await expect
+			.poll(async () => (await savedMap(page))?.nodes.find((n) => n.id === 'tag-b')?.fr5a?.exclude)
+			.toEqual(['Work/Design.md']);
+		expect((await savedMap(page))?.edges).toHaveLength(0);
+		await map.getByRole('button', { name: 'Undo', exact: true }).click();
+		await expect(map.locator('.svelte-flow__node')).toHaveCount(3);
+		await expect(map.locator('.svelte-flow__edge')).toHaveCount(2);
+		await expect
+			.poll(async () => (await savedMap(page))?.nodes.find((n) => n.id === 'tag-b')?.fr5a?.exclude)
+			.toEqual([]);
+		expect(
+			await page.evaluate(() => (window as unknown as Win).api.readNote('Work/Design.md'))
+		).toBe('# Design\n\nScreens #atlas/ui');
+	} finally {
+		await ctx.close();
+	}
+});
