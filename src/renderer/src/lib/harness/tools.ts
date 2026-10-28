@@ -1,3 +1,4 @@
+import { extensions } from '../extensions/registry';
 import type { NoteMeta } from '../../../../shared/types';
 import { blockedReason, isHidden } from './privacy';
 import { formatResults, type SearchResult } from './web';
@@ -66,7 +67,9 @@ export interface Tool {
 
 /** Exactly the tools handed to the model and accepted by the loop for this run. */
 export function toolsForRun(skill: Skill | null, deps: ToolDeps): Tool[] {
-	return deps.profile.tools ? allowedTools(skill, createTools(deps), (tool) => tool.def.name) : [];
+	return deps.profile.tools
+		? allowedTools(skill, extensions.tools(createTools(deps)), (tool) => tool.def.name)
+		: [];
 }
 
 /** "current" is a chat attachment, not a bypass around note permissions. */

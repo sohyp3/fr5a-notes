@@ -16,6 +16,9 @@ import '@fontsource/cairo/400.css';
 import '@fontsource/cairo/600.css';
 import './app.css';
 import App from './App.svelte';
+import { setupExtensions } from './lib/extensions/setup';
+
+setupExtensions();
 
 // WebKit (iOS) only applies :active to touched elements when some touch
 // listener exists; passive, so it never holds up scrolling.

@@ -1,10 +1,11 @@
+import { extensions, runExtensionHarness } from '../extensions/registry';
 import { platform } from '../platform';
 import { SvelteSet } from 'svelte/reactivity';
 import { getAppState } from '../stores/app.svelte';
 import { docToText } from '../editor/markdown';
 import { getAiSettings } from './config.svelte';
 import { buildSystemPrompt, estimateTokens, today, type AttachedNote } from './context';
-import { abortable, closeCalls, runLoop } from './loop';
+import { abortable, closeCalls } from './loop';
 import { describeError } from './errors';
 import { AbortError, ProviderError, chatCompletion } from './openai';
 import { blockedReason, isHidden, isLocalOnly } from './privacy';
@@ -396,10 +397,12 @@ class HarnessState {
 			);
 			await platform.writeMeta(SEEDED_MARKER, 'built-in skills seeded\n');
 		}
-		this.skills = await loadSkillTree({
+		const loaded = await loadSkillTree({
 			list: (rel) => platform.listMeta(rel),
 			read: (rel) => platform.readMeta(rel)
 		});
+		const modes = extensions.modes();
+		this.skills = [...loaded.filter((s) => !modes.some((m) => m.name === s.name)), ...modes];
 	}
 
 	newTab(): void {
@@ -828,7 +831,7 @@ class HarnessState {
 				]),
 				signal
 			);
-			if (!apiKey && !profile.local)
+			if (!apiKey && !profile.local && !extensions.adapter(profile.id)?.ownsAuthentication)
 				throw new Error(
 					profile.id === OPENCODE.id
 						? `${profile.name} needs an API key: get one at ${OPENCODE_KEY_URL}, then paste it in Settings → AI.`
@@ -937,7 +940,7 @@ class HarnessState {
 				tab.history = [...closeCalls(tab.history), { role: 'user', content: userText }];
 			messages = [{ role: 'system', content: system }, ...tab.history];
 
-			const outcome = await runLoop({
+			const outcome = await runExtensionHarness({
 				profile,
 				messages,
 				tools,
@@ -945,13 +948,16 @@ class HarnessState {
 				signal,
 				complete: async (req) => {
 					startAi();
-					const res = await chatCompletion(platform, {
-						...req,
-						profile,
-						apiKey,
-						session: chatId,
-						client: `fr5a/${__APP_VERSION__}`
-					});
+					const adapter = extensions.adapter(profile.id);
+					const res = adapter
+						? await adapter.complete(req)
+						: await chatCompletion(platform, {
+								...req,
+								profile,
+								apiKey,
+								session: chatId,
+								client: `fr5a/${__APP_VERSION__}`
+							});
 					if (res.usage) used = addUsage(used, res.usage);
 					return res;
 				},
