@@ -836,14 +836,20 @@ test('AI harness: the prompt mark, a one-line draft and Send share one line', as
 	await openPlan(page);
 	const harness = await openHarness(page);
 	await harness.locator('textarea').fill('hello');
-	const mid = (loc: Locator) =>
-		loc.evaluate((el) => {
-			const r = el.getBoundingClientRect();
-			return r.top + r.height / 2;
-		});
-	const send = await mid(harness.getByRole('button', { name: 'Send' }));
-	expect(Math.abs((await mid(harness.locator('textarea'))) - send)).toBeLessThanOrEqual(1);
-	expect(Math.abs((await mid(harness.locator('.ps1'))) - send)).toBeLessThanOrEqual(1);
+	// Measure the whole composer in one browser turn: the tablet sheet can
+	// still be translating after it becomes visible, so separate reads drift.
+	await expect
+		.poll(() =>
+			harness.evaluate((el) => {
+				const mid = (selector: string) => {
+					const r = el.querySelector(selector)!.getBoundingClientRect();
+					return r.top + r.height / 2;
+				};
+				const send = mid('button[aria-label="Send"]');
+				return Math.max(Math.abs(mid('textarea') - send), Math.abs(mid('.ps1') - send));
+			})
+		)
+		.toBeLessThanOrEqual(1);
 });
 
 test('settings show the app version', async ({ page }) => {
