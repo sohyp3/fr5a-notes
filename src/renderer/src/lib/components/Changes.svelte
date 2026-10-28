@@ -6,10 +6,8 @@
 	import { compactDiff, diffLines } from '../harness/diff';
 	import { docToText } from '../editor/markdown';
 	import DiffView from './DiffView.svelte';
-	import MapDiff from './MapDiff.svelte';
 	import { isTrackedMap } from '../../../../shared/paths';
 	import { isTrackedNote } from '../../../../shared/types';
-	import { diffMap } from '../maps/diff';
 	import Icon from './Icon.svelte';
 	import EmptyState from './EmptyState.svelte';
 	import mascotClean from '$lib/assets/fr5a-clean.png';
@@ -20,6 +18,27 @@
 	const app = getAppState();
 	const canStash = !!platform.gitStash;
 	const canRevert = !!platform.gitRevert;
+
+	// Map comparison is optional even when Changes itself is imported at boot.
+	// Only actual map rows justify loading the semantic parser and its view.
+	let mapTools = $state.raw<{
+		Component: typeof import('./MapDiff.svelte').default;
+		diffMap: typeof import('../maps/diff').diffMap;
+	} | null>(null);
+	let loadingMapTools = $state(false);
+	let mapLoadError = $state(false);
+	async function loadMapTools(): Promise<void> {
+		loadingMapTools = true;
+		mapLoadError = false;
+		try {
+			const [view, tools] = await Promise.all([import('./MapDiff.svelte'), import('../maps/diff')]);
+			mapTools = { Component: view.default, diffMap: tools.diffMap };
+		} catch {
+			mapLoadError = true;
+		} finally {
+			loadingMapTools = false;
+		}
+	}
 
 	type Row = GitChange & {
 		added: number;
@@ -35,7 +54,7 @@
 		const sealed = [c.before, c.after].some((t) => t !== null && isEncryptedNote(t));
 		const all = sealed ? [] : diffLines(c.before ?? '', c.after ?? '');
 		const map = isTrackedMap(c.path);
-		const semantic = map && !sealed ? diffMap(c.before, c.after) : null;
+		const semantic = map && !sealed && mapTools ? mapTools.diffMap(c.before, c.after) : null;
 		return {
 			...c,
 			map,
@@ -48,6 +67,15 @@
 	}
 
 	const rows = $derived((app.changes ?? []).map(rowOf));
+	$effect(() => {
+		if (
+			rows.some((row) => row.map && !row.sealed) &&
+			!mapTools &&
+			!loadingMapTools &&
+			!mapLoadError
+		)
+			void loadMapTools();
+	});
 	const noteRows = $derived(rows.filter((r) => isTrackedNote(r.path)));
 	const mapCount = $derived(rows.filter((r) => r.map).length);
 	const changeCount = $derived(
@@ -515,7 +543,20 @@
 							{#if current.sealed}
 								<p class="muted">Encrypted. Unlock your notes to see what changed.</p>
 							{:else if current.map}
-								<MapDiff before={current.before} after={current.after} />
+								{#if mapTools}
+									{@const MapDiff = mapTools.Component}
+									<MapDiff before={current.before} after={current.after} />
+								{:else}
+									{#if mapLoadError}
+										<p class="muted">
+											The map comparison could not load. <button
+												class="link"
+												onclick={() => void loadMapTools()}>Try again</button
+											>
+										</p>
+									{:else}<p class="muted" role="status">Loading map comparison…</p>{/if}
+									<DiffView lines={current.lines} />
+								{/if}
 							{:else}
 								<DiffView lines={current.lines} />
 							{/if}

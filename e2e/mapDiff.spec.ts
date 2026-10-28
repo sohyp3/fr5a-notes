@@ -20,23 +20,26 @@ const after = JSON.stringify({
 	edges: [{ id: 'e', fromNode: 'a', toNode: 'b', label: 'review' }]
 });
 
-async function install(page: Page, rows: GitChange[]) {
+async function install(page: Page, rows: GitChange[], enabled = true) {
 	await page.addInitScript(installFakeApi);
-	await page.addInitScript((changes) => {
-		const w = window as unknown as {
-			api: {
-				gitChanges(): Promise<unknown>;
-				getState(key: string): Promise<unknown>;
-				writeMeta(path: string, text: string): Promise<void>;
+	await page.addInitScript(
+		({ changes, enabled }) => {
+			const w = window as unknown as {
+				api: {
+					gitChanges(): Promise<unknown>;
+					getState(key: string): Promise<unknown>;
+					writeMeta(path: string, text: string): Promise<void>;
+				};
 			};
-		};
-		w.api.gitChanges = async () => changes;
-		const get = w.api.getState.bind(w.api);
-		w.api.getState = async (key) => (key === 'settings' ? { mindMaps: true } : get(key));
-		for (const row of changes)
-			if (row.after !== null && row.path.startsWith('.fr5a/maps/'))
-				void w.api.writeMeta(row.path.slice(6), row.after);
-	}, rows);
+			w.api.gitChanges = async () => changes;
+			const get = w.api.getState.bind(w.api);
+			w.api.getState = async (key) => (key === 'settings' ? { mindMaps: enabled } : get(key));
+			for (const row of changes)
+				if (row.after !== null && row.path.startsWith('.fr5a/maps/'))
+					void w.api.writeMeta(row.path.slice(6), row.after);
+		},
+		{ changes: rows, enabled }
+	);
 	await page.goto('/');
 	await expect(page.locator('.body[data-layout]')).toBeVisible();
 	if ((await page.locator('.body').getAttribute('data-layout')) === 'phone') {
@@ -71,6 +74,36 @@ for (const mode of ['desktop', 'phone'] as const) {
 			await page.screenshot({ path: info.outputPath(`map-diff-${mode}.png`) });
 			await page.getByRole('button', { name: 'Open map', exact: true }).click();
 			await expect(page.locator('.svelte-flow')).toBeVisible();
+		});
+		test('compares changed maps with Mind maps disabled without loading the map editor', async ({
+			page
+		}) => {
+			const loaded: string[] = [];
+			page.on('request', (request) => loaded.push(request.url()));
+			await install(page, [map], false);
+			await page.getByRole('list', { name: 'Changed notes and maps' }).getByRole('button').click();
+			await expect(page.locator('.map-diff')).toContainText('Updated thesis');
+			await expect(page.getByRole('button', { name: 'Open map', exact: true })).toHaveCount(0);
+			expect(
+				loaded.filter((url) => /xyflow|dagre|MapEditor|MapCanvas|lib\/maps\/(?!diff)/.test(url))
+			).toEqual([]);
+		});
+		test('leaves comparison code unloaded for note-only Changes with Mind maps disabled', async ({
+			page
+		}) => {
+			const loaded: string[] = [];
+			page.on('request', (request) => loaded.push(request.url()));
+			await install(
+				page,
+				[{ path: 'hello.md', status: 'modified', before: '# Hello', after: '# Hello\nchanged' }],
+				false
+			);
+			await expect(page.getByRole('list', { name: 'Changed notes and maps' })).toContainText(
+				'hello.md'
+			);
+			expect(
+				loaded.filter((url) => /xyflow|dagre|MapDiff|MapEditor|MapCanvas|lib\/maps\//.test(url))
+			).toEqual([]);
 		});
 		test('explains how to open a map from a nested repository', async ({ page }) => {
 			await install(page, [{ ...map, path: 'investing/.fr5a/maps/Trade.canvas' }]);
