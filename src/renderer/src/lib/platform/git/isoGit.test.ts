@@ -592,3 +592,26 @@ describe('isomorphic-git sync', () => {
 		expect(read(a.dir, 'private/diary.md')).toBe('# Diary\n');
 	});
 });
+
+it('reports map changes on mobile while keeping map destructive operations out of note APIs', async () => {
+	const a = client('maps');
+	await git.init({ fs, dir: a.dir, defaultBranch: 'main' });
+	const before = '{"nodes":[],"edges":[]}';
+	write(a.dir, '.fr5a/maps/Trade.canvas', before);
+	await git.add({ fs, dir: a.dir, filepath: '.fr5a/maps/Trade.canvas' });
+	await git.commit({
+		fs,
+		dir: a.dir,
+		message: 'map',
+		author: { name: 'Test', email: 'test@example.com' }
+	});
+	write(a.dir, '.fr5a/maps/Trade.canvas', '{"nodes":[{"id":"node"}]}');
+	write(a.dir, '.fr5a/maps/New.canvas', before);
+	write(a.dir, '.fr5a/sessions/private.canvas', 'private');
+	const changes = await a.sync.changes();
+	expect(changes?.map((r) => r.path)).toEqual(['.fr5a/maps/New.canvas', '.fr5a/maps/Trade.canvas']);
+	expect(changes?.find((r) => r.path.endsWith('Trade.canvas'))?.before).toBe(before);
+	await expect(a.sync.stashPush(['.fr5a/maps/Trade.canvas'], 'map')).rejects.toThrow(/Only notes/);
+	await expect(a.sync.revert(['.fr5a/maps/Trade.canvas'])).rejects.toThrow(/Only notes/);
+	expect(read(a.dir, '.fr5a/maps/Trade.canvas')).toBe('{"nodes":[{"id":"node"}]}');
+});

@@ -568,6 +568,12 @@ class AppState {
 		this.changesLoading = true;
 		try {
 			await this.flush();
+			if (this.settings.mindMaps) {
+				const { guardMapRead, savedAll } = await import('../maps/files');
+				if (this.activeMindMap && this.activeMindMap !== 'all')
+					await guardMapRead(this.activeMindMap);
+				await savedAll();
+			}
 			this.changes = await platform.gitChanges();
 		} catch (err) {
 			console.error('[changes]', err);

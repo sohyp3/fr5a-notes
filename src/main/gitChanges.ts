@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { isTrackedNote, type ChangeStatus, type GitChange } from '../shared/types';
+import { isTrackedChange, type ChangeStatus, type GitChange } from '../shared/types';
 
 /**
  * "What changed since the last sync": git status of the workspace's notes plus
@@ -77,7 +77,7 @@ export async function repoChanges(dir: string, prefix = ''): Promise<GitChange[]
 	if (st.code !== 0) return null;
 	const out: GitChange[] = [];
 	for (const row of parsePorcelain(st.stdout)) {
-		if (!isTrackedNote(row.path)) continue;
+		if (!isTrackedChange(row.path)) continue;
 		const before =
 			row.status === 'added' || !hasHead
 				? null

@@ -604,7 +604,7 @@ async function changePlan(page: Page) {
 }
 
 const changedFile = (page: Page, name: string) =>
-	page.getByRole('list', { name: 'Changed notes' }).locator('.file').filter({ hasText: name });
+	page.getByRole('list', { name: 'Changed notes and maps' }).locator('.file').filter({ hasText: name });
 
 test('changes: an edited note shows up with its diff', async ({ page }) => {
 	await changePlan(page);
@@ -622,7 +622,7 @@ test('changes: stash a note, see it, restore it, then revert', async ({ page }) 
 	await page.getByLabel('Stash plan.md as').fill('try this');
 	await page.locator('form.bar').getByRole('button', { name: 'Stash' }).tap();
 	await expect(page.getByRole('status')).toContainText('Stashed plan.md as “try this”');
-	await expect(page.getByRole('list', { name: 'Changed notes' })).toHaveCount(0);
+	await expect(page.getByRole('list', { name: 'Changed notes and maps' })).toHaveCount(0);
 
 	// The stash lists its notes with their diff.
 	await page.getByRole('list', { name: 'Stashes' }).getByText('try this').tap();
