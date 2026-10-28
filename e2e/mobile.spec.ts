@@ -604,7 +604,10 @@ async function changePlan(page: Page) {
 }
 
 const changedFile = (page: Page, name: string) =>
-	page.getByRole('list', { name: 'Changed notes and maps' }).locator('.file').filter({ hasText: name });
+	page
+		.getByRole('list', { name: 'Changed notes and maps' })
+		.locator('.file')
+		.filter({ hasText: name });
 
 test('changes: an edited note shows up with its diff', async ({ page }) => {
 	await changePlan(page);
