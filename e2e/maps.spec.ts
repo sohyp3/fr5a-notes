@@ -714,3 +714,93 @@ test('desktop maps: a change on disk asks Reload / Keep mine; Tidy; graph-only M
 	await expect(page.getByRole('region', { name: 'All notes map' })).toBeVisible();
 	await ctx.close();
 });
+
+test('selection mode supports group actions, magnet aligns positions, and undo restores deletion', async ({
+	browser
+}) => {
+	const { ctx, page } = await desktopPage(browser);
+	try {
+		await newAtlas(page);
+		await addIdea(page, 'First idea', false);
+		await addIdea(page, 'Second idea', false);
+		const map = page.getByRole('region', { name: 'Mind map Atlas' });
+		const cards = map.locator('.svelte-flow__node');
+		const a = await cards.nth(0).boundingBox(),
+			b = await cards.nth(1).boundingBox();
+		expect(
+			a &&
+				b &&
+				(a.x + a.width <= b.x ||
+					b.x + b.width <= a.x ||
+					a.y + a.height <= b.y ||
+					b.y + b.height <= a.y)
+		).toBeTruthy();
+		await map.getByRole('button', { name: 'Snap to grid', exact: true }).click();
+		await expect(map.getByRole('button', { name: 'Snap to grid', exact: true })).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+		await expect
+			.poll(async () =>
+				(await savedMap(page))?.nodes.every((n) => n.x % 20 === 0 && n.y % 20 === 0)
+			)
+			.toBe(true);
+		await map.getByRole('button', { name: 'Select multiple nodes' }).click();
+		// The newest idea was selected when created. Toggle it off, then select both.
+		await cards.filter({ hasText: 'Second idea' }).click();
+		await cards.filter({ hasText: 'First idea' }).click();
+		await cards.filter({ hasText: 'Second idea' }).click();
+		await expect(map.getByText('2 selected', { exact: true })).toBeVisible();
+		await page.screenshot({ path: 'test-results/maps-desktop-selection.png' });
+		await map.getByRole('button', { name: 'Select multiple nodes' }).click();
+		await expect(cards.nth(0)).toHaveClass(/draggable/);
+		const before = await cards.evaluateAll((els) =>
+			els.map((el) => ({ x: el.getBoundingClientRect().x, y: el.getBoundingClientRect().y }))
+		);
+		const drag = await cards.nth(0).boundingBox();
+		await page.mouse.move(drag!.x + drag!.width / 2, drag!.y + drag!.height / 2);
+		await page.mouse.down();
+		await page.mouse.move(drag!.x + drag!.width / 2 + 60, drag!.y + drag!.height / 2 + 40, {
+			steps: 8
+		});
+		await page.mouse.up();
+		await expect
+			.poll(async () => (await cards.nth(0).boundingBox())!.x - before[0].x)
+			.toBeGreaterThan(20);
+		const after = await cards.evaluateAll((els) =>
+			els.map((el) => ({ x: el.getBoundingClientRect().x, y: el.getBoundingClientRect().y }))
+		);
+		expect(after[0].x - before[0].x).toBeGreaterThan(20);
+		expect(Math.abs(after[0].x - before[0].x - (after[1].x - before[1].x))).toBeLessThan(2);
+		await map.getByRole('button', { name: 'Undo', exact: true }).click();
+		await map.getByRole('button', { name: 'Redo', exact: true }).click();
+		await map.getByRole('button', { name: 'Select multiple nodes' }).click();
+		await cards.filter({ hasText: 'First idea' }).click();
+		await cards.filter({ hasText: 'Second idea' }).click();
+		await map.getByRole('button', { name: 'Delete selected nodes' }).click();
+		await expect(cards).toHaveCount(0);
+		await map.getByRole('button', { name: 'Undo', exact: true }).click();
+		await expect(cards).toHaveCount(2);
+		await map.getByRole('button', { name: 'Zoom in', exact: true }).click();
+		await map.getByRole('button', { name: 'Zoom out', exact: true }).click();
+	} finally {
+		await ctx.close();
+	}
+});
+
+test('touch selection exposes group actions without modifier keys', async ({ page }) => {
+	await install(page);
+	await newAtlas(page);
+	await addIdea(page, 'Touch first', true);
+	await addIdea(page, 'Touch second', true);
+	const map = page.getByRole('region', { name: 'Mind map Atlas' });
+	await map.getByRole('button', { name: 'Fit the map' }).click();
+	await map.getByRole('button', { name: 'Select multiple nodes' }).click();
+	await map.locator('.svelte-flow__node').filter({ hasText: 'Touch second' }).tap();
+	await map.locator('.svelte-flow__node').filter({ hasText: 'Touch first' }).tap();
+	await map.locator('.svelte-flow__node').filter({ hasText: 'Touch second' }).tap();
+	await expect(map.getByText('2 selected', { exact: true })).toBeVisible();
+	await page.screenshot({
+		path: `test-results/maps-touch-selection-${test.info().project.name.replaceAll(' ', '-')}.png`
+	});
+});

@@ -1,3 +1,4 @@
+import { freePosition } from './placement';
 /**
  * Mind maps as JSON Canvas 1.0 (https://jsoncanvas.org/spec/1.0/) files at
  * `.fr5a/maps/<Name>.canvas`. fr5a's own fields sit under an `fr5a` key on a
@@ -406,8 +407,10 @@ export function populateTag(
 				id: target,
 				type: 'file',
 				file,
-				x: Math.round(cx + at.x - NOTE_W / 2),
-				y: Math.round(cy + at.y - NOTE_H / 2),
+				...freePosition(
+					{ x: cx + at.x - NOTE_W / 2, y: cy + at.y - NOTE_H / 2, width: NOTE_W, height: NOTE_H },
+					nodes
+				),
 				width: NOTE_W,
 				height: NOTE_H,
 				fr5a: { from: tagId }

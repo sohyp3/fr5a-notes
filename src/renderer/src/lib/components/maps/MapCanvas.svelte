@@ -4,9 +4,8 @@
 		Background,
 		BackgroundVariant,
 		ConnectionMode,
-		NodeToolbar,
 		Panel,
-		Position,
+		SelectionMode,
 		SvelteFlow,
 		useSvelteFlow,
 		type Connection,
@@ -44,6 +43,7 @@
 		type FlowNode,
 		type ParsedCanvas
 	} from '../../maps/canvas';
+	import { freePosition, GRID, snapPoint } from '../../maps/placement';
 	import { setMapApi } from '../../maps/context';
 	import {
 		clearMapSaveFailure,
@@ -106,6 +106,8 @@
 	let redoStack = $state.raw<string[]>([]);
 	let selection = $state.raw<{ nodes: string[]; edges: string[] }>({ nodes: [], edges: [] });
 	let snap = $state(readSnap());
+	let selecting = $state(false);
+	let selectionBeforeClick: string[] = [];
 	let menu = $state<{ items: MenuItem[]; at: { x: number; y: number }; title: string } | null>(
 		null
 	);
@@ -117,7 +119,6 @@
 		onpick(item: PickItem): void;
 	} | null>(null);
 	let host = $state<HTMLElement | null>(null);
-	let added = 0;
 	/** The canvas before a delete, for the tag nodes' exclude lists. */
 	let beforeDelete: CanvasDoc | null = null;
 	let cancelPress: (() => void) | null = null;
@@ -145,6 +146,9 @@
 	}
 	function toggleSnap(): void {
 		snap = !snap;
+		if (snap && nodes.length) {
+			change((d) => ({ ...d, nodes: d.nodes.map((n) => ({ ...n, ...snapPoint(n) })) }));
+		}
 		try {
 			localStorage.setItem(SNAP_KEY, snap ? '1' : '0');
 		} catch {
@@ -412,7 +416,11 @@
 	/** A change made here (not by dragging): one undo step, then a save. */
 	function change(fn: (d: CanvasDoc) => CanvasDoc, select?: string[]): void {
 		checkpoint();
-		show(fn(current()), select);
+		const next = fn(current());
+		show(
+			snap ? { ...next, nodes: next.nodes.map((n) => ({ ...n, ...snapPoint(n) })) } : next,
+			select
+		);
 		scheduleSave();
 	}
 
@@ -458,8 +466,11 @@
 		const p = r
 			? flow.screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 })
 			: { x: 0, y: 0 };
-		const k = added++ % 6;
-		return { x: Math.round(p.x - w / 2 + k * 26), y: Math.round(p.y - h / 2 + k * 26) };
+		return place({ x: p.x - w / 2, y: p.y - h / 2 }, w, h);
+	}
+
+	function place(at: { x: number; y: number }, width: number, height: number) {
+		return freePosition({ ...at, width, height }, current().nodes, snap);
 	}
 
 	function concept(at: { x: number; y: number }, text = ''): CanvasNode {
@@ -562,7 +573,7 @@
 		const p = d.nodes.find((n) => n.id === parentId);
 		if (!p) return;
 		const kids = d.edges.filter((e) => e.fromNode === parentId).length;
-		const node = concept({ x: p.x + p.width + 80, y: p.y + kids * 60 });
+		const node = concept(place({ x: p.x + p.width + 80, y: p.y + kids * 60 }, 180, 44));
 		change(
 			(c) => ({ ...c, nodes: [...c.nodes, node], edges: [...c.edges, link(parentId, node.id)] }),
 			[node.id]
@@ -575,7 +586,7 @@
 		const s = d.nodes.find((n) => n.id === id);
 		if (!s) return;
 		const parent = d.edges.find((e) => e.toNode === id)?.fromNode;
-		const node = concept({ x: s.x, y: s.y + s.height + 20 });
+		const node = concept(place({ x: s.x, y: s.y + s.height + 40 }, 180, 44));
 		change(
 			(c) => ({
 				...c,
@@ -916,6 +927,13 @@
 			redo();
 			return;
 		}
+		if (mod && e.key.toLowerCase() === 'a') {
+			stop();
+			nodes = nodes.map((n) => ({ ...n, selected: true }));
+			edges = edges.map((e) => ({ ...e, selected: false }));
+			selection = { nodes: nodes.map((n) => n.id), edges: [] };
+			return;
+		}
 		if (mod || e.altKey) return;
 		if (e.key === 'Escape') {
 			if (dismiss()) stop();
@@ -959,7 +977,7 @@
 				edges.map((e) => ({ source: e.source, target: e.target }))
 			);
 			checkpoint();
-			await moveTo(target);
+			await moveTo(snap ? new Map([...target].map(([id, p]) => [id, snapPoint(p)])) : target);
 			commit();
 			if (!only) void flow.fitView({ ...fitOptions(0.2, 1), duration: ms.pane });
 		} finally {
@@ -1004,7 +1022,7 @@
 		maxZoom,
 		minZoom: app.layout === 'phone' ? 0.6 : undefined
 	});
-	const fit = () => void flow.fitView({ ...fitOptions(0.2, 1.2), duration: ms.pane });
+	const fit = () => void flow.fitView({ ...fitOptions(0.2, 1.2), duration: 0 });
 
 	function moreMenu(at: { x: number; y: number }): void {
 		menu = {
@@ -1042,7 +1060,14 @@
 	}}
 />
 
-<section class={['map', { touch: app.touch }]} aria-label={`Mind map ${mapName}`} bind:this={host}>
+<section
+	class={['map', { touch: app.touch }]}
+	aria-label={`Mind map ${mapName}`}
+	bind:this={host}
+	onpointerdowncapture={() => {
+		selectionBeforeClick = [...selection.nodes];
+	}}
+>
 	{#if status === 'loading'}
 		<p class="state">Opening…</p>
 	{:else if status === 'error'}
@@ -1062,9 +1087,22 @@
 			fitViewOptions={fitOptions(0.25, 1)}
 			minZoom={0.1}
 			maxZoom={2.5}
-			snapGrid={snap ? [10, 10] : undefined}
+			snapGrid={snap ? [GRID, GRID] : undefined}
+			selectionKey="Shift"
+			multiSelectionKey={['Meta', 'Control', 'Shift']}
+			selectionMode={SelectionMode.Partial}
+			selectionOnDrag={selecting}
 			deleteKey={['Delete', 'Backspace']}
-			panOnDrag={[0, 1]}
+			panOnDrag={selecting ? [1] : [0, 1]}
+			nodesDraggable={!selecting}
+			onnodeclick={({ node }) => {
+				if (!selecting) return;
+				const ids = new Set(selectionBeforeClick);
+				if (ids.has(node.id)) ids.delete(node.id);
+				else ids.add(node.id);
+				nodes = nodes.map((n) => ({ ...n, selected: ids.has(n.id) }));
+				selection = { nodes: [...ids], edges: [] };
+			}}
 			nodeDragThreshold={app.touch ? 6 : 1}
 			connectionRadius={app.touch ? 40 : 24}
 			zoomOnDoubleClick={false}
@@ -1120,7 +1158,7 @@
 			}}
 			proOptions={{ hideAttribution: true }}
 		>
-			<Background variant={BackgroundVariant.Dots} gap={snap ? 10 : 24} size={1.2} />
+			<Background variant={BackgroundVariant.Dots} gap={snap ? GRID : 24} size={1.2} />
 
 			<Panel position={app.touch ? 'bottom-center' : 'top-left'} class="map-toolbar">
 				<div class="bar" role="toolbar" aria-label="Map">
@@ -1165,6 +1203,13 @@
 						disabled={!redoStack.length}
 						onclick={redo}><Icon name="redo" size={17} /></button
 					>
+					<button
+						class={['tb', { on: selecting }]}
+						aria-label="Select multiple nodes"
+						aria-pressed={selecting}
+						title="Select nodes (Shift+drag, Mod+click)"
+						onclick={() => (selecting = !selecting)}>Select</button
+					>
 					{#if app.touch}
 						<button class="ib" title="Fit" aria-label="Fit the map" onclick={fit}
 							><Icon name="fit" size={17} /></button
@@ -1202,10 +1247,29 @@
 				</div>
 			</Panel>
 
-			{#if (single && app.touch) || singleEdge}
+			{#if selection.nodes.length > 1 || (single && !editingId) || singleEdge}
 				<Panel position="top-center" class="map-selbar">
 					<div class="bar" role="toolbar" aria-label="Selection">
-						{#if singleEdge}
+						{#if selection.nodes.length > 1}
+							<span class="selection-count" aria-live="polite"
+								>{selection.nodes.length} selected</span
+							>
+							<button class="tb" disabled={tidying} onclick={() => void tidy()}>Tidy</button>
+							<button
+								class="ib"
+								aria-label="Color selected nodes"
+								onclick={(e) => colorMenu(selection.nodes, below(e))}
+								><Icon name="palette" size={17} /></button
+							>
+							<button
+								class="ib"
+								aria-label="Delete selected nodes"
+								onclick={() => remove(selection.nodes)}><Icon name="trash" size={17} /></button
+							>
+							<button class="ib" aria-label="Clear selection" onclick={deselect}
+								><Icon name="close" size={17} /></button
+							>
+						{:else if singleEdge}
 							<button class="tb" onclick={() => void editLabel(singleEdge)}>Label…</button>
 							<button
 								class="ib"
@@ -1219,12 +1283,25 @@
 				</Panel>
 			{/if}
 
-			{#if single && !app.touch && !editingId}
-				<NodeToolbar nodeId={single} position={Position.Top} offset={10}>
-					<div class="bar float" role="toolbar" aria-label="Selection">
-						{@render actions(single)}
-					</div>
-				</NodeToolbar>
+			<Panel position="bottom-right" class="map-zoom">
+				<div class="bar" role="toolbar" aria-label="Zoom">
+					<button
+						class="tb"
+						aria-label="Zoom out"
+						onclick={() => void flow.zoomOut({ duration: 0 })}
+						><Icon name="minus" size={17} /></button
+					>
+					<button class="tb" aria-label="Zoom in" onclick={() => void flow.zoomIn({ duration: 0 })}
+						><Icon name="plus" size={17} /></button
+					>
+				</div>
+			</Panel>
+			{#if selecting}
+				<Panel position="bottom-center" class="map-hint"
+					><p class="selection-hint">
+						Tap nodes or drag a box to select. Turn Select off to move them.
+					</p></Panel
+				>
 			{/if}
 		</SvelteFlow>
 		{#if nodes.length === 0}
@@ -1582,10 +1659,6 @@
 		background: var(--bg-elevated);
 		box-shadow: 0 6px 22px rgba(0, 0, 0, 0.12);
 	}
-	.bar.float {
-		padding: 3px;
-		border-radius: 11px;
-	}
 	.name {
 		max-width: 180px;
 		padding: 0 8px 0 2px;
@@ -1648,7 +1721,8 @@
 	.ib:disabled {
 		opacity: 0.38;
 	}
-	.ib.on {
+	.ib.on,
+	.tb.on {
 		background: var(--accent-soft);
 		color: var(--accent-ink);
 	}
@@ -1659,7 +1733,47 @@
 		margin: 0 12px max(12px, env(safe-area-inset-bottom));
 	}
 	.map :global(.map-selbar) {
+		margin: 68px 12px 12px;
+	}
+
+	.map.touch :global(.map-selbar) {
+		margin-top: 12px;
+	}
+
+	.selection-count {
+		padding: 0 8px;
+		font-size: 13px;
+		color: var(--text-muted);
+		white-space: nowrap;
+	}
+	.map :global(.map-zoom) {
 		margin: 12px;
+	}
+	.map.touch :global(.map-zoom) {
+		bottom: 78px;
+	}
+	.map :global(.map-hint) {
+		margin-bottom: 16px;
+		max-width: calc(100% - 140px);
+		pointer-events: none;
+	}
+	.map.touch :global(.map-hint) {
+		bottom: 142px;
+		max-width: calc(100% - 32px);
+	}
+	.selection-hint {
+		margin: 0;
+		padding: 8px 12px;
+		border-radius: 8px;
+		background: var(--bg-elevated);
+		color: var(--text-muted);
+		font-size: 12px;
+		text-align: center;
+	}
+	@media (max-width: 900px) {
+		.name {
+			max-width: 100px;
+		}
 	}
 
 	/* --- states --- */

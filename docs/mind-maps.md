@@ -75,5 +75,8 @@ the path; titles of encrypted notes are never written to the map.
   beside it. Delete / Backspace removes. Mod+Z / Mod+Shift+Z undo / redo.
 - Double-click or Mod+click a note node to open the note. A note moved or renamed in the app is
   followed in every map; one that's gone shows dashed with **Relink…**.
-- Snap to a 10 px grid, **Tidy** (left-to-right layout of the selection or the map), **Fit**.
+- **Select** lets you tap multiple nodes on touch or drag a selection box. On desktop, Shift+drag
+  draws a box and Shift/Mod+click extends the selection; Mod+A selects all nodes. Turn Select off
+  to drag the group. The selection bar offers color, Tidy, delete and clear; edits support undo.
+- Snap to a 20 px grid (aligns existing cards when enabled), **Tidy** (left-to-right layout of the selection or the map), **Fit**.
 - Touch: long-press a node for its actions; tap a connection to label or delete it.
