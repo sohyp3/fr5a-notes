@@ -43,6 +43,8 @@
 		type FlowNode,
 		type ParsedCanvas
 	} from '../../maps/canvas';
+	import type { TidyDirection } from '../../maps/tidy';
+	import { descendants } from '../../maps/drag';
 	import { freePosition, GRID, snapPoint } from '../../maps/placement';
 	import { setMapApi } from '../../maps/context';
 	import {
@@ -107,6 +109,14 @@
 	let selection = $state.raw<{ nodes: string[]; edges: string[] }>({ nodes: [], edges: [] });
 	let snap = $state(readSnap());
 	let selecting = $state(false);
+	let magnet = $state(readPreference('fr5a-map-magnet') === '1');
+	let tidyDirection = $state<TidyDirection>(
+		readPreference('fr5a-map-tidy-direction') === 'vertical' ? 'vertical' : 'horizontal'
+	);
+	let dragOrigin: { id: string; x: number; y: number } | null = null;
+	// Drag-session bookkeeping; no template or derived state reads this map.
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
+	let followers = new Map<string, { x: number; y: number }>();
 	let selectionBeforeClick: string[] = [];
 	let menu = $state<{ items: MenuItem[]; at: { x: number; y: number }; title: string } | null>(
 		null
@@ -136,6 +146,60 @@
 		const raw = single ? doc.nodes.find((n) => n.id === single) : undefined;
 		return raw ? kindOf(raw) : null;
 	});
+
+	function readPreference(key: string): string | null {
+		try {
+			return localStorage.getItem(key);
+		} catch {
+			return null;
+		}
+	}
+	function savePreference(key: string, value: string): void {
+		try {
+			localStorage.setItem(key, value);
+		} catch {
+			/* per session only */
+		}
+	}
+	function toggleMagnet(): void {
+		magnet = !magnet;
+		savePreference('fr5a-map-magnet', magnet ? '1' : '0');
+	}
+
+	function startDrag({ nodes: dragged }: { nodes: MapNode[] }): void {
+		if (interacting) return;
+		cancelPress?.();
+		interacting = true;
+		checkpoint();
+		const anchor = dragged[0];
+		dragOrigin = anchor ? { id: anchor.id, ...anchor.position } : null;
+		followers = new Map();
+		if (!magnet || !anchor) return;
+		const moving = new Set(dragged.map((n) => n.id));
+		const children = descendants(moving, edges);
+		for (const n of nodes) {
+			if (children.has(n.id) && !moving.has(n.id)) followers.set(n.id, { ...n.position });
+		}
+	}
+
+	function dragFollowers({ nodes: dragged }: { nodes: MapNode[] }): void {
+		if (!dragOrigin || !followers.size) return;
+		const anchor = dragged.find((n) => n.id === dragOrigin!.id);
+		if (!anchor) return;
+		const dx = anchor.position.x - dragOrigin.x;
+		const dy = anchor.position.y - dragOrigin.y;
+		nodes = nodes.map((n) => {
+			const start = followers.get(n.id);
+			return start ? { ...n, position: { x: start.x + dx, y: start.y + dy } } : n;
+		});
+	}
+
+	function stopDrag(event: { nodes: MapNode[] }): void {
+		dragFollowers(event);
+		dragOrigin = null;
+		followers.clear();
+		commitInteraction();
+	}
 
 	function readSnap(): boolean {
 		try {
@@ -978,8 +1042,10 @@
 
 	let tidying = $state(false);
 
-	async function tidy(): Promise<void> {
+	async function tidy(direction: TidyDirection = tidyDirection): Promise<void> {
 		if (tidying) return;
+		tidyDirection = direction;
+		savePreference('fr5a-map-tidy-direction', direction);
 		const only = selection.nodes.length > 1 ? new Set(selection.nodes) : null;
 		const items = nodes
 			.filter((n) => !only || only.has(n.id))
@@ -996,7 +1062,8 @@
 			const { tidyLayout } = await import('../../maps/tidy');
 			const target = await tidyLayout(
 				items,
-				edges.map((e) => ({ source: e.source, target: e.target }))
+				edges.map((e) => ({ source: e.source, target: e.target })),
+				direction
 			);
 			checkpoint();
 			await moveTo(snap ? new Map([...target].map(([id, p]) => [id, snapPoint(p)])) : target);
@@ -1046,12 +1113,32 @@
 	});
 	const fit = () => void flow.fitView({ ...fitOptions(0.2, 1.2), duration: 0 });
 
+	function tidyItems(): MenuItem[] {
+		return (['horizontal', 'vertical'] as const).map((direction) => ({
+			label: `Tidy ${direction === 'horizontal' ? 'horizontally' : 'vertically'}`,
+			icon: 'tidy',
+			selected: tidyDirection === direction,
+			disabled: tidying,
+			action: () => void tidy(direction)
+		}));
+	}
+	function tidyMenu(event: MouseEvent): void {
+		event.preventDefault();
+		event.stopPropagation();
+		menu = { title: 'Tidy direction', at: below(event), items: tidyItems() };
+	}
+
 	function moreMenu(at: { x: number; y: number }): void {
 		menu = {
 			title: mapName,
 			at,
 			items: [
-				{ label: 'Tidy', icon: 'tidy', action: () => void tidy() },
+				...tidyItems(),
+				{
+					label: magnet ? 'Move subnodes: on' : 'Move subnodes: off',
+					icon: 'snap',
+					action: toggleMagnet
+				},
 				{ label: snap ? 'Snap to grid: on' : 'Snap to grid: off', icon: 'snap', action: toggleSnap }
 			]
 		};
@@ -1116,7 +1203,8 @@
 			selectionOnDrag={selecting}
 			deleteKey={['Delete', 'Backspace']}
 			panOnDrag={selecting ? [1] : [0, 1]}
-			nodesDraggable={!selecting}
+			nodesDraggable={true}
+			selectNodesOnDrag={!selecting}
 			onnodeclick={({ node }) => {
 				if (!selecting) return;
 				const ids = new Set(selectionBeforeClick);
@@ -1135,17 +1223,9 @@
 			onconnect={commit}
 			onconnectstart={() => (interacting = true)}
 			onconnectend={interactionEnd}
-			onnodedragstart={() => {
-				cancelPress?.();
-				interacting = true;
-				checkpoint();
-			}}
-			onnodedragstop={commitInteraction}
-			onselectiondragstart={() => {
-				interacting = true;
-				checkpoint();
-			}}
-			onselectiondragstop={commitInteraction}
+			onnodedragstart={startDrag}
+			onnodedrag={dragFollowers}
+			onnodedragstop={stopDrag}
 			onbeforedelete={async () => {
 				if (editingId) return false;
 				beforeDelete = current();
@@ -1242,21 +1322,28 @@
 					{:else}
 						<span class="sep"></span>
 						<button
-							class={['ib', { on: snap }]}
-							title="Snap to grid"
-							aria-label="Snap to grid"
-							aria-pressed={snap}
-							onclick={toggleSnap}><Icon name="snap" size={17} /></button
+							class={['ib', { on: magnet }]}
+							title="Move subnodes with their parent"
+							aria-label="Move subnodes"
+							aria-pressed={magnet}
+							onclick={toggleMagnet}><Icon name="snap" size={17} /></button
 						>
 						<button
 							class="ib"
-							title={selection.nodes.length > 1 ? 'Tidy the selection' : 'Tidy the map'}
+							title={`Tidy ${selection.nodes.length > 1 ? 'selection' : 'map'} ${tidyDirection === 'horizontal' ? 'horizontally' : 'vertically'} (right-click for direction)`}
 							aria-label="Tidy"
 							disabled={tidying}
+							oncontextmenu={tidyMenu}
 							onclick={() => void tidy()}><Icon name="tidy" size={17} /></button
 						>
 						<button class="ib" title="Fit" aria-label="Fit the map" onclick={fit}
 							><Icon name="fit" size={17} /></button
+						>
+						<button
+							class="ib"
+							title="More map actions"
+							aria-label="More map actions"
+							onclick={(e) => moreMenu(below(e))}><Icon name="more" size={18} /></button
 						>
 						<span class="sep"></span>
 						<button
@@ -1276,7 +1363,9 @@
 							<span class="selection-count" aria-live="polite"
 								>{selection.nodes.length} selected</span
 							>
-							<button class="tb" disabled={tidying} onclick={() => void tidy()}>Tidy</button>
+							<button class="tb" disabled={tidying} title="Choose tidy direction" onclick={tidyMenu}
+								>Tidy…</button
+							>
 							<button
 								class="ib"
 								aria-label="Color selected nodes"
@@ -1321,7 +1410,7 @@
 			{#if selecting}
 				<Panel position="bottom-center" class="map-hint"
 					><p class="selection-hint">
-						Tap nodes or drag a box to select. Turn Select off to move them.
+						Tap nodes or drag a box to select. Drag selected nodes to move them together.
 					</p></Panel
 				>
 			{/if}

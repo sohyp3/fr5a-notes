@@ -76,7 +76,10 @@ the path; titles of encrypted notes are never written to the map.
 - Double-click or Mod+click a note node to open the note. A note moved or renamed in the app is
   followed in every map; one that's gone shows dashed with **Relink…**.
 - **Select** lets you tap multiple nodes on touch or drag a selection box. On desktop, Shift+drag
-  draws a box and Shift/Mod+click extends the selection; Mod+A selects all nodes. Turn Select off
-  to drag the group. The selection bar offers color, Tidy, delete and clear; edits support undo.
-- Snap to a 20 px grid (aligns existing cards when enabled), **Tidy** (left-to-right layout of the selection or the map), **Fit**.
+  draws a box and Shift/Mod+click extends the selection; Mod+A selects all nodes. Drag any selected node to move the group, including while Select is on. The selection bar offers color, Tidy, delete and clear; edits support undo.
+- **Magnet** moves a node’s subnodes along with it, following outgoing connections through all levels.
+  Selected nodes and shared subnodes move once, even when connections form a cycle.
+- **Tidy** arranges the selection or map horizontally or vertically. Right-click Tidy to choose
+  a direction; subsequent clicks reuse it. The selection’s **Tidy…** and **More** also offer both directions.
+- **More** offers snapping to a 20 px grid (aligns existing cards when enabled). **Fit** frames the map.
 - Touch: long-press a node for its actions; tap a connection to label or delete it.

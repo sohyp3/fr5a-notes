@@ -719,7 +719,7 @@ test('desktop maps: a change on disk asks Reload / Keep mine; Tidy; graph-only M
 	await ctx.close();
 });
 
-test('selection mode supports group actions, magnet aligns positions, and undo restores deletion', async ({
+test('selection mode supports group dragging, grid snapping, and undo restores deletion', async ({
 	browser
 }) => {
 	const { ctx, page } = await desktopPage(browser);
@@ -739,11 +739,8 @@ test('selection mode supports group actions, magnet aligns positions, and undo r
 					a.y + a.height <= b.y ||
 					b.y + b.height <= a.y)
 		).toBeTruthy();
-		await map.getByRole('button', { name: 'Snap to grid', exact: true }).click();
-		await expect(map.getByRole('button', { name: 'Snap to grid', exact: true })).toHaveAttribute(
-			'aria-pressed',
-			'true'
-		);
+		await map.getByRole('button', { name: 'More map actions' }).click();
+		await page.getByRole('menuitem', { name: 'Snap to grid: off' }).click();
 		await expect
 			.poll(async () =>
 				(await savedMap(page))?.nodes.every((n) => n.x % 20 === 0 && n.y % 20 === 0)
@@ -756,7 +753,6 @@ test('selection mode supports group actions, magnet aligns positions, and undo r
 		await cards.filter({ hasText: 'Second idea' }).click();
 		await expect(map.getByText('2 selected', { exact: true })).toBeVisible();
 		await page.screenshot({ path: 'test-results/maps-desktop-selection.png' });
-		await map.getByRole('button', { name: 'Select multiple nodes' }).click();
 		await expect(cards.nth(0)).toHaveClass(/draggable/);
 		const before = await cards.evaluateAll((els) =>
 			els.map((el) => ({ x: el.getBoundingClientRect().x, y: el.getBoundingClientRect().y }))
@@ -778,7 +774,6 @@ test('selection mode supports group actions, magnet aligns positions, and undo r
 		expect(Math.abs(after[0].x - before[0].x - (after[1].x - before[1].x))).toBeLessThan(2);
 		await map.getByRole('button', { name: 'Undo', exact: true }).click();
 		await map.getByRole('button', { name: 'Redo', exact: true }).click();
-		await map.getByRole('button', { name: 'Select multiple nodes' }).click();
 		await cards.filter({ hasText: 'First idea' }).click();
 		await cards.filter({ hasText: 'Second idea' }).click();
 		await map.getByRole('button', { name: 'Delete selected nodes' }).click();
@@ -804,6 +799,15 @@ test('touch selection exposes group actions without modifier keys', async ({ pag
 	await map.locator('.svelte-flow__node').filter({ hasText: 'Touch first' }).tap();
 	await map.locator('.svelte-flow__node').filter({ hasText: 'Touch second' }).tap();
 	await expect(map.getByText('2 selected', { exact: true })).toBeVisible();
+	await map.getByRole('button', { name: 'Tidy…', exact: true }).click();
+	await page.getByRole('menuitemradio', { name: 'Tidy vertically' }).click();
+	await expect(map.getByRole('button', { name: 'Tidy…', exact: true })).toBeEnabled();
+	await map.getByRole('button', { name: 'More', exact: true }).click();
+	await page.getByRole('menuitem', { name: 'Move subnodes: off' }).click();
+	await map.getByRole('button', { name: 'More', exact: true }).click();
+	await expect(page.getByRole('menuitem', { name: 'Move subnodes: on' })).toBeVisible();
+	await page.getByRole('menuitemradio', { name: 'Tidy horizontally' }).click();
+	await expect(map.getByRole('button', { name: 'Tidy…', exact: true })).toBeEnabled();
 	await page.screenshot({
 		path: `test-results/maps-touch-selection-${test.info().project.name.replaceAll(' ', '-')}.png`
 	});
@@ -932,6 +936,94 @@ test('sync reload rechecks local edits made while the final disk read is pending
 			.poll(async () => (await savedMap(page))?.nodes.some((n) => n.text === 'Newer local edit'))
 			.toBe(true);
 		await expect(dialog).toHaveCount(0);
+	} finally {
+		await ctx.close();
+	}
+});
+
+test('magnet carries descendants once and tidy switches between both directions', async ({
+	browser
+}, info) => {
+	test.skip(info.project.name !== 'phone 390x844', 'one desktop run is enough');
+	const { ctx, page } = await desktopPage(browser);
+	try {
+		await page.evaluate(async (rel) => {
+			await (window as unknown as Win).api.writeMeta(
+				rel,
+				JSON.stringify({
+					nodes: ['Parent', 'Child', 'Leaf', 'Unrelated'].map((text, i) => ({
+						id: text,
+						type: 'text',
+						text,
+						x: i * 240,
+						y: (i % 2) * 120,
+						width: 180,
+						height: 44
+					})),
+					edges: [
+						{ id: 'a', fromNode: 'Parent', toNode: 'Child' },
+						{ id: 'b', fromNode: 'Child', toNode: 'Leaf' },
+						{ id: 'c', fromNode: 'Leaf', toNode: 'Child' }
+					]
+				})
+			);
+		}, MAP);
+		await openMaps(page);
+		await page.getByRole('button', { name: 'Atlas Mind map' }).click();
+		const map = page.getByRole('region', { name: 'Mind map Atlas' });
+		const parent = map.locator('.svelte-flow__node[data-id="Parent"]');
+		await expect(parent).toBeVisible();
+		const dragParent = async () => {
+			const box = (await parent.boundingBox())!;
+			await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+			await page.mouse.down();
+			await page.mouse.move(box.x + box.width / 2 + 65, box.y + box.height / 2 + 45, { steps: 8 });
+			await page.mouse.up();
+		};
+		const positions = async () =>
+			Promise.all(
+				['Parent', 'Child', 'Leaf', 'Unrelated'].map(async (text) => {
+					const position = await drawnAt(page, text);
+					if (!position) throw new Error(`Missing node: ${text}`);
+					return position;
+				})
+			);
+		const before = await positions();
+		await map.getByRole('button', { name: 'Move subnodes', exact: true }).click();
+		await dragParent();
+		const after = await positions();
+		const delta = { x: after[0].x - before[0].x, y: after[0].y - before[0].y };
+		expect(delta.x).toBeGreaterThan(20);
+		for (const i of [1, 2])
+			expect({ x: after[i].x - before[i].x, y: after[i].y - before[i].y }).toEqual(delta);
+		expect(after[3]).toEqual(before[3]);
+		await expect
+			.poll(async () => (await savedMap(page))?.nodes.find((n) => n.id === 'Leaf')?.x)
+			.toBe(after[2].x);
+		await map.getByRole('button', { name: 'Undo', exact: true }).click();
+		expect(await positions()).toEqual(before);
+		await map.getByRole('button', { name: 'Redo', exact: true }).click();
+		expect(await positions()).toEqual(after);
+		await map.getByRole('button', { name: 'Move subnodes', exact: true }).click();
+		await dragParent();
+		const independent = await positions();
+		expect(independent[0]).not.toEqual(after[0]);
+		expect(independent.slice(1)).toEqual(after.slice(1));
+		const tidy = map.getByRole('button', { name: 'Tidy', exact: true });
+		await tidy.click({ button: 'right' });
+		await page.getByRole('menuitemradio', { name: 'Tidy vertically' }).click();
+		await expect(tidy).toBeEnabled();
+		await expect(tidy).toHaveAttribute('title', /vertically/);
+		const vertical = await positions();
+		expect(vertical[1].y).toBeGreaterThan(vertical[0].y);
+		await page.screenshot({ path: info.outputPath('map-tidy-vertical.png') });
+		await tidy.click({ button: 'right' });
+		await page.getByRole('menuitemradio', { name: 'Tidy horizontally' }).click();
+		await expect(tidy).toBeEnabled();
+		await expect(tidy).toHaveAttribute('title', /horizontally/);
+		const horizontal = await positions();
+		expect(horizontal[1].x).toBeGreaterThan(horizontal[0].x);
+		await page.screenshot({ path: info.outputPath('map-tidy-horizontal.png') });
 	} finally {
 		await ctx.close();
 	}

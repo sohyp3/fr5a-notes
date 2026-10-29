@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { freePosition, snapPoint } from './placement';
 import { tidyLayout } from './tidy';
+import { descendants } from './drag';
 
 describe('map placement', () => {
 	it('finds room for mixed card sizes and keeps snapped additions on the grid', () => {
@@ -20,6 +21,54 @@ describe('map placement', () => {
 			occupied.push({ ...p, ...size });
 		}
 	});
+	it('follows descendants without pulling ancestors or duplicating cycles and shared children', () => {
+		const edges = [
+			{ source: 'parent', target: 'child' },
+			{ source: 'child', target: 'grandchild' },
+			{ source: 'grandchild', target: 'child' },
+			{ source: 'other', target: 'grandchild' },
+			{ source: 'ancestor', target: 'parent' }
+		];
+		expect(descendants(new Set(['parent', 'other']), edges)).toEqual(
+			new Set(['parent', 'other', 'child', 'grandchild'])
+		);
+	});
+	it.each(['horizontal', 'vertical'] as const)(
+		'tidies a branch %s with its origin preserved',
+		async (direction) => {
+			const items = ['root', 'child', 'leaf'].map((id) => ({
+				id,
+				x: -80,
+				y: 30,
+				width: 180,
+				height: 44
+			}));
+			const result = await tidyLayout(
+				items,
+				[
+					{ source: 'root', target: 'child' },
+					{ source: 'child', target: 'leaf' }
+				],
+				direction
+			);
+			expect(result.get('root')).toEqual({ x: -80, y: 30 });
+			for (const [parent, child] of [
+				['root', 'child'],
+				['child', 'leaf']
+			]) {
+				const a = result.get(parent)!;
+				const b = result.get(child)!;
+				if (direction === 'vertical') {
+					expect(b.y).toBeGreaterThan(a.y + 44);
+					expect(b.x).toBe(a.x);
+				} else {
+					expect(b.x).toBeGreaterThan(a.x + 180);
+					expect(b.y).toBe(a.y);
+				}
+			}
+		}
+	);
+
 	it('rounds negative coordinates consistently', () => {
 		expect(snapPoint({ x: -33, y: 27 })).toEqual({ x: -40, y: 20 });
 	});
